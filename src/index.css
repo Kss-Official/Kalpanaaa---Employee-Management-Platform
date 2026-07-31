@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #030712;
+    color: #f3f4f6;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+}
+
+/* Custom Sleek Dark Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #030712;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-id-card-element, #printable-id-card-element *,
+  #document-preview-paper, #document-preview-paper *,
+  #employee-pass-download-element, #employee-pass-download-element * {
+    visibility: visible;
+  }
+  #printable-id-card-element, #document-preview-paper, #employee-pass-download-element {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

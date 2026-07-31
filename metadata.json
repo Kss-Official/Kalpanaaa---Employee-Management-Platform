@@ -1,0 +1,6 @@
+{
+  "name": "Kalpana Software Solutions Workspace",
+  "description": "Private internal employee, attendance, and operations workspace for Kalpana Software Solutions.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
