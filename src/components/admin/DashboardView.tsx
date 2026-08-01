@@ -94,42 +94,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   return (
     <div className="space-y-6">
       {/* Top Banner & Quick Actions */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 text-white p-6 rounded-3xl shadow-sm">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-blue-400 uppercase tracking-wider mb-1">
-            <span>Enterprise Workforce Overview</span>
-            <span>•</span>
-            <span>{settings.companyName}</span>
+      <div className="relative bg-slate-900/90 border border-slate-800/80 p-8 rounded-2xl shadow-sm overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        {/* Subtle engineering background pattern */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-900/0 to-slate-900/0 pointer-events-none opacity-50"></div>
+        <div className="absolute -right-20 -top-20 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 text-[10px] font-black text-blue-500 uppercase tracking-widest mb-2">
+            <span>Executive Command Center</span>
+            <span className="text-slate-600">•</span>
+            <span className="text-slate-400">{settings.companyName}</span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">{getGreeting()}, {displayName} 👋</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Real-time workforce activity and attendance status for {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
+          <h1 className="text-3xl font-extrabold tracking-tight text-white mb-1">
+            {getGreeting()}, {displayName}
+          </h1>
+          <p className="text-xs text-slate-400 font-medium">
+            System overview and workforce analytics for {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="relative z-10 flex flex-wrap items-center gap-3">
           <button
             onClick={onOpenAddEmployee}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
+            className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-100 text-slate-900 text-xs font-black tracking-wide uppercase rounded-xl transition-all cursor-pointer shadow-sm hover:scale-[1.02]"
           >
-            <Plus className="w-4 h-4" />
-            Add Employee
+            <Plus className="w-4 h-4" strokeWidth={3} />
+            New Employee
           </button>
 
           <button
             onClick={() => onNavigateTab('qr_kiosk')}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+            className="flex items-center gap-2 px-5 py-2.5 bg-slate-950/50 hover:bg-slate-800 border border-slate-700/50 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
           >
-            <QrCode className="w-4 h-4" />
+            <QrCode className="w-4 h-4 text-emerald-400" />
             Scanner Kiosk
           </button>
 
           <button
             onClick={() => generateAttendanceReportPdf(todayRecords, settings, 'Daily Attendance Summary Report')}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-950/50 hover:bg-slate-800 border border-slate-700/50 text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
           >
             <FileDown className="w-4 h-4" />
-            Export Daily PDF
+            Export PDF
           </button>
         </div>
       </div>
@@ -183,7 +189,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       {/* Analytics Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Attendance Trend Chart */}
-        <div className="lg:col-span-2 bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl">
+        <div className="lg:col-span-2 bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="text-sm font-bold text-white">Attendance Trend (Past 7 Days)</h3>
@@ -232,7 +238,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         </div>
 
         {/* Department Stats Bar Chart */}
-        <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl">
+        <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm flex flex-col">
           <div className="mb-6">
             <h3 className="text-sm font-bold text-white">Department Turnout</h3>
             <p className="text-xs text-slate-400">Present vs Total employees per department</p>
@@ -255,22 +261,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         </div>
       </div>
 
-      {/* Live Recent Attendance Ticker */}
-      <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl">
-        <div className="flex items-center justify-between mb-4">
+      {/* Recent Activity List */}
+      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-slate-800/60 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold text-white">Live Attendance Feed</h3>
-            <p className="text-xs text-slate-400">Most recent employee check-ins recorded today</p>
+            <h3 className="text-sm font-black text-white uppercase tracking-wider">Live Activity Feed</h3>
+            <p className="text-[10px] text-slate-500 font-bold mt-1">Real-time check-ins for {new Date().toLocaleDateString()}</p>
           </div>
           <button
             onClick={() => onNavigateTab('attendance')}
-            className="text-xs font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer"
+            className="text-[10px] font-bold text-blue-500 hover:text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
           >
-            View All Records
-            <ArrowUpRight className="w-3.5 h-3.5" />
+            View All <ArrowUpRight className="w-3 h-3" />
           </button>
         </div>
 
+        <div className="divide-y divide-slate-800/60">
         {recentCheckIns.length === 0 ? (
           <div className="text-center py-8 text-slate-500 text-xs font-medium">
             No check-in activity recorded yet for today.
@@ -278,33 +284,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         ) : (
           <div className="divide-y divide-slate-800">
             {recentCheckIns.map(rec => {
-              const checkInFormatted = new Date(rec.checkInAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              const emp = employees.find(e => e.employeeId === rec.employeeCode);
               return (
-                <div key={rec.id} className="py-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                      rec.status === 'Present' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    }`}>
-                      {rec.employeeName.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold text-white">{rec.employeeName}</p>
-                      <p className="text-[11px] text-slate-400">{rec.employeeCode} • {rec.department}</p>
+                <div key={rec.id} className="grid grid-cols-4 items-center">
+                  <div className="col-span-2 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={emp?.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(rec.employeeName || 'User')}&background=0D8ABC&color=fff`}
+                        alt={rec.employeeName}
+                        className="w-8 h-8 rounded-full border border-slate-700"
+                      />
+                      <div>
+                        <div className="text-sm font-bold text-white leading-tight">{rec.employeeName || 'Unknown'}</div>
+                        <div className="text-[10px] text-slate-500 font-semibold">{rec.department || '--'}</div>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="text-right">
-                    <div className="text-xs font-bold text-white">{checkInFormatted}</div>
-                    <div className="flex items-center gap-1 text-[10px] text-slate-400 justify-end">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${rec.locationVerified ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                      {rec.locationVerified ? 'GPS Verified' : 'Standard'}
-                    </div>
+                  <div className="px-6 py-4 text-xs text-slate-300 font-mono font-bold">
+                    {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                  </div>
+                  <div className="px-6 py-4 text-right">
+                    {rec.locationVerified ? (
+                      <span className="text-emerald-400 flex items-center gap-1 text-[10px] font-bold uppercase justify-end"><CheckCircle2 className="w-3 h-3"/> Office GPS</span>
+                    ) : (
+                      <span className="text-amber-400 flex items-center gap-1 text-[10px] font-bold uppercase justify-end"><AlertTriangle className="w-3 h-3"/> Unverified</span>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

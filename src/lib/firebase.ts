@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import { 
   getAuth, 
   signInWithEmailAndPassword, 
@@ -37,6 +38,18 @@ export const firebaseConfig = {
 
 // Initialize Firebase App
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+// Initialize Firebase App Check to block API Sniffing & Database Scraping
+if (typeof window !== "undefined") {
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaEnterpriseProvider('6LcR5m8tAAAAAAEpJqgzO9KUJZ-lLX6s_QuoENfl'),
+      isTokenAutoRefreshEnabled: true
+    });
+  } catch (error) {
+    console.warn("App Check initialization error (often safe to ignore in dev):", error);
+  }
+}
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);

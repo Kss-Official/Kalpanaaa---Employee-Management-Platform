@@ -21,7 +21,7 @@ import {
 
 const OFFICE_PRESETS = [
   {
-    name: "Kalpana HQ — AGPS Nagar, Hyderabad",
+    name: "Kalpanaaa HQ — AGPS Nagar, Hyderabad",
     latitude: 13.0143043,
     longitude: 77.6459944,
     radiusMeters: 100
@@ -62,7 +62,7 @@ export const WorkLocation: React.FC = () => {
     activeEmployee?.designation?.toLowerCase().includes('ceo') || 
     activeEmployee?.designation?.toLowerCase().includes('cto');
 
-  const [officeName, setOfficeName] = useState(companyWorkZone.name || 'Kalpana Software Solutions — Main Office');
+  const [officeName, setOfficeName] = useState(companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office');
   const [latitude, setLatitude] = useState<number>(companyWorkZone.latitude ?? 13.0143043);
   const [longitude, setLongitude] = useState<number>(companyWorkZone.longitude ?? 77.6459944);
   const [radiusMeters, setRadiusMeters] = useState<number>(companyWorkZone.radiusMeters ?? 100);
@@ -82,7 +82,7 @@ export const WorkLocation: React.FC = () => {
   // Sync internal state if companyWorkZone changes from Firestore
   useEffect(() => {
     if (companyWorkZone) {
-      setOfficeName(companyWorkZone.name || 'Kalpana Software Solutions — Main Office');
+      setOfficeName(companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office');
       setLatitude(companyWorkZone.latitude ?? 13.0143043);
       setLongitude(companyWorkZone.longitude ?? 77.6459944);
       setRadiusMeters(companyWorkZone.radiusMeters ?? 100);
@@ -257,7 +257,7 @@ export const WorkLocation: React.FC = () => {
 
     try {
       const updatedWorkZone = {
-        name: officeName.trim() || 'Kalpana Software Solutions — Main Office',
+        name: officeName.trim() || 'Kalpanaaa Software Solutions — Main Office',
         latitude: Number(latitude),
         longitude: Number(longitude),
         radiusMeters: Number(radiusMeters),
@@ -379,7 +379,7 @@ export const WorkLocation: React.FC = () => {
                   type="text"
                   value={officeName}
                   onChange={(e) => setOfficeName(e.target.value)}
-                  placeholder="e.g. Kalpana Software Solutions — Main Office"
+                  placeholder="e.g. Kalpanaaa Software Solutions — Main Office"
                   required
                   disabled={!isExecutive}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl font-bold text-white focus:outline-none focus:border-blue-500 disabled:opacity-60"

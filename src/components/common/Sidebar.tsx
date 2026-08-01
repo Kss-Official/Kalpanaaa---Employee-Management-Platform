@@ -39,8 +39,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: 'Executive Overview', icon: LayoutDashboard },
     { id: 'employees', label: 'Team Directory', icon: Users },
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
-    { id: 'qr_kiosk', label: 'Terminal Kiosk', icon: QrCode },
     { id: 'reports', label: 'Reports & Intelligence', icon: FileSpreadsheet },
+    { id: 'leave_approvals', label: 'Leave & WFH Sanctions', icon: FileText },
     { id: 'documents', label: 'Document Generator', icon: FileText },
     { id: 'settings', label: 'Policy & Rules', icon: Settings },
     { id: 'audit_logs', label: 'Audit Trail', icon: ShieldCheck },
@@ -50,8 +50,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: 'Workspace Overview', icon: LayoutDashboard },
     { id: 'employees', label: 'Team Directory', icon: Users },
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
-    { id: 'qr_kiosk', label: 'Terminal Kiosk', icon: QrCode },
     { id: 'reports', label: 'Reports & Issuance', icon: FileSpreadsheet },
+    { id: 'leave_approvals', label: 'Leave & WFH Sanctions', icon: FileText },
     { id: 'documents', label: 'Document Generator', icon: FileText },
     { id: 'settings', label: 'Policy & Rules', icon: Settings },
     { id: 'audit_logs', label: 'Audit Trail', icon: ShieldCheck },
@@ -60,7 +60,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const employeeNavItems = [
     { id: 'emp_dashboard', label: 'My Workspace', icon: LayoutDashboard },
     { id: 'emp_attendance', label: 'My Attendance', icon: UserCheck },
-    { id: 'emp_qr', label: 'Pass QR & ID', icon: CreditCard },
+    { id: 'emp_leave', label: 'My Leave & WFH', icon: CalendarCheck2 },
+    { id: 'emp_qr', label: 'Barcode & QR Printing', icon: CreditCard },
     { id: 'emp_directory', label: 'Team Directory', icon: Users },
     { id: 'emp_profile', label: 'My Profile', icon: UserCheck },
   ];
@@ -94,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="px-4 py-3.5 border-b border-slate-800/80 flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase block">
-              {isAdmin ? 'Kalpana Workspace' : 'Employee Workspace'}
+              {isAdmin ? 'Kalpanaaa Workspace' : 'Employee Workspace'}
             </span>
             <span className="text-xs font-semibold text-white truncate block max-w-[170px]">
               {activeEmployee?.fullName || 'Active Workspace'}

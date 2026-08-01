@@ -10,11 +10,12 @@ import { EmployeeProfileModal } from './components/admin/EmployeeProfileModal';
 import { EmployeeFormModal } from './components/admin/EmployeeFormModal';
 import { EmployeeIdCardModal } from './components/admin/EmployeeIdCardModal';
 import { AttendanceManagement } from './components/admin/AttendanceManagement';
-import { QrScannerKiosk } from './components/admin/QrScannerKiosk';
 import { ReportsView } from './components/admin/ReportsView';
 import { DocumentGenerator } from './components/admin/DocumentGenerator';
 import { SettingsView } from './components/admin/SettingsView';
 import { AuditLogsView } from './components/admin/AuditLogsView';
+import { LeaveApprovalsView } from './components/admin/LeaveApprovalsView';
+import { VerificationView } from './components/public/VerificationView';
 import { EmployeePortal } from './components/employee/EmployeePortal';
 import { SplashScreen } from './components/common/SplashScreen';
 import { Employee } from './types';
@@ -49,13 +50,13 @@ const MainLayout: React.FC = () => {
 
   // Strict role-based tab routing
   useEffect(() => {
-    if (role === 'SUPER_ADMIN') {
-      // CEO & CTO always land on Admin Control Panel
+    if (role === 'SUPER_ADMIN' || role === 'HR_ADMIN') {
+      // CEO, CTO & HR always land on Admin Control Panel
       if (activeTab.startsWith('emp_')) {
         setActiveTab('dashboard');
       }
     } else {
-      // All other roles (EMPLOYEE, HR_ADMIN) go to Employee Portal only
+      // All other roles (EMPLOYEE) go to Employee Portal only
       if (!activeTab.startsWith('emp_')) {
         setActiveTab('emp_dashboard');
       }
@@ -99,7 +100,6 @@ const MainLayout: React.FC = () => {
 
       {/* Top Header Navigation */}
       <Header 
-        onOpenScanner={() => setActiveTab('qr_kiosk')}
         onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
         isMobileSidebarOpen={isMobileSidebarOpen}
         onShowLanding={() => setViewMode('landing')}
@@ -120,15 +120,15 @@ const MainLayout: React.FC = () => {
         {/* Primary Main Workspace View */}
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-y-auto">
           
-          {/* Executive Security Check Guard */}
-          {!activeTab.startsWith('emp_') && role !== 'SUPER_ADMIN' ? (
+          {/* Executive & HR Security Check Guard */}
+          {!activeTab.startsWith('emp_') && role === 'EMPLOYEE' ? (
             <div className="bg-slate-900 border border-rose-900/50 rounded-3xl p-8 max-w-2xl mx-auto my-12 text-center space-y-5 shadow-2xl">
               <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
                 <ShieldCheck className="w-8 h-8" />
               </div>
-              <h2 className="text-xl font-black text-white">Executive Admin Access Restricted</h2>
+              <h2 className="text-xl font-black text-white">Admin Access Restricted</h2>
               <p className="text-xs text-slate-300 leading-relaxed max-w-lg mx-auto">
-                The Workspace Admin Dashboard & Management System is strictly restricted to company <strong className="text-white font-black">CEO (Akshit)</strong> and <strong className="text-white font-black">CTO (Gaurav)</strong> using official executive corporate credentials at Kalpanaaa Software Solutions.
+                The Workspace Admin Dashboard & Management System is strictly restricted to company <strong className="text-white font-black">Executives and HR Administrators</strong> using official corporate credentials at Kalpanaaa Software Solutions.
               </p>
 
               <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
@@ -160,8 +160,6 @@ const MainLayout: React.FC = () => {
               )}
 
               {activeTab === 'attendance' && <AttendanceManagement />}
-              
-              {activeTab === 'qr_kiosk' && <QrScannerKiosk />}
 
               {activeTab === 'reports' && <ReportsView />}
 
@@ -170,6 +168,8 @@ const MainLayout: React.FC = () => {
               {activeTab === 'settings' && <SettingsView />}
 
               {activeTab === 'audit_logs' && <AuditLogsView />}
+
+              {activeTab === 'leave_approvals' && <LeaveApprovalsView />}
 
               {/* Employee Self-Service Views */}
               {activeTab.startsWith('emp_') && (
@@ -217,6 +217,16 @@ const MainLayout: React.FC = () => {
 };
 
 export default function App() {
+  const isVerifyRoute = window.location.pathname === '/verify';
+
+  if (isVerifyRoute) {
+    return (
+      <AuthProvider>
+        <VerificationView />
+      </AuthProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <MainLayout />

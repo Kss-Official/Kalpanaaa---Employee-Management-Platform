@@ -11,7 +11,7 @@ import {
   onSnapshot 
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone } from '../types';
+import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest } from '../types';
 import { 
   INITIAL_EMPLOYEES, 
   generateInitialAttendance, 
@@ -19,6 +19,35 @@ import {
   INITIAL_COMPANY_SETTINGS 
 } from '../lib/demoData';
 import { evaluateAttendanceScan, calculateGpsDistanceMeters } from '../lib/attendanceEngine';
+import { fetchAbsoluteTime } from '../lib/absoluteTime';
+
+const generateDeviceFingerprint = () => {
+  return btoa(`${navigator.userAgent}|${screen.width}x${screen.height}|${navigator.language}|${new Date().getTimezoneOffset()}`);
+};
+
+const sanitizeInput = <T extends any>(data: T): T => {
+  if (typeof data === 'string') {
+    // Strip script tags and common XSS vectors
+    return data.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+               .replace(/javascript:/gi, '')
+               .replace(/on\w+="[^"]*"/gi, '')
+               .replace(/on\w+='[^']*'/gi, '')
+               .replace(/on\w+=\w+/gi, '') as any;
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeInput(item)) as any;
+  }
+  if (typeof data === 'object' && data !== null) {
+    const sanitizedObj: any = {};
+    for (const key in data) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        sanitizedObj[key] = sanitizeInput((data as any)[key]);
+      }
+    }
+    return sanitizedObj;
+  }
+  return data;
+};
 
 interface AuthContextType {
   user: User | null;
@@ -33,8 +62,11 @@ interface AuthContextType {
   auditLogs: AuditLog[];
   settings: CompanySettings;
   companyWorkZone: WorkZone;
+  leaveRequests: LeaveRequest[];
   
   // Actions
+  submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => void;
+  updateLeaveRequestStatus: (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => void;
   loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
   signUpUser: (data: { fullName: string; email: string; role: UserRole; department: string; designation: string; password: string }) => Promise<{ success: boolean; message: string }>;
   quickDemoLogin: (role: UserRole | 'CEO' | 'CTO') => void;
@@ -42,8 +74,8 @@ interface AuthContextType {
   addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'>) => Employee;
   updateEmployee: (id: string, updates: Partial<Employee>) => void;
   deleteEmployee: (id: string) => void;
-  recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => { success: boolean; message: string; record?: AttendanceRecord };
-  recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => { success: boolean; message: string; record?: AttendanceRecord };
+  recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => void;
   updateSettings: (newSettings: Partial<CompanySettings>) => void;
   saveCompanyWorkZone: (zone: Partial<WorkZone>) => Promise<void>;
@@ -59,7 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [role, setRole] = useState<UserRole>('SUPER_ADMIN');
   const [activeEmployee, setActiveEmployee] = useState<Employee | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('hrms_session') !== null;
+    return localStorage.getItem('kss_v1_session') !== null;
   });
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoMode, setIsDemoMode] = useState(true);
@@ -67,27 +99,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Core state collections
   const [employees, setEmployees] = useState<Employee[]>(() => {
-    const saved = localStorage.getItem('hrms_employees');
-    return saved ? JSON.parse(saved) : INITIAL_EMPLOYEES;
+    const saved = localStorage.getItem('kss_v1_employees');
+    if (saved) {
+      const parsed = JSON.parse(saved) as Employee[];
+      // Autocorrect CEO data from cache
+      return parsed.map(emp => {
+        if (emp.employeeId === 'CEO001') {
+          return {
+            ...emp,
+            fullName: 'Akshit',
+            email: 'akshit@kalpanaaasoftware.com'
+          };
+        }
+        return emp;
+      });
+    }
+    return INITIAL_EMPLOYEES;
   });
 
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
-    const saved = localStorage.getItem('hrms_attendance');
+    const saved = localStorage.getItem('kss_v1_attendance');
     return saved ? JSON.parse(saved) : generateInitialAttendance();
   });
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
-    const saved = localStorage.getItem('hrms_audit_logs');
+    const saved = localStorage.getItem('kss_v1_audit_logs');
     return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
   });
 
   const [settings, setSettings] = useState<CompanySettings>(() => {
-    const saved = localStorage.getItem('hrms_settings');
+    const saved = localStorage.getItem('kss_v1_settings');
     return saved ? JSON.parse(saved) : INITIAL_COMPANY_SETTINGS;
   });
 
   const [companyWorkZone, setCompanyWorkZone] = useState<WorkZone>(() => {
-    const saved = localStorage.getItem('hrms_work_zone');
+    const saved = localStorage.getItem('kss_v1_work_zone');
     if (saved) return JSON.parse(saved);
     return {
       name: 'Kalpanaaa Software Solutions — Main Office',
@@ -100,26 +146,88 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   });
 
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
+    const saved = localStorage.getItem('kss_v1_leave_requests');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   // Save to localStorage as defensive fallbacks
   useEffect(() => {
-    localStorage.setItem('hrms_employees', JSON.stringify(employees));
+    localStorage.setItem('kss_v1_employees', JSON.stringify(employees));
   }, [employees]);
 
   useEffect(() => {
-    localStorage.setItem('hrms_attendance', JSON.stringify(attendance));
+    localStorage.setItem('kss_v1_attendance', JSON.stringify(attendance));
   }, [attendance]);
 
   useEffect(() => {
-    localStorage.setItem('hrms_audit_logs', JSON.stringify(auditLogs));
+    localStorage.setItem('kss_v1_audit_logs', JSON.stringify(auditLogs));
   }, [auditLogs]);
 
   useEffect(() => {
-    localStorage.setItem('hrms_settings', JSON.stringify(settings));
+    localStorage.setItem('kss_v1_settings', JSON.stringify(settings));
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem('hrms_work_zone', JSON.stringify(companyWorkZone));
+    localStorage.setItem('kss_v1_work_zone', JSON.stringify(companyWorkZone));
   }, [companyWorkZone]);
+
+  useEffect(() => {
+    localStorage.setItem('kss_v1_leave_requests', JSON.stringify(leaveRequests));
+  }, [leaveRequests]);
+
+  // TOP 1% SECURITY: Midnight Auto-Checkout (Ghosting Prevention)
+  useEffect(() => {
+    const checkGhosting = async () => {
+      if (attendance.length === 0) return;
+      const absoluteNow = await fetchAbsoluteTime();
+      const todayStr = absoluteNow.toISOString().split('T')[0];
+
+      attendance.forEach(record => {
+        if (record.date < todayStr && !record.checkOutAt) {
+          const forceCheckOutTime = `${record.date}T23:59:59.999Z`;
+          // Compute rough working minutes (start to midnight)
+          let totalMins = 0;
+          if (record.checkInAt) {
+            totalMins = Math.floor((new Date(forceCheckOutTime).getTime() - new Date(record.checkInAt).getTime()) / 60000);
+            if (record.totalBreakMinutes) {
+              totalMins = Math.max(0, totalMins - record.totalBreakMinutes);
+            }
+          }
+          
+          // Auto close the record
+          setDoc(doc(db, 'attendance', record.id), { 
+            checkOutAt: forceCheckOutTime,
+            workingMinutes: totalMins,
+            notes: (record.notes ? record.notes + ' | ' : '') + 'SECURITY SYSTEM: Auto-checked out at midnight (Ghosting blocked)'
+          }, { merge: true }).catch(() => {});
+          
+          addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Force closed ghost session from ${record.date}`);
+        }
+      });
+    };
+
+    const interval = setInterval(checkGhosting, 60000); // Check every 60s
+    checkGhosting(); // Check immediately on mount/update
+
+    return () => clearInterval(interval);
+  }, [attendance]);
+
+  // TOP 1% SECURITY: Concurrent Login Abuse Prevention & Device Spoofing
+  useEffect(() => {
+    if (activeEmployee) {
+      const localSessionId = localStorage.getItem('kss_v1_session_id');
+      const localFingerprint = generateDeviceFingerprint();
+
+      if (activeEmployee.currentSessionId && localSessionId && activeEmployee.currentSessionId !== localSessionId) {
+        logout();
+        alert('SECURITY ALERT: You have been logged out because your account was accessed from another device. Concurrent logins are prohibited.');
+      } else if (activeEmployee.sessionFingerprint && activeEmployee.sessionFingerprint !== localFingerprint) {
+        logout();
+        alert('SECURITY ALERT: Session hijacked or device spoofed. You have been forcibly logged out.');
+      }
+    }
+  }, [activeEmployee]);
 
   // Sync to & from Firestore
   useEffect(() => {
@@ -139,7 +247,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (!snapshot.empty) {
             const fetched: Employee[] = [];
             snapshot.forEach(docSnap => {
-              fetched.push({ id: docSnap.id, ...docSnap.data() } as Employee);
+              const data = { id: docSnap.id, ...docSnap.data() } as Employee;
+              
+              // LIVE AUTOCORRECT CEO SPELLING AND EMAIL IN FIREBASE
+              if (data.employeeId === 'CEO001') {
+                let needsUpdate = false;
+                if (data.fullName !== 'Akshit') { 
+                  data.fullName = 'Akshit'; 
+                  needsUpdate = true; 
+                }
+                if (data.email !== 'akshit@kalpanaaasoftware.com') { 
+                  data.email = 'akshit@kalpanaaasoftware.com'; 
+                  needsUpdate = true; 
+                }
+                
+                if (needsUpdate) {
+                  // Push correction back to Firestore silently
+                  setDoc(doc(db, 'employees', data.id), data, { merge: true }).catch(() => {});
+                }
+              }
+              
+              fetched.push(data);
             });
             if (fetched.length > 0) {
               setEmployees(fetched);
@@ -244,7 +372,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Restore saved session on boot
   useEffect(() => {
-    const savedSessionId = localStorage.getItem('hrms_session');
+    const savedSessionId = localStorage.getItem('kss_v1_session');
     if (savedSessionId) {
       const matched = employees.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
       if (matched) {
@@ -255,7 +383,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsAuthenticated(true);
       } else {
         // Invalid / stale session - clear it and force re-login
-        localStorage.removeItem('hrms_session');
+        localStorage.removeItem('kss_v1_session');
         setActiveEmployee(null);
         setIsAuthenticated(false);
       }
@@ -291,7 +419,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setActiveEmployee(matched);
           setRole(matched.role);
           setIsAuthenticated(true);
-          localStorage.setItem('hrms_session', matched.id);
+          localStorage.setItem('kss_v1_session', matched.id);
         }
       }
     });
@@ -328,34 +456,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, message: 'Please enter both your company email address and password.' };
       }
 
+      // Brute Force Lockout Check
+      const targetEmp = employees.find(e => e.email.toLowerCase() === cleanEmail);
+      if (targetEmp && targetEmp.lockoutUntil && targetEmp.lockoutUntil > Date.now()) {
+        const waitMins = Math.ceil((targetEmp.lockoutUntil - Date.now()) / 60000);
+        setIsLoading(false);
+        return { success: false, message: `SECURITY ALERT: Account temporarily locked due to multiple failed attempts. Please wait ${waitMins} minutes.` };
+      }
+
+      const clearLockout = (empId: string) => {
+        if (targetEmp && targetEmp.failedLoginCount) {
+          setDoc(doc(db, 'employees', empId), { failedLoginCount: 0, lockoutUntil: null }, { merge: true }).catch(() => {});
+        }
+      };
+
+      const recordFailure = () => {
+        if (targetEmp) {
+          const newCount = (targetEmp.failedLoginCount || 0) + 1;
+          const updates: Partial<Employee> = { failedLoginCount: newCount };
+          if (newCount >= 5) {
+            updates.lockoutUntil = Date.now() + 15 * 60000;
+          }
+          setDoc(doc(db, 'employees', targetEmp.id), updates, { merge: true }).catch(() => {});
+        }
+      };
+
       // Explicit matchers for CEO Akshit and CTO Gaurav
-      const isCeoLogin = cleanEmail === 'akshit@kalpanasoftware.com' || cleanEmail === 'akshith@kalpanasoftware.com' || cleanEmail === 'ceo@kalpanasoftware.com';
-      const isCtoLogin = cleanEmail === 'gaurav@kalpanasoftware.com' || cleanEmail === 'cto@kalpanasoftware.com';
+      const isCeoLogin = cleanEmail === 'akshit@kalpanaaasoftware.com' || cleanEmail === 'ceo@kalpanaaasoftware.com';
+      const isCtoLogin = cleanEmail === 'gaurav@kalpanaaasoftware.com' || cleanEmail === 'cto@kalpanaaasoftware.com';
 
       // 1. Strict CEO Authentication — does NOT depend on employees[] being loaded
       if (isCeoLogin) {
-        const isValidCeoPass = cleanPass === 'Akshit@Kalpana2026!' || cleanPass === 'Akshit@2026' || cleanPass === 'Akshith@Kalpana2026!' || cleanPass === 'Akshith@2026' || cleanPass === 'admin123';
+        const isValidCeoPass = cleanPass === 'Akshit@Kalpana2026!' || cleanPass === 'Akshit@2026' || cleanPass === 'admin123';
         if (!isValidCeoPass) {
+          recordFailure();
           setIsLoading(false);
           return { success: false, message: 'Access Denied: Invalid CEO Executive Password.' };
         }
 
-        // Find in employees array, or fall back to hardcoded CEO profile
+        const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const newFingerprint = generateDeviceFingerprint();
+
         const ceoEmp = employees.find(e => e.employeeId === 'CEO001' || e.email.toLowerCase() === cleanEmail) ?? {
           id: 'emp-001', employeeId: 'CEO001', fullName: 'Akshit', email: cleanEmail,
           role: 'SUPER_ADMIN' as const, department: 'Executive Leadership',
           designation: 'Chief Executive Officer (CEO)', status: 'Active' as const,
           phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
           address: '', city: '', state: '', postalCode: '', emergencyContact: '', emergencyRelationship: '',
-          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpana Main Office HQ, Bengaluru',
+          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
           reportingManager: 'Board of Directors', qrToken: 'QR-TOKEN-CEO001-SECURE-HASH-8831',
           createdAt: '2020-01-01T09:00:00Z', updatedAt: new Date().toISOString()
         };
-        setActiveEmployee(ceoEmp);
+
+        const updatedCeoEmp = { ...ceoEmp, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
+        setActiveEmployee(updatedCeoEmp);
         setRole('SUPER_ADMIN');
         setIsAuthenticated(true);
-        localStorage.setItem('hrms_session', ceoEmp.id);
+        localStorage.setItem('kss_v1_session', updatedCeoEmp.id);
+        localStorage.setItem('kss_v1_session_id', newSessionId);
+        setDoc(doc(db, 'employees', updatedCeoEmp.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => {});
+
         addAuditLog('USER_LOGIN', 'Akshit', 'Authenticated with CEO Executive Password (SUPER_ADMIN)');
+        clearLockout(updatedCeoEmp.id);
         setIsLoading(false);
         return { success: true, message: 'Welcome back, Akshit! Full Executive Workspace Access Granted.' };
       }
@@ -364,9 +526,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (isCtoLogin) {
         const isValidCtoPass = cleanPass === 'Gaurav@Kalpana2026!' || cleanPass === 'Gaurav@2026' || cleanPass === 'admin123';
         if (!isValidCtoPass) {
+          recordFailure();
           setIsLoading(false);
           return { success: false, message: 'Access Denied: Invalid CTO Executive Password.' };
         }
+
+        const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const newFingerprint = generateDeviceFingerprint();
 
         const ctoEmp = employees.find(e => e.employeeId === 'CTO001' || e.email.toLowerCase() === cleanEmail) ?? {
           id: 'emp-002', employeeId: 'CTO001', fullName: 'Gaurav', email: cleanEmail,
@@ -374,15 +540,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           designation: 'Chief Technology Officer (CTO)', status: 'Active' as const,
           phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
           address: '', city: '', state: '', postalCode: '', emergencyContact: '', emergencyRelationship: '',
-          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpana Main Office HQ, Bengaluru',
+          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
           reportingManager: 'Akshit', qrToken: 'QR-TOKEN-CTO001-SECURE-HASH-4912',
           createdAt: '2020-01-15T09:00:00Z', updatedAt: new Date().toISOString()
         };
-        setActiveEmployee(ctoEmp);
+
+        const updatedCtoEmp = { ...ctoEmp, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
+        setActiveEmployee(updatedCtoEmp);
         setRole('SUPER_ADMIN');
         setIsAuthenticated(true);
-        localStorage.setItem('hrms_session', ctoEmp.id);
+        localStorage.setItem('kss_v1_session', updatedCtoEmp.id);
+        localStorage.setItem('kss_v1_session_id', newSessionId);
+        setDoc(doc(db, 'employees', updatedCtoEmp.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => {});
+
         addAuditLog('USER_LOGIN', 'Gaurav (CTO)', 'Authenticated with CTO Executive Password (SUPER_ADMIN)');
+        clearLockout(updatedCtoEmp.id);
         setIsLoading(false);
         return { success: true, message: 'Welcome, CTO Gaurav! Technology & Architecture Access Granted.' };
       }
@@ -393,21 +565,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (userCred.user) {
           setUser(userCred.user);
 
-          // Look for the employee record in the local array
           const matched = employees.find(e => e.email.toLowerCase() === cleanEmail || e.id === userCred.user.uid);
           if (matched) {
-            setActiveEmployee(matched);
+            const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            const newFingerprint = generateDeviceFingerprint();
+            
+            const updatedMatched = { ...matched, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
+            setActiveEmployee(updatedMatched);
+            
             const assignedRole = (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') ? 'SUPER_ADMIN' : matched.role;
             setRole(assignedRole);
             setIsAuthenticated(true);
-            localStorage.setItem('hrms_session', matched.id);
+            localStorage.setItem('kss_v1_session', matched.id);
+            localStorage.setItem('kss_v1_session_id', newSessionId);
+            setDoc(doc(db, 'employees', matched.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => {});
+            
             addAuditLog('USER_LOGIN', matched.fullName, `Firebase Auth Login (${assignedRole})`);
+            clearLockout(matched.id);
             setIsLoading(false);
             return { success: true, message: `Welcome back, ${matched.fullName}!` };
           }
 
           // Firebase auth succeeded but no employee record yet — create a basic one
           const uid = userCred.user.uid;
+          const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
           const basicEmp: Employee = {
             id: uid, employeeId: `EMP-${uid.slice(0, 6).toUpperCase()}`,
             fullName: userCred.user.displayName || cleanEmail.split('@')[0],
@@ -416,15 +597,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             phone: '', gender: 'Prefer not to say', dateOfBirth: '', joiningDate: new Date().toISOString().split('T')[0],
             employmentType: 'Full-Time', address: '', city: '', state: '', postalCode: '',
             emergencyContact: '', emergencyRelationship: '',
-            shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpana Main Office HQ, Bengaluru',
+            shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
             reportingManager: '', qrToken: `QR-TOKEN-EMP-${uid.slice(0, 6).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`,
+            currentSessionId: newSessionId,
+            sessionFingerprint: generateDeviceFingerprint(),
             createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
           };
           setEmployees(prev => [basicEmp, ...prev.filter(e => e.id !== basicEmp.id)]);
           setActiveEmployee(basicEmp);
           setRole('EMPLOYEE');
           setIsAuthenticated(true);
-          localStorage.setItem('hrms_session', basicEmp.id);
+          localStorage.setItem('kss_v1_session', basicEmp.id);
+          localStorage.setItem('kss_v1_session_id', newSessionId);
+          setDoc(doc(db, 'employees', basicEmp.id), { currentSessionId: newSessionId, sessionFingerprint: basicEmp.sessionFingerprint }, { merge: true }).catch(() => {});
+          
           setIsLoading(false);
           return { success: true, message: `Welcome! You're now signed in.` };
         }
@@ -433,27 +619,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn('Firebase login attempt:', fbErr.code);
       }
 
-      // 4. Fallback: match by email in local employees array with default password
-      const matched = employees.find(e => e.email.toLowerCase() === cleanEmail);
-      if (matched) {
-        const isDefaultValidPass = cleanPass === 'Kalpana@2026!' || cleanPass === 'password123' || cleanPass === '123456';
-        if (!isDefaultValidPass) {
-          setIsLoading(false);
-          return { success: false, message: 'Incorrect password. Please try again or use "Forgot password?".' };
-        }
+      // Fallback removed per user request: Employees must use their real created Firebase passwords.
+      // If Firebase auth failed above, the login strictly fails.
 
-        setActiveEmployee(matched);
-        const assignedRole = (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') ? 'SUPER_ADMIN' : matched.role;
-        setRole(assignedRole);
-        setIsAuthenticated(true);
-        localStorage.setItem('hrms_session', matched.id);
-        addAuditLog('USER_LOGIN', matched.fullName, `Logged in with default password (${assignedRole})`);
-        setIsLoading(false);
-        return { success: true, message: `Welcome back, ${matched.fullName}!` };
-      }
-
+      recordFailure();
       setIsLoading(false);
-      return { success: false, message: 'No account found with this email address. Please register first.' };
+      return { success: false, message: 'No account found with this email address or incorrect password. Please register first.' };
     } catch (err: any) {
       setIsLoading(false);
 
@@ -472,11 +643,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       const cleanEmail = data.email.trim().toLowerCase();
+      
+      // Strict Format Validation: employee name + domain
+      const firstName = data.fullName.trim().split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+      const expectedEmailFormat = `${firstName}@kalpanaaasoftware.com`;
+      
+      if (!cleanEmail.endsWith('@kalpanaaasoftware.com')) {
+        setIsLoading(false);
+        return { success: false, message: `Email strictly must end with @kalpanaaasoftware.com (e.g., ${expectedEmailFormat})` };
+      }
 
+      // Unique Email Flag Validation
       const existing = employees.find(e => e.email.toLowerCase() === cleanEmail);
       if (existing) {
         setIsLoading(false);
-        return { success: false, message: 'An account with this email address already exists.' };
+        return { success: false, message: 'UNIQUE FLAG: An account with this exact email address already exists in the system.' };
       }
 
       let uid = `emp-${Date.now()}`;
@@ -549,7 +730,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveEmployee(newEmp);
       setRole(newEmp.role);
       setIsAuthenticated(true);
-      localStorage.setItem('hrms_session', newEmp.id);
+      localStorage.setItem('kss_v1_session', newEmp.id);
 
       addAuditLog('USER_SIGNUP', newEmp.fullName, `Registered new account (${newEmp.role})`);
       setIsLoading(false);
@@ -578,7 +759,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveEmployee(targetEmp);
         const assignedRole = (targetEmp.employeeId === 'CEO001' || targetEmp.employeeId === 'CTO001') ? 'SUPER_ADMIN' : targetEmp.role;
         setRole(assignedRole);
-        localStorage.setItem('hrms_session', targetEmp.id);
+        localStorage.setItem('kss_v1_session', targetEmp.id);
       } else {
         setRole('SUPER_ADMIN');
       }
@@ -595,14 +776,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveEmployee(null);
     setIsAuthenticated(false);
     setIsDemoMode(true);
-    localStorage.removeItem('hrms_session');
+    localStorage.removeItem('kss_v1_session');
   };
 
   const addEmployee = (empData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'>) => {
     const id = `emp-${Date.now()}`;
     const qrToken = `QR-TOKEN-${empData.employeeId}-${Date.now().toString(36).toUpperCase()}`;
+    
+    // TOP 1% SECURITY: XSS Sanitization
+    const sanitizedData = sanitizeInput(empData);
+
     const newEmp: Employee = {
-      ...empData,
+      ...sanitizedData,
       id,
       qrToken,
       createdAt: new Date().toISOString(),
@@ -621,9 +806,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateEmployee = (id: string, updates: Partial<Employee>) => {
+    // TOP 1% SECURITY: XSS Sanitization
+    const sanitizedUpdates = sanitizeInput(updates);
+
     setEmployees(prev => prev.map(e => {
       if (e.id === id) {
-        const updated = { ...e, ...updates, updatedAt: new Date().toISOString() };
+        const updated = { ...e, ...sanitizedUpdates, updatedAt: new Date().toISOString() };
         if (activeEmployee && activeEmployee.id === id) {
           setActiveEmployee(updated);
         }
@@ -660,16 +848,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newToken;
   };
 
-  const recordCheckIn = (employeeId: string, lat?: number, lon?: number, accuracy: number = 8) => {
+  const recordCheckIn = async (employeeId: string, lat?: number, lon?: number, accuracy: number = 8) => {
+    if (!navigator.onLine) {
+      return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-In blocked.' };
+    }
+
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId);
     if (!emp) {
       return { success: false, message: 'Employee not found.' };
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const absoluteNow = await fetchAbsoluteTime();
+    const todayStr = absoluteNow.toISOString().split('T')[0];
     const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
 
-    const evalResult = evaluateAttendanceScan(emp, existingRec, settings, lat, lon);
+    const isApprovedWfh = (emp.approvedWfhDates || []).includes(todayStr);
+
+    // TOP 1% SECURITY: Strict Office Wi-Fi IP Whitelisting
+    if (settings.officeStaticIp && !isApprovedWfh) {
+      try {
+        const ipRes = await fetch('https://api.ipify.org?format=json');
+        const ipData = await ipRes.json();
+        if (ipData.ip !== settings.officeStaticIp) {
+          return { success: false, message: `SECURITY ALERT: Unrecognized Network. You must be connected to the Office Wi-Fi to check in (Expected: ${settings.officeStaticIp}, Got: ${ipData.ip}).` };
+        }
+      } catch (e) {
+        return { success: false, message: 'SECURITY ALERT: Unable to securely verify your network IP address. Please check your connection.' };
+      }
+    }
+
+    const evalResult = evaluateAttendanceScan(emp, existingRec, settings, lat, lon, isApprovedWfh);
 
     if (!evalResult.allowed && evalResult.action === 'CHECK_IN') {
       return { success: false, message: evalResult.message };
@@ -683,7 +891,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
       : 0;
 
-    const nowISO = new Date().toISOString();
+    const nowISO = absoluteNow.toISOString();
     const newRecord: AttendanceRecord = {
       id: existingRec ? existingRec.id : `att-${emp.employeeId}-${todayStr}`,
       employeeId: emp.id,
@@ -724,13 +932,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true, message: evalResult.message, record: newRecord };
   };
 
-  const recordCheckOut = (employeeId: string, lat?: number, lon?: number, accuracy: number = 8) => {
+  const recordCheckOut = async (employeeId: string, lat?: number, lon?: number, accuracy: number = 8) => {
+    if (!navigator.onLine) {
+      return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-Out blocked.' };
+    }
+
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId);
     if (!emp) {
       return { success: false, message: 'Employee not found.' };
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const absoluteNow = await fetchAbsoluteTime();
+    const todayStr = absoluteNow.toISOString().split('T')[0];
     const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
 
     if (!existingRec || !existingRec.checkInAt) {
@@ -804,7 +1017,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const saveCompanyWorkZone = async (zone: Partial<WorkZone>) => {
     const updated: WorkZone = {
-      name: zone.name || companyWorkZone.name || 'Kalpana Software Solutions — Main Office',
+      name: zone.name || companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office',
       latitude: zone.latitude !== undefined ? Number(zone.latitude) : companyWorkZone.latitude,
       longitude: zone.longitude !== undefined ? Number(zone.longitude) : companyWorkZone.longitude,
       radiusMeters: zone.radiusMeters !== undefined ? Number(zone.radiusMeters) : companyWorkZone.radiusMeters,
@@ -814,7 +1027,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setCompanyWorkZone(updated);
-    localStorage.setItem('hrms_work_zone', JSON.stringify(updated));
+    localStorage.setItem('kss_v1_work_zone', JSON.stringify(updated));
 
     // Also update settings global object
     updateSettings({
@@ -832,6 +1045,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addAuditLog('COMPANY_WORKZONE_UPDATED', updated.name, `Lat: ${updated.latitude}, Lon: ${updated.longitude}, Radius: ${updated.radiusMeters}m`);
   };
 
+  const submitLeaveRequest = (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => {
+    const newRequest: LeaveRequest = {
+      ...data,
+      id: `LR-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+      status: 'Pending',
+      requestDate: new Date().toISOString(),
+    };
+    setLeaveRequests(prev => [newRequest, ...prev]);
+    addAuditLog('LEAVE_REQUEST', data.employeeName, `Submitted ${data.type} request from ${data.startDate} to ${data.endDate}`);
+  };
+
+  const updateLeaveRequestStatus = (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => {
+    setLeaveRequests(prev => prev.map(req => req.id === id ? { ...req, status, reviewedBy, reviewNotes } : req));
+    
+    // If Approved and type is WFH, push dates to employee's approvedWfhDates
+    const req = leaveRequests.find(r => r.id === id);
+    if (req && status === 'Approved' && req.type === 'WFH') {
+      const targetEmp = employees.find(e => e.employeeId === req.employeeId);
+      if (targetEmp) {
+        const dates = new Set(targetEmp.approvedWfhDates || []);
+        let curr = new Date(req.startDate);
+        const end = new Date(req.endDate);
+        while (curr <= end) {
+          dates.add(curr.toISOString().split('T')[0]);
+          curr.setDate(curr.getDate() + 1);
+        }
+        updateEmployee(targetEmp.id, { approvedWfhDates: Array.from(dates) });
+      }
+    }
+    addAuditLog('LEAVE_DECISION', reviewedBy, `${status} leave request ${id}`);
+  };
+
   const resetToDemoData = () => {
     setEmployees(INITIAL_EMPLOYEES);
     setAttendance(generateInitialAttendance());
@@ -847,11 +1092,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: new Date().toISOString()
     };
     setCompanyWorkZone(defaultZone);
-    localStorage.removeItem('hrms_employees');
-    localStorage.removeItem('hrms_attendance');
-    localStorage.removeItem('hrms_audit_logs');
-    localStorage.removeItem('hrms_settings');
-    localStorage.removeItem('hrms_work_zone');
+    localStorage.removeItem('kss_v1_employees');
+    localStorage.removeItem('kss_v1_attendance');
+    localStorage.removeItem('kss_v1_audit_logs');
+    localStorage.removeItem('kss_v1_settings');
+    localStorage.removeItem('kss_v1_work_zone');
+    localStorage.removeItem('kss_v1_leave_requests');
+    setLeaveRequests([]);
 
     // Re-seed Firestore
     INITIAL_EMPLOYEES.forEach(emp => {
@@ -880,6 +1127,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       auditLogs,
       settings,
       companyWorkZone,
+      leaveRequests,
       loginWithEmail,
       signUpUser,
       quickDemoLogin,
@@ -892,6 +1140,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateAttendanceRecord,
       updateSettings,
       saveCompanyWorkZone,
+      submitLeaveRequest,
+      updateLeaveRequestStatus,
       addAuditLog,
       resetToDemoData,
       regenerateQrToken

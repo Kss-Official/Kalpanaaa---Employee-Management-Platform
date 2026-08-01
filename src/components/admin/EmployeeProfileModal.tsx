@@ -1,21 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Employee } from '../../types';
-import { 
-  X, 
-  User, 
-  Briefcase, 
-  Mail, 
-  Phone, 
-  MapPin, 
-  Calendar, 
-  QrCode, 
-  CreditCard, 
-  Download, 
-  Printer, 
-  RotateCcw, 
-  Shield, 
-  Clock, 
+import {
+  X,
+  User,
+  Briefcase,
+  Mail,
+  Phone,
+  MapPin,
+  Calendar,
+  QrCode,
+  CreditCard,
+  Download,
+  Printer,
+  RotateCcw,
+  Shield,
+  Clock,
   Building,
   Heart
 } from 'lucide-react';
@@ -42,26 +42,38 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   const empAttendance = attendance.filter(a => a.employeeId === employee.id || a.employeeCode === employee.employeeId);
   const empLogs = auditLogs.filter(l => l.target.includes(employee.employeeId) || l.actorId === employee.id);
 
-  // Generate QR Canvas
+  // Generate QR Canvas with TOTP Refresh
   useEffect(() => {
-    const tokenPayload = generateEmployeeQrToken(employee, settings.qrTokenLifetimeMinutes);
-    QRCode.toDataURL(tokenPayload, { 
-      width: 320, 
-      margin: 2,
-      errorCorrectionLevel: 'H',
-      color: { dark: '#000000', light: '#FFFFFF' }
-    }, (err, url) => {
-      if (!err && url) {
-        setQrDataUrl(url);
-      }
-    });
+    let intervalId: NodeJS.Timeout;
+
+    const renderQr = () => {
+      const tokenPayload = generateEmployeeQrToken(employee, settings.qrTokenLifetimeMinutes);
+      QRCode.toDataURL(tokenPayload, {
+        width: 320,
+        margin: 2,
+        errorCorrectionLevel: 'H',
+        color: { dark: '#000000', light: '#FFFFFF' }
+      }, (err, url) => {
+        if (!err && url) {
+          setQrDataUrl(url);
+        }
+      });
+    };
+
+    // Initial render
+    renderQr();
+    
+    // Refresh every 5 seconds to ensure TOTP bucket is always fresh on screen
+    intervalId = setInterval(renderQr, 5000);
+
+    return () => clearInterval(intervalId);
   }, [employee, settings.qrTokenLifetimeMinutes]);
 
   const handleRegenerateQr = () => {
     regenerateQrToken(employee.id);
     const newTokenPayload = generateEmployeeQrToken(employee, settings.qrTokenLifetimeMinutes);
-    QRCode.toDataURL(newTokenPayload, { 
-      width: 320, 
+    QRCode.toDataURL(newTokenPayload, {
+      width: 320,
       margin: 2,
       errorCorrectionLevel: 'H',
       color: { dark: '#000000', light: '#FFFFFF' }
@@ -81,7 +93,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
       <div className="bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl w-full max-w-4xl overflow-hidden my-8 text-white">
-        
+
         {/* Header Hero Banner */}
         <div className="bg-slate-950 text-white p-6 relative border-b border-slate-800">
           <button
@@ -103,9 +115,8 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                 <span className="font-mono text-xs font-bold bg-blue-600/30 text-blue-300 px-2.5 py-0.5 rounded-md border border-blue-500/30">
                   {employee.employeeId}
                 </span>
-                <span className={`px-2.5 py-0.5 text-xs font-bold rounded-md ${
-                  employee.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300'
-                }`}>
+                <span className={`px-2.5 py-0.5 text-xs font-bold rounded-md ${employee.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300'
+                  }`}>
                   {employee.status}
                 </span>
                 <span className="bg-slate-800 text-slate-300 text-xs font-medium px-2.5 py-0.5 rounded-md border border-slate-700">
@@ -143,33 +154,29 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
           <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-800 overflow-x-auto text-xs font-semibold">
             <button
               onClick={() => setActiveTab('details')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${
-                activeTab === 'details' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
+              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'details' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
             >
               Employee Details
             </button>
             <button
               onClick={() => setActiveTab('qr')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${
-                activeTab === 'qr' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
+              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'qr' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
             >
               QR Attendance Pass
             </button>
             <button
               onClick={() => setActiveTab('attendance')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${
-                activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
+              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
             >
               Attendance History ({empAttendance.length})
             </button>
             <button
               onClick={() => setActiveTab('activity')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${
-                activeTab === 'activity' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
+              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'activity' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
             >
               Audit Trail
             </button>
@@ -310,13 +317,12 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                           {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
                         </td>
                         <td className="py-2.5 px-3 font-mono text-slate-300">
-                          {rec.workingMinutes ? `${Math.floor(rec.workingMinutes/60)}h ${rec.workingMinutes%60}m` : '--'}
+                          {rec.workingMinutes ? `${Math.floor(rec.workingMinutes / 60)}h ${rec.workingMinutes % 60}m` : '--'}
                         </td>
                         <td className="py-2.5 px-3 font-bold">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] ${
-                            rec.status === 'Present' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                            rec.status === 'Late' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                          }`}>
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] ${rec.status === 'Present' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                              rec.status === 'Late' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            }`}>
                             {rec.status}
                           </span>
                         </td>

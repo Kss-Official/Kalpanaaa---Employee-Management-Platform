@@ -15,7 +15,7 @@
     },
     "Employee": {
       "title": "Employee Profile",
-      "description": "Full employee record for Kalpana Software Solutions workforce",
+      "description": "Full employee record for Kalpanaaa Software Solutions workforce",
       "type": "object",
       "properties": {
         "id": { "type": "string" },

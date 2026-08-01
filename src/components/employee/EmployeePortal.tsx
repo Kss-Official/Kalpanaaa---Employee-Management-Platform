@@ -39,8 +39,11 @@ import {
   StopCircle
 } from 'lucide-react';
 import QRCode from 'qrcode';
+import Barcode from 'react-barcode';
 import { generateEmployeeQrToken, calculateGpsDistanceMeters } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
+import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
+import { EmployeeLeaveTab } from './EmployeeLeaveTab';
 import { BreakEntry } from '../../types';
 
 interface EmployeePortalProps {
@@ -86,7 +89,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [postalCode, setPostalCode] = useState(activeEmployee?.postalCode || '');
   const [emergencyContact, setEmergencyContact] = useState(activeEmployee?.emergencyContact || '');
   const [emergencyRelationship, setEmergencyRelationship] = useState(activeEmployee?.emergencyRelationship || '');
-  const [bio, setBio] = useState(activeEmployee?.bio || 'Dedicated software & operations engineering professional at Kalpana HRMS.');
+  const [bio, setBio] = useState(activeEmployee?.bio || 'Dedicated software & operations engineering professional at Kalpanaaa HRMS.');
   const [skills, setSkills] = useState<string[]>(activeEmployee?.skills || ['React', 'TypeScript', 'HR Management', 'Project Coordination']);
   const [newSkillInput, setNewSkillInput] = useState('');
   const [preferredShift, setPreferredShift] = useState(activeEmployee?.preferredShift || activeEmployee?.shift || 'General Shift (09:00 - 18:00)');
@@ -169,10 +172,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     ? liveDistanceMeters <= companyWorkZone.radiusMeters
     : false;
 
-  // Generate QR Code Pass
+  // Generate Static QR Code for ID Card (Company Website)
   useEffect(() => {
     if (activeEmployee) {
-      const payload = generateEmployeeQrToken(activeEmployee, settings.qrTokenLifetimeMinutes);
+      const payload = `https://kalpanaaasoftwaresolutions.in/verify?empId=${encodeURIComponent(activeEmployee.employeeId)}`;
       QRCode.toDataURL(payload, { 
         width: 320, 
         margin: 2,
@@ -182,7 +185,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         if (!err && url) setQrUrl(url);
       });
     }
-  }, [activeEmployee, settings.qrTokenLifetimeMinutes]);
+  }, [activeEmployee]);
 
   if (!activeEmployee) {
     return (
@@ -192,16 +195,16 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     );
   }
 
-  const handleSelfCheckIn = () => {
+  const handleSelfCheckIn = async () => {
     setActionFeedback(null);
-    const res = recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
+    const res = await recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     if (res.success && res.record && isWfh) {
       updateAttendanceRecord(res.record.id, { isWfh: true, status: 'Work From Home', notes: 'Self check-in — Work From Home' });
     }
     setActionFeedback({ success: res.success, message: res.message });
   };
 
-  const handleSelfCheckOut = () => {
+  const handleSelfCheckOut = async () => {
     setActionFeedback(null);
     // Auto-end any open break before checkout
     if (activeBreak && todayRecord) {
@@ -211,7 +214,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, completedBreak], totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
       setActiveBreak(null);
     }
-    const res = recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
+    const res = await recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     setActionFeedback({ success: res.success, message: res.message });
   };
 
@@ -235,6 +238,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   };
 
   const handleToggleWfh = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const approvedDates = activeEmployee.approvedWfhDates || [];
+    
+    if (!approvedDates.includes(todayStr)) {
+      setActionFeedback({ success: false, message: 'Work From Home requires prior approval. Please submit a request in the "My Leave & WFH" tab.' });
+      return;
+    }
+
     const newVal = !isWfh;
     setIsWfh(newVal);
     if (todayRecord) {
@@ -392,13 +403,19 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             <button
               onClick={handleToggleWfh}
               className={`w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
-                isWfh
-                  ? 'bg-sky-500/20 border-sky-500/40 text-sky-300 hover:bg-sky-500/30'
-                  : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-sky-300 hover:border-sky-500/40'
+                !(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                  ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed opacity-75'
+                  : isWfh
+                    ? 'bg-sky-500/20 border-sky-500/40 text-sky-300 hover:bg-sky-500/30'
+                    : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-sky-300 hover:border-sky-500/40'
               }`}
             >
               <Home className="w-3.5 h-3.5" />
-              {isWfh ? '🏠 WFH Active — Click to Switch to Office' : 'Mark as Work From Home Today'}
+              {!(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                ? '🔒 WFH Locked (Requires Admin Approval)'
+                : isWfh 
+                  ? '🏠 WFH Active — Click to Switch to Office' 
+                  : 'Mark as Work From Home Today'}
             </button>
           )}
         </div>
@@ -436,253 +453,280 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       {/* 1. EMPLOYEE DASHBOARD TAB */}
       {activeTab === 'emp_dashboard' && (
         <div className="space-y-6">
-
-          {/* Authoritative Location Verification Live Status Banner */}
-          <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-6 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-3 gap-2">
-              <div className="flex items-center gap-2.5">
-                <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
+          
+          {/* Section 1: Hero & Command Center */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Left: Personalized Command Center */}
+            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 sm:p-8 flex flex-col justify-between relative overflow-hidden shadow-sm">
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-900/0 to-slate-900/0 opacity-50"></div>
+              
+              <div className="relative z-10 space-y-6">
                 <div>
-                  <h3 className="font-bold text-white text-xs uppercase tracking-wider">
-                    Company Location Verification Status
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Automatically mapped to <strong className="text-blue-300 font-semibold">{companyWorkZone.name}</strong>
+                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-1">
+                    {getGreeting()}, {displayName}
+                  </h1>
+                  <p className="text-sm text-slate-400 font-medium">
+                    {activeEmployee.designation} <span className="mx-2 text-slate-600">•</span> {settings.companyName}
                   </p>
                 </div>
-              </div>
 
-              {/* Status Badge */}
-              <div className="self-start sm:self-auto">
-                {isVerifiedLocation ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-extrabold rounded-full">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Verified (Inside Radius)</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-extrabold rounded-full">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Unverified ({liveDistanceMeters ? `${liveDistanceMeters}m away` : 'GPS Acquiring'})</span>
-                  </span>
-                )}
-              </div>
-            </div>
+                {/* Primary Actions (Check-In / Out) */}
+                <div className="bg-slate-950/60 p-5 rounded-xl border border-slate-800/60 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs uppercase tracking-wider font-semibold text-slate-400">Current Status</span>
+                    <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide ${
+                      todayRecord?.isWfh
+                        ? 'text-sky-400 bg-sky-400/10 border border-sky-400/20'
+                        : 'text-emerald-400 bg-emerald-400/10 border border-emerald-400/20'
+                    }`}>
+                      {todayRecord?.status || 'Not Checked In'} {todayRecord?.isWfh && ' (WFH)'}
+                    </span>
+                  </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-              <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Company Work Zone</span>
-                <span className="font-bold text-white truncate block">{companyWorkZone.name}</span>
-                <span className="text-[10px] text-slate-500 font-mono">Radius: {companyWorkZone.radiusMeters}m</span>
-              </div>
+                  <div className="flex items-center gap-3">
+                    {!todayRecord?.checkInAt ? (
+                      <button onClick={handleSelfCheckIn} className="flex-1 px-4 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                        <Clock className="w-4 h-4" /> Check In
+                      </button>
+                    ) : !todayRecord?.checkOutAt ? (
+                      <button onClick={handleSelfCheckOut} className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm rounded-lg transition-colors border border-slate-700 flex items-center justify-center gap-2 shadow-sm">
+                        <LogOut className="w-4 h-4" /> Check Out
+                      </button>
+                    ) : (
+                      <div className="flex-1 px-4 py-3 bg-slate-900 text-slate-500 font-bold text-sm rounded-lg border border-slate-800 text-center">
+                        ✓ Shift Completed
+                      </div>
+                    )}
+                  </div>
 
-              <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Distance From Office</span>
-                <span className="font-bold text-blue-400 font-mono text-sm">
-                  {liveDistanceMeters !== null ? `${liveDistanceMeters} meters` : 'Calculating...'}
-                </span>
-                <span className="text-[10px] text-slate-500 block">Allowed: ≤ {companyWorkZone.radiusMeters}m</span>
-              </div>
-
-              <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">GPS Accuracy</span>
-                <span className="font-bold text-emerald-400 font-mono text-sm">
-                  {gpsLocation?.accuracy ? `± ${gpsLocation.accuracy} meters` : 'High Precision'}
-                </span>
-                <span className="text-[10px] text-slate-500 block">Device Geolocation</span>
-              </div>
-
-              <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Last Verification</span>
-                <span className="font-bold text-slate-200 font-mono text-sm">
-                  {todayRecord?.checkInAt ? new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Live Device Lock'}
-                </span>
-                <span className="text-[10px] text-slate-500 block">Snapshot Logged</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
-          {/* Today's Working Summary */}
-          <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-6 space-y-4 shadow-xl">
-            <h3 className="font-bold text-white text-xs uppercase tracking-wider text-blue-400 flex items-center gap-2 border-b border-slate-800/80 pb-3">
-              <Clock className="w-4 h-4" />
-              Today's Attendance Summary
-            </h3>
-
-            <div className="space-y-3 text-xs">
-              <div className="flex justify-between py-2 border-b border-slate-800/60">
-                <span className="text-slate-400">Check In Time</span>
-                <span className="font-bold text-white font-mono">
-                  {todayRecord?.checkInAt ? new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                </span>
-              </div>
-
-              <div className="flex justify-between py-2 border-b border-slate-800/60">
-                <span className="text-slate-400">Check Out Time</span>
-                <span className="font-bold text-white font-mono">
-                  {todayRecord?.checkOutAt ? new Date(todayRecord.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                </span>
-              </div>
-
-              <div className="flex justify-between py-2 border-b border-slate-800/60">
-                <span className="text-slate-400">Working Duration</span>
-                <span className="font-bold text-blue-400 font-mono">
-                  {todayRecord?.workingMinutes ? `${Math.floor(todayRecord.workingMinutes/60)}h ${todayRecord.workingMinutes%60}m` : '0h 0m'}
-                </span>
-              </div>
-
-              {(todayRecord?.totalBreakMinutes ?? 0) > 0 && (
-                <div className="flex justify-between py-2 border-b border-slate-800/60">
-                  <span className="text-slate-400 flex items-center gap-1"><Coffee className="w-3 h-3" /> Total Breaks</span>
-                  <span className="font-bold text-amber-400 font-mono">{todayRecord!.totalBreakMinutes}m</span>
-                </div>
-              )}
-
-              <div className="flex justify-between py-2">
-                <span className="text-slate-400">Location Status</span>
-                <span className="font-bold flex items-center gap-1">
-                  {todayRecord?.isWfh ? (
-                    <><Home className="w-3.5 h-3.5 text-sky-400" /><span className="text-sky-400">Work From Home</span></>
-                  ) : (
-                    <><MapPin className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">{settings.officeName}</span></>
+                  {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+                    <button
+                      onClick={handleToggleWfh}
+                      className={`w-full py-2 rounded-lg text-xs font-semibold transition-colors border ${
+                        !(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                          ? 'bg-transparent border-slate-800 text-slate-500 cursor-not-allowed'
+                          : isWfh
+                            ? 'bg-sky-500/10 border-sky-500/20 text-sky-400 hover:bg-sky-500/20'
+                            : 'bg-transparent border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+                      }`}
+                    >
+                      {!(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                        ? '🔒 WFH Locked (Requires Admin Approval)'
+                        : isWfh 
+                          ? 'Working From Home' 
+                          : 'Switch to WFH'}
+                    </button>
                   )}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick QR Pass Widget */}
-          <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-6 text-center shadow-xl flex flex-col items-center justify-between">
-            <div>
-              <h3 className="font-bold text-xs uppercase tracking-wider text-blue-400 mb-1 flex items-center justify-center gap-2">
-                <QrCode className="w-4 h-4" />
-                Digital QR Pass
-              </h3>
-              <p className="text-[11px] text-slate-400 mb-3">Scan at office terminal kiosk for instant verification</p>
-
-              <div className="bg-white p-3.5 rounded-2xl shadow-lg inline-block">
-                {qrUrl ? (
-                  <img src={qrUrl} alt="Employee Pass QR" className="w-36 h-36 mx-auto" />
-                ) : (
-                  <div className="w-36 h-36 bg-slate-100 animate-pulse rounded-xl" />
-                )}
-              </div>
-            </div>
-
-            <p className="text-[10px] text-slate-500 font-mono mt-3">Cryptographic Token Verified</p>
-          </div>
-
-          {/* Shift & Official Details */}
-          <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-6 space-y-4 shadow-xl">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-purple-400 flex items-center gap-2 border-b border-slate-800/80 pb-3">
-              <Briefcase className="w-4 h-4" />
-              Work & Policy Profile
-            </h3>
-
-            <div className="space-y-3 text-xs">
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Shift</span>
-                <span className="font-semibold text-white">{activeEmployee.shift}</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Work Location</span>
-                <span className="font-semibold text-white">{activeEmployee.workLocation}</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">Reporting Manager</span>
-                <span className="font-semibold text-white">{activeEmployee.reportingManager}</span>
-              </div>
-              <div className="flex justify-between py-1.5">
-                <span className="text-slate-400">Official Email</span>
-                <span className="font-semibold text-white truncate max-w-[160px]">{activeEmployee.email}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Break Management Panel ── shown only when actively checked in */}
-        {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
-          <div className="bg-slate-900/90 rounded-3xl border border-amber-500/25 p-6 shadow-xl space-y-4">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-amber-400 flex items-center gap-2 border-b border-slate-800/80 pb-3">
-              <Timer className="w-4 h-4" />
-              Break Management
-              {activeBreak && (
-                <span className="ml-auto text-xs font-bold text-amber-300 bg-amber-500/20 border border-amber-500/30 px-3 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                  {activeBreak.type} — {formatBreakTime(breakElapsedSec)}
-                </span>
-              )}
-            </h3>
-
-            {activeBreak ? (
-              <div className="flex flex-col sm:flex-row items-center gap-4">
-                <div className="flex-1 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-center w-full">
-                  <p className="text-[11px] text-amber-300 font-semibold mb-1">Currently on {activeBreak.type}</p>
-                  <p className="text-4xl font-black font-mono text-white tracking-tight">{formatBreakTime(breakElapsedSec)}</p>
-                  <p className="text-[10px] text-slate-500 mt-1">Started at {new Date(activeBreak.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                 </div>
-                <button
-                  onClick={handleEndBreak}
-                  className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs rounded-2xl cursor-pointer flex items-center gap-2 shadow-lg shadow-amber-900/40 hover:scale-[1.02] transition-all"
-                >
-                  <StopCircle className="w-4 h-4" />
-                  End Break & Return to Work
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button
-                  onClick={() => handleStartBreak('Tea Break')}
-                  className="flex items-center gap-3 px-5 py-4 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-500/30 hover:border-amber-500/60 text-white rounded-2xl cursor-pointer transition-all hover:scale-[1.01] group"
-                >
-                  <div className="p-2.5 bg-amber-500/20 rounded-xl group-hover:bg-amber-500/30 transition-colors">
-                    <Coffee className="w-5 h-5 text-amber-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-extrabold text-sm text-white">Tea Break</p>
-                    <p className="text-[11px] text-slate-400">Std: {settings.teaBreakDurationMinutes ?? 10}min — click to start timer</p>
-                  </div>
-                  <PlayCircle className="w-5 h-5 text-amber-400/60 ml-auto group-hover:text-amber-400 transition-colors" />
-                </button>
 
-                <button
-                  onClick={() => handleStartBreak('Lunch Break')}
-                  className="flex items-center gap-3 px-5 py-4 bg-orange-900/30 hover:bg-orange-900/50 border border-orange-500/30 hover:border-orange-500/60 text-white rounded-2xl cursor-pointer transition-all hover:scale-[1.01] group"
-                >
-                  <div className="p-2.5 bg-orange-500/20 rounded-xl group-hover:bg-orange-500/30 transition-colors">
-                    <UtensilsCrossed className="w-5 h-5 text-orange-400" />
+                {/* Micro Attendance Summary */}
+                <div className="flex items-center gap-6 pt-2">
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Check-In</span>
+                    <span className="text-sm font-mono text-white">
+                      {todayRecord?.checkInAt ? new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                    </span>
                   </div>
-                  <div className="text-left">
-                    <p className="font-extrabold text-sm text-white">Lunch Break</p>
-                    <p className="text-[11px] text-slate-400">Std: {settings.lunchBreakDurationMinutes ?? 30}min — click to start timer</p>
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Hours Logged</span>
+                    <span className="text-sm font-mono text-white">
+                      {todayRecord?.workingMinutes ? `${Math.floor(todayRecord.workingMinutes/60)}h ${todayRecord.workingMinutes%60}m` : '0h 0m'}
+                    </span>
                   </div>
-                  <PlayCircle className="w-5 h-5 text-orange-400/60 ml-auto group-hover:text-orange-400 transition-colors" />
-                </button>
+                  {isVerifiedLocation !== null && !todayRecord?.isWfh && (
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Location</span>
+                      <span className={`text-xs font-bold flex items-center gap-1 ${isVerifiedLocation ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {isVerifiedLocation ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                        {isVerifiedLocation ? 'Verified' : 'Unverified'}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            </div>
 
-            {/* Break log for today */}
-            {(todayRecord?.breaks?.length ?? 0) > 0 && (
-              <div className="space-y-2 pt-2 border-t border-slate-800/60">
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Today's Break Log</p>
-                {todayRecord!.breaks!.map((b, i) => (
-                  <div key={i} className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800">
-                    <span className="flex items-center gap-2">
-                      {b.type === 'Tea Break' ? <Coffee className="w-3 h-3 text-amber-400" /> : <UtensilsCrossed className="w-3 h-3 text-orange-400" />}
-                      {b.type}
+            {/* Right: Premium Hero Image */}
+            <div className="rounded-2xl border border-slate-800/80 overflow-hidden relative h-[360px] lg:h-auto shadow-sm">
+              <img 
+                src="/elite_engineering_team.png" 
+                alt="Kalpanaaa Engineering Team" 
+                className="absolute inset-0 w-full h-full object-cover opacity-90 transition-transform duration-1000 hover:scale-105"
+              />
+              
+              <div className="absolute bottom-6 left-6 right-6">
+                <p className="text-white font-semibold text-lg tracking-tight mb-2">Building the future of enterprise software.</p>
+                <div className="flex items-center gap-4 text-xs font-medium text-slate-300">
+                  <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> System Operational</span>
+                  <span className="flex items-center gap-1.5"><Globe className="w-4 h-4 text-blue-400" /> Core Services Online</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Productivity & Workflow */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* Current Tasks */}
+            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
+              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-slate-500" /> Current Tasks
+              </h3>
+              <div className="space-y-3">
+                {[
+                  { title: "Review PR #4812 - Core API Optimization", project: "Infrastructure", status: "In Progress" },
+                  { title: "Design System Architecture Document", project: "Platform", status: "To Do" },
+                  { title: "Q3 Roadmap Planning Sync", project: "Management", status: "Completed" }
+                ].map((task, i) => (
+                  <div key={i} className="flex items-start justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/40 hover:border-slate-700 transition-colors cursor-default">
+                    <div>
+                      <p className="text-sm font-medium text-white mb-0.5">{task.title}</p>
+                      <span className="text-[10px] font-mono text-slate-500">{task.project}</span>
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                      task.status === 'Completed' ? 'text-emerald-400 border-emerald-400/20 bg-emerald-400/10' :
+                      task.status === 'In Progress' ? 'text-blue-400 border-blue-400/20 bg-blue-400/10' :
+                      'text-slate-400 border-slate-700 bg-slate-800'
+                    }`}>
+                      {task.status}
                     </span>
-                    <span className="font-mono text-slate-400">
-                      {new Date(b.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → {b.endAt ? new Date(b.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
-                    </span>
-                    <span className="font-bold text-amber-400">{b.durationMinutes}m</span>
                   </div>
                 ))}
-                <p className="text-right text-[11px] font-bold text-amber-400">Total break time: {todayRecord!.totalBreakMinutes}m</p>
               </div>
-            )}
+            </div>
+
+            {/* Leave Balance & Performance Summary */}
+            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
+              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-slate-500" /> Leave Balance & Summary
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="p-4 bg-slate-950/50 rounded-xl border border-slate-800/40">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Annual Leave</span>
+                  <div className="flex items-end gap-2">
+                    <span className="text-2xl font-bold text-white leading-none">14</span>
+                    <span className="text-xs text-slate-400 font-medium pb-0.5">/ 21 days</span>
+                  </div>
+                  <div className="w-full h-1 bg-slate-800 rounded-full mt-3 overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: '66%' }}></div>
+                  </div>
+                </div>
+                <div className="p-4 bg-slate-950/50 rounded-xl border border-slate-800/40">
+                  <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Sick Leave</span>
+                  <div className="flex items-end gap-2">
+                    <span className="text-2xl font-bold text-white leading-none">5</span>
+                    <span className="text-xs text-slate-400 font-medium pb-0.5">/ 7 days</span>
+                  </div>
+                  <div className="w-full h-1 bg-slate-800 rounded-full mt-3 overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: '71%' }}></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Performance Mini-Stat */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/40">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <Zap className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white">Performance Score</p>
+                    <p className="text-[10px] text-slate-500">Based on Q2 Reviews</p>
+                  </div>
+                </div>
+                <span className="text-lg font-bold text-white font-mono">4.8<span className="text-slate-500 text-xs">/5</span></span>
+              </div>
+            </div>
           </div>
-        )}
+
+          {/* Section 3: Culture & Communication */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* Announcements */}
+            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
+              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-slate-500" /> Company Announcements
+              </h3>
+              <div className="space-y-4">
+                {[
+                  { title: "Q3 Engineering All-Hands", date: "Today", desc: "Join us at 4 PM for product roadmap updates and architecture review." },
+                  { title: "New Security Policies", date: "Yesterday", desc: "Please review the updated device fingerprinting and concurrent login policies." },
+                ].map((news, i) => (
+                  <div key={i} className="relative pl-4 border-l-2 border-slate-800">
+                    <div className="absolute w-2 h-2 rounded-full bg-blue-500 -left-[5px] top-1.5"></div>
+                    <p className="text-sm font-bold text-white mb-0.5">{news.title}</p>
+                    <p className="text-xs text-slate-400 mb-1">{news.desc}</p>
+                    <span className="text-[10px] font-mono text-slate-500">{news.date}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Notifications / Calendar */}
+            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
+              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-slate-500" /> Today's Agenda
+              </h3>
+              <div className="space-y-3">
+                {[
+                  { time: "10:00 AM", title: "Daily Engineering Standup", type: "meeting" },
+                  { time: "01:30 PM", title: "Architecture Review: Payment Gateway", type: "meeting" },
+                  { time: "04:00 PM", title: "Q3 Engineering All-Hands", type: "event" }
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-slate-950/50 border border-slate-800/40">
+                    <div className="text-center min-w-[60px]">
+                      <span className="block text-[10px] font-mono text-slate-400">{item.time.split(' ')[0]}</span>
+                      <span className="block text-[9px] font-bold text-slate-500">{item.time.split(' ')[1]}</span>
+                    </div>
+                    <div className="w-px h-8 bg-slate-800"></div>
+                    <div>
+                      <p className="text-sm font-medium text-white">{item.title}</p>
+                      <p className="text-[10px] text-slate-500 uppercase font-semibold">{item.type}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+
+          {/* Break Management - Condensed & Minimal */}
+          {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center">
+                  <Coffee className="w-5 h-5 text-slate-400" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Break Management</h4>
+                  <p className="text-[11px] text-slate-400">Total break time today: <span className="font-mono text-slate-300">{todayRecord?.totalBreakMinutes || 0}m</span></p>
+                </div>
+              </div>
+
+              {activeBreak ? (
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <span className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider">{activeBreak.type} Active</span>
+                    <span className="text-lg font-mono font-bold text-white">{formatBreakTime(breakElapsedSec)}</span>
+                  </div>
+                  <button onClick={handleEndBreak} className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-xs rounded-lg transition-colors flex items-center gap-2">
+                    <StopCircle className="w-4 h-4" /> End Break
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <button onClick={() => handleStartBreak('Tea Break')} className="px-4 py-2 bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold text-xs rounded-lg transition-colors flex items-center gap-2">
+                    <Coffee className="w-3.5 h-3.5" /> Tea Break
+                  </button>
+                  <button onClick={() => handleStartBreak('Lunch Break')} className="px-4 py-2 bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold text-xs rounded-lg transition-colors flex items-center gap-2">
+                    <UtensilsCrossed className="w-3.5 h-3.5" /> Lunch Break
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -763,85 +807,86 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         </div>
       )}
 
-      {/* 3. DIGITAL ID PASS TAB */}
+      {/* 3. PRINTABLE ID CARD TAB */}
       {activeTab === 'emp_qr' && (
-        <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-8 shadow-2xl max-w-md mx-auto text-center space-y-6">
-          <div id="employee-pass-download-element" className="p-6 bg-slate-950 text-white rounded-3xl border border-slate-800 space-y-4 text-left">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <span className="text-xs font-black text-blue-400 tracking-wider uppercase block">{settings.companyName}</span>
-                <span className="text-[10px] text-slate-400 font-mono">DIGITAL ATTENDANCE PASS</span>
-              </div>
-              <span className="text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-full flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                ACTIVE PASS
-              </span>
+        <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-8 shadow-2xl max-w-4xl mx-auto space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+            <div>
+              <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-blue-400" />
+                Employee ID Card Generator
+              </h2>
+              <p className="text-slate-400 text-xs mt-0.5">Print your official corporate ID card or download it as a PDF.</p>
             </div>
+          </div>
 
-            <div className="flex items-center gap-4 py-1">
-              <img
-                src={activeEmployee.profilePhotoUrl || profilePhoto}
-                alt={activeEmployee.fullName}
-                className="w-16 h-16 rounded-2xl object-cover border-2 border-blue-500/60 shadow-lg"
-              />
-              <div>
-                <h2 className="text-base font-extrabold text-white">{activeEmployee.fullName}</h2>
-                <p className="text-xs text-slate-300 font-semibold">{activeEmployee.designation}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] font-mono font-extrabold bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-md border border-blue-500/30">
-                    ID: {activeEmployee.employeeId}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-medium">{activeEmployee.department}</span>
+          <div className="flex flex-col md:flex-row items-center justify-center gap-8 bg-slate-950/50 p-8 rounded-2xl border border-slate-800/60 overflow-x-auto">
+            
+            {/* The Print Container */}
+            <div id="employee-id-card-element" className="flex flex-col sm:flex-row gap-6 bg-transparent pb-8">
+              
+              {/* FRONT OF CARD - QR CODE */}
+              <div className="w-[340px] h-[580px] bg-white rounded-3xl shadow-2xl overflow-hidden relative print:shadow-none print:border print:border-slate-300 flex flex-col scale-[0.7] origin-top sm:scale-[0.8] md:scale-[0.85] lg:scale-100 mx-auto items-center justify-center p-8">
+                <div className="w-full flex flex-col items-center justify-center bg-white p-6 rounded-2xl border border-slate-100 shadow-sm gap-4">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Scan to Verify Employee</div>
+                  {qrUrl ? (
+                    <img src={qrUrl} alt="Scan to Verify" className="w-40 h-40 object-contain" />
+                  ) : (
+                    <div className="w-40 h-40 bg-slate-100 animate-pulse rounded-xl" />
+                  )}
+                  <div className="text-xl text-center text-slate-800 font-black tracking-[0.2em]">{activeEmployee.employeeId}</div>
+                  <div className="text-sm text-center text-slate-500 font-bold uppercase tracking-widest border-t border-slate-200 pt-3 w-full">{activeEmployee.fullName}</div>
                 </div>
               </div>
-            </div>
 
-            <div className="bg-white p-4 rounded-2xl border-2 border-slate-200 text-center shadow-inner">
-              <div className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-1.5 flex items-center justify-center gap-1">
-                <QrCode className="w-3.5 h-3.5 text-blue-600" />
-                <span>100% Optical Scannable Pass</span>
+              {/* BACK OF CARD - QR ONLY */}
+              <div className="w-[340px] h-[580px] bg-white rounded-3xl shadow-2xl overflow-hidden relative print:shadow-none print:border print:border-slate-300 flex flex-col scale-[0.7] origin-top sm:scale-[0.8] md:scale-[0.85] lg:scale-100 mx-auto items-center justify-center p-8">
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                  {qrUrl ? (
+                    <img src={qrUrl} alt="Website QR Code" className="w-64 h-64 object-contain image-render-crisp" />
+                  ) : (
+                    <div className="w-64 h-64 bg-slate-100 animate-pulse rounded-xl" />
+                  )}
+                </div>
+                <div className="text-sm text-center text-slate-400 font-black mt-8 tracking-widest uppercase flex items-center justify-center gap-2">
+                  <QrCode className="w-4 h-4" /> Company Portal
+                </div>
               </div>
 
-              <div className="bg-white p-2 rounded-xl inline-block border border-slate-100">
-                {qrUrl ? (
-                  <img src={qrUrl} alt="Employee Pass" className="w-48 h-48 mx-auto object-contain image-render-crisp" />
-                ) : (
-                  <div className="w-48 h-48 bg-slate-100 animate-pulse rounded-xl" />
-                )}
-              </div>
-
-              <p className="text-[9px] font-mono text-slate-500 mt-2">
-                CRYPTOGRAPHIC TOKEN: {activeEmployee.qrToken.substring(0, 16)}...
-              </p>
-            </div>
-
-            <div className="text-[10px] text-slate-400 font-mono space-y-1 pt-1 border-t border-slate-800/80">
-              <p><span className="text-slate-300 font-semibold">Campus Location:</span> {settings.officeName}</p>
-              <p><span className="text-slate-300 font-semibold">Verification Rule:</span> Scan at Kiosk Check-In Station</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          {/* Action Buttons */}
+          <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto">
             <button
               onClick={() => window.print()}
-              className="py-3 bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer border border-slate-700 transition-all"
+              className="py-3 bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm"
             >
               <Printer className="w-4 h-4" />
-              <span>Print Pass</span>
+              <span>Print (CR80 Format)</span>
             </button>
 
             <button
-              onClick={() => downloadElementAsPdf('employee-pass-download-element', `ID_Pass_${activeEmployee.employeeId}.pdf`)}
-              className="py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-600/30 transition-all hover:scale-[1.01]"
+              onClick={() => downloadElementAsPdf('employee-id-card-element', `ID_Card_${activeEmployee.employeeId}.pdf`)}
+              className="py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-blue-900/40"
             >
               <Download className="w-4 h-4" />
-              <span>Download PDF</span>
+              <span>Export PDF</span>
             </button>
           </div>
+          
+          <p className="text-[10px] text-slate-500 text-center">
+            Note: Ensure your printer settings are set to 100% scale (no margins) if printing directly to CR80 ID cards.
+          </p>
         </div>
       )}
 
-      {/* 4. EDIT PROFILE & FACE PHOTO SETTINGS TAB */}
+      {/* 4. MY LEAVE & WFH TAB */}
+      {activeTab === 'emp_leave' && (
+        <EmployeeLeaveTab />
+      )}
+
+      {/* 5. EDIT PROFILE & FACE PHOTO SETTINGS TAB */}
       {activeTab === 'emp_profile' && (
         <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-6 sm:p-8 shadow-2xl max-w-4xl mx-auto space-y-8 text-xs">
           

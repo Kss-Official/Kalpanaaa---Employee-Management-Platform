@@ -54,12 +54,12 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     return matchesSearch && matchesDept && matchesStatus;
   });
 
-  const getStatusBadge = (status: EmployeeStatus) => {
+  const getStatusIndicator = (status: EmployeeStatus) => {
     switch (status) {
-      case 'Active': return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-      case 'On Leave': return 'bg-amber-500/20 text-amber-300 border-amber-500/30';
-      case 'Terminated': return 'bg-rose-500/20 text-rose-300 border-rose-500/30';
-      default: return 'bg-slate-800 text-slate-300 border-slate-700';
+      case 'Active': return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]';
+      case 'On Leave': return 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]';
+      case 'Terminated': return 'bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.5)]';
+      default: return 'bg-slate-500';
     }
   };
 
@@ -86,15 +86,15 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       </div>
 
       {/* Filters Bar */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-3">
+      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" strokeWidth={2.5} />
           <input
             type="text"
-            placeholder="Search name, ID, email, designation..."
+            placeholder="Search name, ID, email..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl focus:outline-none focus:border-blue-500 text-white placeholder-slate-500"
+            className="w-full pl-9 pr-4 py-2.5 text-xs bg-slate-950/50 border border-slate-800/60 rounded-xl focus:outline-none focus:border-blue-500/50 text-white placeholder-slate-500 transition-colors"
           />
         </div>
 
@@ -103,7 +103,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           <select
             value={deptFilter}
             onChange={e => setDeptFilter(e.target.value)}
-            className="px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-200 font-medium focus:outline-none focus:border-blue-500"
+            className="px-4 py-2.5 text-xs bg-slate-950/50 border border-slate-800/60 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500/50 cursor-pointer"
           >
             <option value="ALL">All Departments</option>
             {departments.map(d => (
@@ -115,7 +115,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
-            className="px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-200 font-medium focus:outline-none focus:border-blue-500"
+            className="px-4 py-2.5 text-xs bg-slate-950/50 border border-slate-800/60 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500/50 cursor-pointer"
           >
             <option value="ALL">All Statuses</option>
             <option value="Active">Active</option>
@@ -124,17 +124,17 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           </select>
 
           {/* Grid vs Table View Toggle */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+          <div className="flex items-center bg-slate-950/50 p-1 rounded-xl border border-slate-800/60">
             <button
               onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${viewMode === 'table' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
               title="Table View"
             >
               <List className="w-4 h-4" />
             </button>
             <button
               onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${viewMode === 'grid' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
               title="Grid View"
             >
               <LayoutGrid className="w-4 h-4" />
@@ -152,61 +152,62 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         </div>
       ) : viewMode === 'table' ? (
         /* TABLE VIEW */
-        <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
+        <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-950 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3.5 px-4">Employee</th>
-                  <th className="py-3.5 px-4">ID Code</th>
-                  <th className="py-3.5 px-4">Department & Role</th>
-                  <th className="py-3.5 px-4">Employment</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4 text-right">Actions</th>
+                <tr className="bg-slate-950/60 border-b border-slate-800/60 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                  <th className="py-4 px-6">Employee</th>
+                  <th className="py-4 px-6">ID Code</th>
+                  <th className="py-4 px-6">Department & Role</th>
+                  <th className="py-4 px-6">Employment</th>
+                  <th className="py-4 px-6">Status</th>
+                  <th className="py-4 px-6 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800 text-xs">
+              <tbody className="divide-y divide-slate-800/40 text-[11px]">
                 {filteredEmployees.map(emp => (
-                  <tr key={emp.id} className="hover:bg-slate-800/50 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-3">
+                  <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group">
+                    <td className="py-3 px-6">
+                      <div className="flex items-center gap-4">
                         <img
                           src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
                           alt={emp.fullName}
-                          className="w-9 h-9 rounded-full object-cover border border-slate-700"
+                          className="w-8 h-8 rounded-full object-cover border border-slate-700/50"
                         />
                         <div>
                           <div
                             onClick={() => onSelectEmployee(emp)}
-                            className="font-bold text-white hover:text-blue-400 cursor-pointer transition-colors"
+                            className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
                           >
                             {emp.fullName}
                           </div>
-                          <div className="text-[11px] text-slate-400">{emp.email}</div>
+                          <div className="text-[10px] font-medium text-slate-500">{emp.email}</div>
                         </div>
                       </div>
                     </td>
 
-                    <td className="py-3 px-4">
-                      <span className="font-mono font-bold text-slate-200 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
+                    <td className="py-3 px-6">
+                      <span className="font-mono font-bold text-slate-400">
                         {emp.employeeId}
                       </span>
                     </td>
 
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-white">{emp.department}</div>
-                      <div className="text-[11px] text-slate-400">{emp.designation}</div>
+                    <td className="py-3 px-6">
+                      <div className="font-bold text-slate-300">{emp.department}</div>
+                      <div className="text-[10px] text-slate-500 font-medium">{emp.designation}</div>
                     </td>
 
-                    <td className="py-3 px-4">
-                      <div className="text-slate-300 font-medium">{emp.employmentType}</div>
-                      <div className="text-[11px] text-slate-500">Shift: {emp.shift.split(' ')[0]}</div>
+                    <td className="py-3 px-6">
+                      <div className="text-slate-400 font-bold">{emp.employmentType}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift.split(' ')[0]}</div>
                     </td>
 
-                    <td className="py-3 px-4">
-                      <span className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${getStatusBadge(emp.status)}`}>
-                        {emp.status}
-                      </span>
+                    <td className="py-3 px-6">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
+                        <span className="text-slate-300 font-bold">{emp.status}</span>
+                      </div>
                     </td>
 
                     <td className="py-3 px-4 text-right">
@@ -248,55 +249,61 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         /* GRID VIEW */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredEmployees.map(emp => (
-            <div key={emp.id} className="bg-slate-900 rounded-3xl border border-slate-800 p-5 shadow-xl hover:border-slate-700 transition-all flex flex-col justify-between">
+            <div key={emp.id} className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 shadow-sm hover:border-slate-700/80 hover:bg-slate-900 transition-all flex flex-col justify-between group cursor-pointer" onClick={() => onSelectEmployee(emp)}>
               <div>
-                <div className="flex items-start justify-between mb-3">
-                  <span className="font-mono text-xs font-bold bg-slate-950 text-slate-300 px-2 py-0.5 rounded-md border border-slate-800">
+                <div className="flex items-start justify-between mb-4">
+                  <span className="font-mono text-[10px] font-black bg-slate-950/50 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-800/50">
                     {emp.employeeId}
                   </span>
-                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${getStatusBadge(emp.status)}`}>
-                    {emp.status}
-                  </span>
+                  <div className="flex items-center gap-2 bg-slate-950/50 px-2.5 py-1 rounded-lg border border-slate-800/50">
+                    <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
+                    <span className="text-[10px] text-slate-300 font-bold tracking-wide uppercase">{emp.status}</span>
+                  </div>
                 </div>
-
-                <div className="text-center my-2">
+                <div className="text-center my-4">
                   <img
                     src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
                     alt={emp.fullName}
-                    className="w-16 h-16 rounded-full object-cover border-2 border-slate-700 mx-auto shadow-md"
+                    className="w-16 h-16 rounded-full object-cover border-2 border-slate-800/80 mx-auto group-hover:scale-105 transition-transform"
                   />
-                  <h3
-                    onClick={() => onSelectEmployee(emp)}
-                    className="font-bold text-white text-sm mt-2 hover:text-blue-400 cursor-pointer transition-colors"
+                  <div className="mt-3">
+                    <h3 className="font-extrabold text-white text-sm group-hover:text-blue-400 transition-colors">{emp.fullName}</h3>
+                    <p className="text-[10px] text-slate-500 font-medium">{emp.designation}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 mt-4 pt-4 border-t border-slate-800/60">
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">{emp.department}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Mail className="w-3.5 h-3.5" />
+                    <span className="text-[11px] truncate">{emp.email}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Phone className="w-3.5 h-3.5" />
+                    <span className="text-[11px]">{emp.phone}</span>
+                  </div>
+                </div>
+              </div>
+
+              {isAdmin && (
+                <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onOpenIdCardModal(emp); }}
+                    className="text-[10px] font-bold text-slate-400 hover:text-emerald-400 flex items-center gap-1 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
                   >
-                    {emp.fullName}
-                  </h3>
-                  <p className="text-xs text-blue-400 font-semibold">{emp.designation}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{emp.department}</p>
+                    <CreditCard className="w-3 h-3" /> ID Card
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onOpenEditModal(emp); }}
+                    className="text-[10px] font-bold text-slate-400 hover:text-amber-400 flex items-center gap-1 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
+                  >
+                    <Edit className="w-3 h-3" /> Edit
+                  </button>
                 </div>
-
-                <div className="my-4 pt-3 border-t border-slate-800 space-y-1.5 text-xs text-slate-300">
-                  <div className="flex items-center gap-2 truncate">
-                    <Mail className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    <span className="truncate">{emp.email}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    <span>{emp.phone}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                <button
-                  onClick={() => onSelectEmployee(emp)}
-                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer text-center"
-                >
-                  View Profile
-                </button>
-                  <Edit className="w-4 h-4" />
-                </button>
-              </div>
+              )}
             </div>
           ))}
         </div>

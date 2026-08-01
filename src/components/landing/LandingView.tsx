@@ -54,11 +54,11 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
       <header className="relative z-20 px-6 lg:px-12 py-4 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl overflow-hidden shadow-md shadow-blue-500/20 shrink-0 border border-slate-700/60">
-            <img src={kalpanaLogo} alt="Kalpana Logo" className="w-full h-full object-cover" />
+            <img src={kalpanaLogo} alt="Kalpanaaa Logo" className="w-full h-full object-cover" />
           </div>
           <div>
             <span className="text-sm font-extrabold text-white tracking-tight flex items-center gap-2">
-              Kalpana Software Solutions
+              Kalpanaaa Software Solutions
               <span className="text-[10px] font-mono bg-blue-500/15 text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
                 Internal Workspace
               </span>
@@ -105,13 +105,13 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
               <div className="lg:col-span-7 space-y-5">
                 <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 font-semibold">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  Kalpana Team Platform
+                  Kalpanaaa Team Platform
                 </div>
 
                 <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight leading-tight">
                   Welcome back, <br />
                   <span className="bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-                    {activeEmployee?.fullName || 'Kalpana Software Solutions Team'}
+                    {activeEmployee?.fullName || 'Kalpanaaa Software Solutions Team'}
                   </span>
                 </h1>
 
@@ -122,7 +122,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
                 {/* Motivational Quote Banner */}
                 <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-slate-300 text-xs italic flex items-center gap-3">
                   <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>“Every great product starts with people who care. Every contribution moves Kalpana forward.”</span>
+                  <span>“Every great product starts with people who care. Every contribution moves Kalpanaaa forward.”</span>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -188,7 +188,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
               Our Workspace Capabilities
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
-              Everything the Kalpana Software Solutions team needs to check in, review team records, and generate verified documents.
+              Everything the Kalpanaaa Software Solutions team needs to check in, review team records, and generate verified documents.
             </p>
           </div>
 
@@ -232,9 +232,9 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <Clock className="w-5 h-5 text-blue-400" />
-                  Today at Kalpana
+                  Today at Kalpanaaa
                 </h2>
-                <p className="text-xs text-slate-400 mt-1">Live daily attendance activity for Kalpana Software Solutions</p>
+                <p className="text-xs text-slate-400 mt-1">Live daily attendance activity for Kalpanaaa Software Solutions</p>
               </div>
               <span className="text-xs font-mono px-3 py-1 bg-slate-950 text-slate-300 rounded-lg border border-slate-800">
                 {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
@@ -266,7 +266,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
         <section className="px-6 lg:px-12 max-w-7xl mx-auto space-y-6">
           <div className="text-center space-y-2">
             <h2 className="text-2xl sm:text-3xl font-extrabold text-white">
-              The People Behind Kalpana
+              The People Behind Kalpanaaa
             </h2>
             <p className="text-xs sm:text-sm text-slate-400">
               Our engineering, design, and operations talent driving innovation every day.
@@ -332,7 +332,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
               How We Work Together
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
-              Our shared engineering focus and workplace principles at Kalpana Software Solutions.
+              Our shared engineering focus and workplace principles at Kalpanaaa Software Solutions.
             </p>
           </div>
 
@@ -361,7 +361,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
         {/* SECTION 07 — CLOSING MESSAGE */}
         <section className="px-6 lg:px-12 max-w-5xl mx-auto text-center space-y-4 pt-6">
           <div className="p-10 rounded-3xl bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 space-y-4">
-            <h2 className="text-3xl sm:text-4xl font-black text-white">We are Kalpana.</h2>
+            <h2 className="text-3xl sm:text-4xl font-black text-white">We are Kalpanaaa.</h2>
             <p className="text-slate-400 text-xs sm:text-sm max-w-xl mx-auto leading-relaxed">
               Building software, learning continuously, and moving forward together as one unified team.
             </p>
@@ -370,7 +370,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
                 onClick={() => onGetStarted('signin')}
                 className="px-8 py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-blue-900/50 transition-all cursor-pointer inline-flex items-center gap-2"
               >
-                <span>Enter Kalpana Workspace</span>
+                <span>Enter Kalpanaaa Workspace</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -381,7 +381,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
 
       {/* Footer */}
       <footer className="relative z-10 py-6 px-6 lg:px-12 border-t border-slate-800/80 text-center text-xs text-slate-500 bg-slate-950">
-        <p>© {new Date().getFullYear()} Kalpana Software Solutions. Private Internal Employee Workspace.</p>
+        <p>© {new Date().getFullYear()} Kalpanaaa Software Solutions. Private Internal Employee Workspace.</p>
       </footer>
 
     </div>

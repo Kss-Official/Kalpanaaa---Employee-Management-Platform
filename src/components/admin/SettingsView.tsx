@@ -245,7 +245,7 @@ export const SettingsView: React.FC = () => {
                   name="officeName"
                   value={formState.officeName}
                   onChange={handleChange}
-                  placeholder="e.g. Kalpana Software Solutions — Main Office"
+                  placeholder="e.g. Kalpanaaa Software Solutions — Main Office"
                   required
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl font-bold text-white focus:outline-none focus:border-blue-500"
                 />
@@ -288,6 +288,18 @@ export const SettingsView: React.FC = () => {
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl font-semibold text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Office Static IP (Optional)</label>
+                <input
+                  type="text"
+                  name="officeStaticIp"
+                  value={formState.officeStaticIp || ''}
+                  onChange={handleChange}
+                  placeholder="e.g. 192.168.1.100"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl font-mono text-white focus:outline-none focus:border-blue-500 text-sm"
+                />
+              </div>
             </div>
 
             {/* Interactive Map Preview with Draggable Marker */}
@@ -296,7 +308,7 @@ export const SettingsView: React.FC = () => {
                 latitude={Number(formState.officeLatitude) || 17.385044}
                 longitude={Number(formState.officeLongitude) || 78.486671}
                 radiusMeters={Number(formState.allowedRadiusMeters) || 100}
-                officeName={formState.officeName || 'Kalpana Software Solutions — Main Office'}
+                officeName={formState.officeName || 'Kalpanaaa Software Solutions — Main Office'}
                 onChangeLocation={(lat, lon) => {
                   setFormState(prev => ({
                     ...prev,

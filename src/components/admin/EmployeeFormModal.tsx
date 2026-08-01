@@ -18,7 +18,13 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
   // Form State
   const [formData, setFormData] = useState({
-    employeeId: employeeToEdit?.employeeId || `EMP${String(employees.length + 1).padStart(3, '0')}`,
+    employeeId: employeeToEdit?.employeeId || (() => {
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const seq = String(employees.length + 1).padStart(3, '0');
+      return `KSS${yy}${mm}${seq}`;
+    })(),
     fullName: employeeToEdit?.fullName || '',
     email: employeeToEdit?.email || '',
     phone: employeeToEdit?.phone || '',
@@ -40,20 +46,44 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     emergencyContact: employeeToEdit?.emergencyContact || '+91 98765 00000',
     emergencyRelationship: employeeToEdit?.emergencyRelationship || 'Parent',
     role: employeeToEdit?.role || ('EMPLOYEE' as UserRole),
+    resumeUrl: employeeToEdit?.resumeUrl || '',
+    approvedWfhDates: employeeToEdit?.approvedWfhDates || [],
   });
 
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    if (e.target.name === 'approvedWfhDates') {
+      const dates = e.target.value.split(',').map(d => d.trim()).filter(d => d);
+      setFormData(prev => ({ ...prev, approvedWfhDates: dates }));
+    } else {
+      setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, fieldName: 'profilePhotoUrl' | 'resumeUrl') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        setFormData(prev => ({ ...prev, [fieldName]: event.target!.result as string }));
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
-    if (!formData.fullName.trim() || !formData.email.trim() || !formData.employeeId.trim()) {
-      setErrorMsg('Please fill in all mandatory fields (Name, Email, Employee ID).');
+    if (!formData.fullName.trim() || !formData.email.trim() || !formData.employeeId.trim() || !formData.phone.trim() || !formData.profilePhotoUrl || !formData.resumeUrl) {
+      setErrorMsg('Please fill in all mandatory fields, including Profile Photo and Resume.');
+      return;
+    }
+
+    if (!formData.email.trim().toLowerCase().endsWith('@kalpanaaasoftware.com')) {
+      setErrorMsg('All employee emails strictly must end with @kalpanaaasoftware.com');
       return;
     }
 
@@ -143,23 +173,25 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Phone Number</label>
+                <label className="block text-slate-300 font-semibold mb-1">Phone Number *</label>
                 <input
                   type="text"
                   name="phone"
                   value={formData.phone}
                   onChange={handleChange}
+                  required
                   placeholder="+91 98765 43210"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Gender</label>
+                <label className="block text-slate-300 font-semibold mb-1">Gender *</label>
                 <select
                   name="gender"
                   value={formData.gender}
                   onChange={handleChange}
+                  required
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="Male">Male</option>
@@ -169,12 +201,39 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Date of Birth</label>
+                <label className="block text-slate-300 font-semibold mb-1">Date of Birth *</label>
                 <input
                   type="date"
                   name="dateOfBirth"
                   value={formData.dateOfBirth}
                   onChange={handleChange}
+                  required
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Profile Image URL *</label>
+                <input
+                  type="url"
+                  name="profilePhotoUrl"
+                  value={formData.profilePhotoUrl}
+                  onChange={handleChange}
+                  required
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Resume URL (PDF) *</label>
+                <input
+                  type="url"
+                  name="resumeUrl"
+                  value={formData.resumeUrl}
+                  onChange={handleChange}
+                  required
+                  placeholder="https://drive.google.com/..."
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -196,12 +255,11 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   onChange={handleChange}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl font-semibold text-white focus:outline-none focus:border-blue-500"
                 >
-                  <option value="Engineering">Engineering</option>
-                  <option value="Human Resources">Human Resources</option>
-                  <option value="Finance">Finance</option>
-                  <option value="Operations">Operations</option>
-                  <option value="Marketing">Marketing</option>
-                  <option value="Product">Product</option>
+                  <option value="UI/UX Department">UI/UX Department</option>
+                  <option value="Software Engineer">Software Engineer</option>
+                  <option value="HR Department">HR Department</option>
+                  <option value="Frontend Developer">Frontend Developer</option>
+                  <option value="Backend Developer">Backend Developer</option>
                 </select>
               </div>
 
@@ -308,6 +366,18 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={formData.shift}
                   onChange={handleChange}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              
+              <div className="sm:col-span-2">
+                <label className="block text-slate-300 font-semibold mb-1">Approved WFH Dates (YYYY-MM-DD)</label>
+                <input
+                  type="text"
+                  name="approvedWfhDates"
+                  value={(formData.approvedWfhDates || []).join(', ')}
+                  onChange={handleChange}
+                  placeholder="e.g. 2026-08-01, 2026-08-02"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono text-xs"
                 />
               </div>
             </div>

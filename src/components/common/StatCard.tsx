@@ -22,40 +22,44 @@ export const StatCard: React.FC<StatCardProps> = ({
   color = 'blue'
 }) => {
   const colorMap = {
-    blue: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
-    emerald: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-    amber: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
-    rose: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
-    purple: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
+    blue: 'text-blue-400',
+    emerald: 'text-emerald-400',
+    amber: 'text-amber-400',
+    rose: 'text-rose-400',
+    purple: 'text-purple-400',
   };
 
-  const style = colorMap[color];
+  const textColor = colorMap[color];
 
   return (
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 shadow-lg transition-all hover:border-slate-700">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{title}</span>
-        <div className={`p-2.5 rounded-xl ${style.bg} ${style.text} ${style.border} border`}>
-          <Icon className="w-5 h-5" />
+    <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 shadow-sm transition-all hover:border-slate-700 hover:bg-slate-900 group">
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <span className="text-[10px] font-black tracking-widest text-slate-500 uppercase block mb-1">{title}</span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-extrabold text-white tracking-tight">{value}</span>
+          </div>
+        </div>
+        <div className={`p-2 rounded-xl bg-slate-950/50 border border-slate-800/50 ${textColor} group-hover:scale-105 transition-transform`}>
+          <Icon className="w-4 h-4" strokeWidth={2.5} />
         </div>
       </div>
 
-      <div className="flex items-baseline justify-between">
-        <div className="text-2xl font-bold text-white tracking-tight">{value}</div>
+      <div className="flex items-center justify-between pt-3 border-t border-slate-800/60 mt-2">
+        {subtext ? (
+          <p className="text-[10px] text-slate-400 font-medium">{subtext}</p>
+        ) : <div />}
+        
         {trend && (
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${
-            trend.type === 'up' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-            trend.type === 'down' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
-            'bg-slate-800 text-slate-300 border border-slate-700'
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
+            trend.type === 'up' ? 'text-emerald-400 bg-emerald-500/10' :
+            trend.type === 'down' ? 'text-rose-400 bg-rose-500/10' :
+            'text-slate-400 bg-slate-800/50'
           }`}>
             {trend.text}
           </span>
         )}
       </div>
-
-      {subtext && (
-        <p className="text-xs text-slate-400 mt-1 font-medium">{subtext}</p>
-      )}
     </div>
   );
 };

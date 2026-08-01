@@ -25,16 +25,18 @@ export function calculateGpsDistanceMeters(
 /**
  * Generate secure attendance payload for QR Code
  */
-export function generateEmployeeQrToken(employee: Employee, expiryMinutes: number = 10): string {
-  const timestamp = Date.now();
-  const expiresAt = timestamp + expiryMinutes * 60 * 1000;
+export function generateEmployeeQrToken(employee: Employee, _expiryMinutes: number = 10): string {
+  // TOTP interval of 10 seconds
+  const bucket = Math.floor(Date.now() / 10000);
+  
+  // Combine employee unique token with bucket to create a rotating hash
+  const totpData = `${employee.id}|${employee.qrToken}|${bucket}`;
+  const encoded = btoa(totpData);
+  
   const rawPayload = {
-    empId: employee.employeeId,
+    totp: encoded,
     empDbId: employee.id,
-    token: employee.qrToken,
-    ts: timestamp,
-    exp: expiresAt,
-    ver: '2026.1'
+    ver: '2026.1_TOTP'
   };
   return JSON.stringify(rawPayload);
 }
@@ -53,18 +55,27 @@ export interface QrParseResult {
 export function parseAndValidateQrCode(qrText: string): QrParseResult {
   try {
     const data = JSON.parse(qrText);
-    if (!data.empId || !data.token) {
+    if (!data.totp || !data.empDbId) {
+      // Fallback for old tokens
+      if (data.empId && data.token) {
+        if (data.exp && Date.now() > data.exp) return { valid: false, expired: true, error: 'Expired' };
+        return { valid: true, empId: data.empId, empDbId: data.empDbId };
+      }
       return { valid: false, error: 'Invalid QR format' };
     }
-    if (data.exp && Date.now() > data.exp) {
-      return { valid: false, expired: true, error: 'QR Code has expired. Please regenerate.' };
+
+    const decoded = atob(data.totp);
+    const [empId, token, bucketStr] = decoded.split('|');
+    const bucket = parseInt(bucketStr, 10);
+    const currentBucket = Math.floor(Date.now() / 10000);
+    
+    // Allow +/- 1 bucket (10 seconds) for clock drift
+    if (Math.abs(currentBucket - bucket) > 1) {
+      return { valid: false, expired: true, error: 'SECURITY ALERT: QR Code has expired. Prevented possible screenshot replay attack.' };
     }
-    return {
-      valid: true,
-      empId: data.empId,
-      empDbId: data.empDbId
-    };
-  } catch {
+
+    return { valid: true, empDbId: data.empDbId, empId: empId, _token: token } as any;
+  } catch (e) {
     // If simple text token match
     if (qrText.startsWith('EMP') || qrText.startsWith('QR-TOKEN-')) {
       return { valid: true, empId: qrText };
@@ -90,7 +101,8 @@ export function evaluateAttendanceScan(
   todayRecord: AttendanceRecord | undefined,
   settings: CompanySettings,
   userLat?: number,
-  userLon?: number
+  userLon?: number,
+  isApprovedWfh?: boolean
 ): CheckInEvaluation {
   // 1. Check GPS Location if required
   let locationVerified = true;
@@ -123,7 +135,7 @@ export function evaluateAttendanceScan(
       status = 'Late';
     }
 
-    if (settings.gpsRequired && !locationVerified) {
+    if (settings.gpsRequired && !locationVerified && !isApprovedWfh) {
       return {
         allowed: false,
         action: 'CHECK_IN',

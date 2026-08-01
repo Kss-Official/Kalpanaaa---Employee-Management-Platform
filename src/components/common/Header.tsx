@@ -18,7 +18,6 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
-  onOpenScanner, 
   onToggleMobileSidebar, 
   isMobileSidebarOpen,
 }) => {
@@ -97,17 +96,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="font-bold text-white">{timeStr}</span>
         </div>
 
-        {/* QR Kiosk Scanner */}
-        {onOpenScanner && (
-          <button
-            onClick={onOpenScanner}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-lg transition-all cursor-pointer"
-            title="Attendance Terminal Kiosk"
-          >
-            <QrCode className="w-4 h-4 text-emerald-400" />
-            <span className="hidden lg:inline">Terminal</span>
-          </button>
-        )}
 
         {/* Role badge — hidden on small screens */}
         <div className="hidden sm:flex items-center gap-1 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 text-xs">

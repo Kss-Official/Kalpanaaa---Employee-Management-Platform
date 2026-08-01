@@ -113,7 +113,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, autoCloseD
           />
           <img
             src={kalpanaLogo}
-            alt="Kalpana Software Solutions Pvt Ltd"
+            alt="Kalpanaaa Software Solutions Pvt Ltd"
             className="relative w-[260px] sm:w-[320px] md:w-[380px] max-w-[78vw] max-h-[55vh] object-contain rounded-3xl"
             style={{
               filter: 'drop-shadow(0 0 36px rgba(59,130,246,0.5)) drop-shadow(0 0 70px rgba(59,130,246,0.2))',

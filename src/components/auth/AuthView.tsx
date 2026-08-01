@@ -122,11 +122,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
       <header className="px-6 py-4 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-blue-600/30 shrink-0 border border-slate-700/60">
-            <img src={kalpanaLogo} alt="Kalpana Logo" className="w-full h-full object-cover" />
+            <img src={kalpanaLogo} alt="Kalpanaaa Logo" className="w-full h-full object-cover" />
           </div>
           <div>
             <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-              Kalpana Software Solutions
+              Kalpanaaa Software Solutions
               <span className="text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider">
                 Internal Workspace
               </span>
@@ -226,7 +226,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                         required
                         value={loginEmail}
                         onChange={e => setLoginEmail(e.target.value)}
-                        placeholder="employee@kalpanasoftware.com"
+                        placeholder="employee@kalpanaaasoftware.com"
                         className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-all"
                       />
                     </div>
@@ -287,9 +287,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => { setLoginEmail('akshith@kalpanasoftware.com'); setLoginPassword(''); setFeedback(null); }}
+                    onClick={() => { setLoginEmail('akshit@kalpanaaasoftware.com'); setLoginPassword(''); setFeedback(null); }}
                     className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all cursor-pointer ${
-                      loginEmail.includes('akshith')
+                      loginEmail.includes('akshit')
                         ? 'bg-purple-600/20 border-purple-500/60 shadow-lg shadow-purple-900/30'
                         : 'bg-slate-950 border-slate-800 hover:border-purple-600/50 hover:bg-purple-950/20'
                     }`}
@@ -308,7 +308,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
 
                   <button
                     type="button"
-                    onClick={() => { setLoginEmail('gaurav@kalpanasoftware.com'); setLoginPassword(''); setFeedback(null); }}
+                    onClick={() => { setLoginEmail('gaurav@kalpanaaasoftware.com'); setLoginPassword(''); setFeedback(null); }}
                     className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all cursor-pointer ${
                       loginEmail.includes('gaurav')
                         ? 'bg-blue-600/20 border-blue-500/60 shadow-lg shadow-blue-900/30'
@@ -344,7 +344,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                         required
                         value={loginEmail}
                         onChange={e => setLoginEmail(e.target.value)}
-                        placeholder="akshith@kalpanasoftware.com"
+                        placeholder="akshit@kalpanaaasoftware.com"
                         className="w-full bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-all"
                       />
                     </div>
@@ -390,8 +390,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
             {activeTab === 'signup' && (
               <form onSubmit={handleSignUp} className="space-y-4">
                 <div>
-                  <h2 className="text-xl font-bold text-white tracking-tight">Create your Kalpana account</h2>
-                  <p className="text-xs text-slate-400 mt-1">Requires official Kalpana Software Solutions team membership verification.</p>
+                  <h2 className="text-xl font-bold text-white tracking-tight">Create your Kalpanaaa account</h2>
+                  <p className="text-xs text-slate-400 mt-1">Requires official Kalpanaaa Software Solutions team membership verification.</p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
@@ -408,13 +408,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">Kalpana Email Address *</label>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Kalpanaaa Email Address *</label>
                     <input
                       type="email"
                       required
                       value={signUpEmail}
                       onChange={e => setSignUpEmail(e.target.value)}
-                      placeholder="sarah@kalpanasoftware.com"
+                      placeholder="sarah@kalpanaaasoftware.com"
                       className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none"
                     />
                   </div>

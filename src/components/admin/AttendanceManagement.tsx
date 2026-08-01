@@ -39,9 +39,9 @@ export const AttendanceManagement: React.FC = () => {
 
   const filteredRecords = attendance.filter(rec => {
     const matchesSearch = 
-      rec.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.employeeCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rec.department.toLowerCase().includes(searchTerm.toLowerCase());
+      (rec.employeeName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (rec.employeeCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (rec.department || '').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesDept = deptFilter === 'ALL' || rec.department === deptFilter;
     const matchesStatus = statusFilter === 'ALL' || rec.status === statusFilter;

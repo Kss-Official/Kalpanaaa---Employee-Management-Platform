@@ -13,6 +13,20 @@ export interface BreakEntry {
   durationMinutes: number;
 }
 
+export interface LeaveRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  type: 'Leave' | 'WFH';
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  requestDate: string;
+  reviewedBy?: string;
+  reviewNotes?: string;
+}
+
 export type AttendanceMethod = 'QR Code' | 'Manual Admin' | 'Self Portal' | 'Biometric';
 
 export interface Employee {
@@ -25,6 +39,7 @@ export interface Employee {
   gender: 'Male' | 'Female' | 'Other' | 'Prefer not to say';
   dateOfBirth: string;
   profilePhotoUrl?: string;
+  resumeUrl?: string;
 
   // Employment
   department: string;
@@ -51,6 +66,11 @@ export interface Employee {
   // System
   role: UserRole;
   qrToken: string;
+  approvedWfhDates?: string[]; // YYYY-MM-DD format
+  currentSessionId?: string; // For preventing concurrent logins
+  sessionFingerprint?: string; // For preventing session token theft / device spoofing
+  failedLoginCount?: number;
+  lockoutUntil?: number; // timestamp
   createdAt: string;
   updatedAt: string;
 }
@@ -124,6 +144,7 @@ export interface CompanySettings {
   officeName: string;
   officeLatitude: number;
   officeLongitude: number;
+  officeStaticIp?: string; // For strict Wi-Fi check-in
   gpsRequired: boolean;
   allowedRadiusMeters: number;
   workStartTime: string; // "09:00"
