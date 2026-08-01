@@ -18,7 +18,7 @@ export const EmployeeIdCardModal: React.FC<EmployeeIdCardModalProps> = ({ employ
 
   useEffect(() => {
     // Generate verification URL for QR Code (engraved back)
-    const websiteUrl = `https://kalpanaaasoftwaresolutions.in/verify?empId=${encodeURIComponent(employee.employeeId)}`;
+    const websiteUrl = 'https://www.kalpanaaasoftwaresolutions.in/';
     
     QRCode.toDataURL(websiteUrl, { 
       width: 400, 
@@ -30,7 +30,6 @@ export const EmployeeIdCardModal: React.FC<EmployeeIdCardModalProps> = ({ employ
     });
   }, []);
 
-  const verificationUrl = `https://kalpanaaasoftwaresolutions.in/verify?empId=${encodeURIComponent(employee.employeeId)}`;
 
   const handlePrintCard = () => {
     window.print();
@@ -123,15 +122,13 @@ export const EmployeeIdCardModal: React.FC<EmployeeIdCardModalProps> = ({ employ
                 <p className="text-white font-bold text-xs tracking-widest uppercase mt-3">{employee.designation}</p>
               </div>
 
-              {/* Verification QR Code (Front) */}
+              {/* Verification Barcode (Front) */}
               <div className="relative z-10 mt-auto mb-6 px-8">
                 <div className="bg-white p-2 rounded-xl inline-block shadow-lg">
-                  {qrUrl ? (
-                    <img src={qrUrl} alt="Scan to Verify" className="w-20 h-20 object-contain" />
-                  ) : (
-                    <div className="w-20 h-20 bg-slate-100 animate-pulse rounded" />
-                  )}
-                  <div className="text-[7px] text-center text-slate-800 font-bold mt-1 tracking-widest">{employee.employeeId} · SCAN TO VERIFY</div>
+                  <div className="flex justify-center overflow-hidden">
+                    <Barcode value={employee.employeeId} width={1.5} height={35} displayValue={false} margin={0} background="#ffffff" />
+                  </div>
+                  <div className="text-[7px] text-center text-slate-800 font-bold mt-1 tracking-widest">{employee.employeeId} · VERIFY</div>
                 </div>
               </div>
             </div>
