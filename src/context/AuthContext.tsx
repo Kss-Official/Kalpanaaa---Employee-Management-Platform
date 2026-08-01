@@ -730,7 +730,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      const empCode = `EMP-${Math.floor(1000 + Math.random() * 9000)}`;
+      // Generate sequential employee ID based on current count
+      // Assuming initial demo data has 3 employees, this will start from KSS2407004 and continue sequentially
+      const nextSequence = employees.length + 1;
+      const empCode = `KSS2407${nextSequence.toString().padStart(3, '0')}`;
       const newEmp: Employee = {
         id: uid,
         employeeId: empCode,
