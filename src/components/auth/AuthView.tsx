@@ -126,12 +126,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
           </div>
           <div>
             <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-              Kalpanaaa Software Solutions
-              <span className="text-[10px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                Internal Workspace
-              </span>
+              <span className="hidden sm:inline">Kalpanaaa Software Solutions</span>
+              <span className="sm:hidden">KSS</span>
             </h1>
-            <p className="text-xs text-slate-400 font-medium">Private Employee & Operations Digital Home</p>
+            <p className="text-xs text-slate-400 font-medium hidden sm:block">Private Employee & Operations Digital Home</p>
           </div>
         </div>
 

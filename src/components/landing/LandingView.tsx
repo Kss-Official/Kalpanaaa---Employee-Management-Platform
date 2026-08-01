@@ -58,12 +58,10 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
           </div>
           <div>
             <span className="text-sm font-extrabold text-white tracking-tight flex items-center gap-2">
-              Kalpanaaa Software Solutions
-              <span className="text-[10px] font-mono bg-blue-500/15 text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                Internal Workspace
-              </span>
+              <span className="hidden sm:inline">Kalpanaaa Software Solutions</span>
+              <span className="sm:hidden">KSS</span>
             </span>
-            <p className="text-[10px] text-slate-400 font-medium">Engineering & Operations Digital Home</p>
+            <p className="text-[10px] text-slate-400 font-medium hidden sm:block">Engineering & Operations Digital Home</p>
           </div>
         </div>
 
@@ -74,7 +72,6 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
               className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-blue-300 border border-blue-800/60 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
               title="View Company Splash Screen"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
               <span className="hidden sm:inline">Company Splash</span>
             </button>
           )}
@@ -121,7 +118,6 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
 
                 {/* Motivational Quote Banner */}
                 <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-slate-300 text-xs italic flex items-center gap-3">
-                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>“Every great product starts with people who care. Every contribution moves Kalpanaaa forward.”</span>
                 </div>
 

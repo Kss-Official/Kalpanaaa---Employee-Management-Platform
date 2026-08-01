@@ -80,7 +80,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="min-w-0">
             <h1 className="text-xs sm:text-sm font-extrabold text-white leading-tight truncate max-w-[130px] sm:max-w-[200px] md:max-w-none">
-              {settings.companyName}
+              <span className="hidden sm:inline">{settings.companyName}</span>
+              <span className="sm:hidden">KSS</span>
             </h1>
             <p className="text-[10px] text-slate-500 font-medium hidden md:block truncate">{settings.officeName}</p>
           </div>
