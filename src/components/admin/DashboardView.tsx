@@ -122,13 +122,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
             New Employee
           </button>
 
-          <button
-            onClick={() => onNavigateTab('qr_kiosk')}
-            className="flex items-center gap-2 px-5 py-2.5 bg-slate-950/50 hover:bg-slate-800 border border-slate-700/50 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
-          >
-            <QrCode className="w-4 h-4 text-emerald-400" />
-            Scanner Kiosk
-          </button>
 
           <button
             onClick={() => generateAttendanceReportPdf(todayRecords, settings, 'Daily Attendance Summary Report')}

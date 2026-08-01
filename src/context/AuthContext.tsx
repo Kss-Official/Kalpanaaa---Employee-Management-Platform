@@ -299,21 +299,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'attendance');
         });
 
-        // Subscribe to audit logs
-        unsubLogs = onSnapshot(collection(db, 'auditLogs'), (snapshot) => {
-          if (!snapshot.empty) {
-            const fetched: AuditLog[] = [];
-            snapshot.forEach(docSnap => {
-              fetched.push({ id: docSnap.id, ...docSnap.data() } as AuditLog);
-            });
-            if (fetched.length > 0) {
-              fetched.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-              setAuditLogs(fetched);
-            }
-          }
-        }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, 'auditLogs');
-        });
+        // Audit logs are now subscribed conditionally in a separate effect
 
         // Subscribe to company settings
         unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
@@ -369,6 +355,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubWorkZone();
     };
   }, []);
+
+  // Conditionally subscribe to audit logs only for admins
+  useEffect(() => {
+    let unsubLogs = () => {};
+    if (isAuthenticated && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) {
+      unsubLogs = onSnapshot(collection(db, 'auditLogs'), (snapshot) => {
+        if (!snapshot.empty) {
+          const fetched: AuditLog[] = [];
+          snapshot.forEach(docSnap => {
+            fetched.push({ id: docSnap.id, ...docSnap.data() } as AuditLog);
+          });
+          if (fetched.length > 0) {
+            fetched.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setAuditLogs(fetched);
+          }
+        }
+      }, (error) => {
+        console.warn('Audit logs permission denied or offline');
+      });
+    } else {
+      setAuditLogs([]);
+    }
+    return () => unsubLogs();
+  }, [isAuthenticated, role]);
 
   // Restore saved session on boot
   useEffect(() => {
