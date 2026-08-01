@@ -4,7 +4,14 @@ export type EmploymentType = 'Full-Time' | 'Part-Time' | 'Contract' | 'Intern';
 
 export type EmployeeStatus = 'Active' | 'On Leave' | 'Terminated' | 'Suspended';
 
-export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Half Day' | 'On Leave' | 'Holiday';
+export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Half Day' | 'On Leave' | 'Holiday' | 'Work From Home';
+
+export interface BreakEntry {
+  type: 'Tea Break' | 'Lunch Break';
+  startAt: string;   // ISO timestamp
+  endAt: string | null; // null = break is ongoing
+  durationMinutes: number;
+}
 
 export type AttendanceMethod = 'QR Code' | 'Manual Admin' | 'Self Portal' | 'Biometric';
 
@@ -84,6 +91,12 @@ export interface AttendanceRecord {
   longitude?: number;
   deviceInfo?: string;
   notes?: string;
+
+  // Break tracking
+  breaks?: BreakEntry[];
+  totalBreakMinutes?: number; // sum of all completed breaks
+  isWfh?: boolean; // work from home flag
+
   createdAt: string;
   updatedAt: string;
 }
@@ -117,6 +130,9 @@ export interface CompanySettings {
   workEndTime: string; // "18:00"
   gracePeriodMinutes: number; // 15
   lateThresholdMinutes: number; // 30
+  teaBreakDurationMinutes: number; // 10
+  lunchBreakDurationMinutes: number; // 30
+  wfhEnabled: boolean;
   
   // QR settings
   qrTokenLifetimeMinutes: number;

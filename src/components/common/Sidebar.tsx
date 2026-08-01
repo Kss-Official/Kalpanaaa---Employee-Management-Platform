@@ -61,7 +61,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'emp_dashboard', label: 'My Workspace', icon: LayoutDashboard },
     { id: 'emp_attendance', label: 'My Attendance', icon: UserCheck },
     { id: 'emp_qr', label: 'Pass QR & ID', icon: CreditCard },
-    { id: 'emp_profile', label: 'My Profile', icon: Users },
+    { id: 'emp_directory', label: 'Team Directory', icon: Users },
+    { id: 'emp_profile', label: 'My Profile', icon: UserCheck },
   ];
 
   const navItems = isExecutive ? executiveNavItems : isHr ? hrNavItems : employeeNavItems;

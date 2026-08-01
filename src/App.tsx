@@ -39,6 +39,14 @@ const MainLayout: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [idCardEmployee, setIdCardEmployee] = useState<Employee | null>(null);
 
+  // Automatically transition to the app view when authentication succeeds
+  useEffect(() => {
+    if (isAuthenticated && activeEmployee) {
+      setViewMode('app');
+      setShowSplash(false); // Immediately dismiss splash on successful login
+    }
+  }, [isAuthenticated, activeEmployee]);
+
   // Strict role-based tab routing
   useEffect(() => {
     if (role === 'SUPER_ADMIN') {
@@ -120,7 +128,7 @@ const MainLayout: React.FC = () => {
               </div>
               <h2 className="text-xl font-black text-white">Executive Admin Access Restricted</h2>
               <p className="text-xs text-slate-300 leading-relaxed max-w-lg mx-auto">
-                The Workspace Admin Dashboard & Management System is strictly restricted to company <strong className="text-white font-black">CEO (Akshith)</strong> and <strong className="text-white font-black">CTO (Gaurav)</strong> using official executive corporate credentials at Kalpana Software Solutions.
+                The Workspace Admin Dashboard & Management System is strictly restricted to company <strong className="text-white font-black">CEO (Akshit)</strong> and <strong className="text-white font-black">CTO (Gaurav)</strong> using official executive corporate credentials at Kalpanaaa Software Solutions.
               </p>
 
               <div className="flex flex-wrap items-center justify-center gap-3 pt-2">

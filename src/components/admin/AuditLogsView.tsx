@@ -6,7 +6,7 @@ export const AuditLogsView: React.FC = () => {
   const { auditLogs } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
 
-  const filteredLogs = auditLogs.filter(log => 
+  const filteredLogs = auditLogs.filter(log =>
     log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
     log.actorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     log.target.toLowerCase().includes(searchTerm.toLowerCase()) ||

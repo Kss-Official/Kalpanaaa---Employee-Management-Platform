@@ -32,7 +32,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   onOpenEditModal,
   onOpenIdCardModal
 }) => {
-  const { employees, deleteEmployee, regenerateQrToken } = useAuth();
+  const { employees, deleteEmployee, regenerateQrToken, role } = useAuth();
+  const isAdmin = role === 'SUPER_ADMIN' || role === 'HR_ADMIN';
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -73,13 +74,15 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={onOpenAddModal}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
-        >
-          <Plus className="w-4 h-4" />
-          Add New Employee
-        </button>
+        {isAdmin && (
+          <button
+            onClick={onOpenAddModal}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
+          >
+            <Plus className="w-4 h-4" />
+            Add New Employee
+          </button>
+        )}
       </div>
 
       {/* Filters Bar */}
@@ -215,20 +218,24 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => onOpenIdCardModal(emp)}
-                          className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                          title="Print / Export ID Badge Card"
-                        >
-                          <CreditCard className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => onOpenEditModal(emp)}
-                          className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                          title="Edit Employee Data"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
+                        {isAdmin && (
+                          <>
+                            <button
+                              onClick={() => onOpenIdCardModal(emp)}
+                              className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                              title="Print / Export ID Badge Card"
+                            >
+                              <CreditCard className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => onOpenEditModal(emp)}
+                              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                              title="Edit Employee Data"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -283,22 +290,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
               <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
                 <button
                   onClick={() => onSelectEmployee(emp)}
-                  className="flex-1 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-200 text-xs font-semibold rounded-xl border border-slate-800 transition-colors cursor-pointer text-center"
+                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer text-center"
                 >
                   View Profile
                 </button>
-                <button
-                  onClick={() => onOpenIdCardModal(emp)}
-                  className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl transition-colors cursor-pointer border border-emerald-500/20"
-                  title="ID Card"
-                >
-                  <CreditCard className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => onOpenEditModal(emp)}
-                  className="p-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 transition-colors cursor-pointer"
-                  title="Edit"
-                >
                   <Edit className="w-4 h-4" />
                 </button>
               </div>

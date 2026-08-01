@@ -1,13 +1,13 @@
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, DocumentTemplate } from '../types';
 
 export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
-  companyName: 'Kalpana Software Solutions',
+  companyName: 'Kalpanaaa Software Solutions',
   logoUrl: 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=120&auto=format&fit=crop&q=80',
   companyAddress: 'No. 14, Bhoganahalli, Sarjapur Road, Bengaluru, KA 560102',
   companyPhone: '+91 (040) 4821-9900',
   companyEmail: 'hr@kalpanasoftware.com',
   
-  officeName: 'Kalpana Main Office HQ',
+  officeName: 'Kalpanaaa Main Office HQ',
   officeLatitude: 13.0143043,
   officeLongitude: 77.6459944,
   gpsRequired: true,
@@ -16,12 +16,15 @@ export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
   workEndTime: '18:00',
   gracePeriodMinutes: 15,
   lateThresholdMinutes: 30,
+  teaBreakDurationMinutes: 10,
+  lunchBreakDurationMinutes: 30,
+  wfhEnabled: true,
   
   qrTokenLifetimeMinutes: 10,
   qrAttendanceEnabled: true,
   
   pdfHeaderTitle: 'CONFIDENTIAL WORKFORCE & ATTENDANCE STATEMENT',
-  authorizedSignatureName: 'Akshith',
+  authorizedSignatureName: 'Akshit',
   authorizedSignatureTitle: 'Chief Executive Officer (CEO)'
 };
 
@@ -31,9 +34,9 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: 'emp-001',
     employeeId: 'CEO001',
-    uid: 'uid-akshith-ceo-001',
-    fullName: 'Akshith',
-    email: 'akshith@kalpanasoftware.com',
+    uid: 'uid-akshit-ceo-001',
+    fullName: 'Akshit',
+    email: 'akshit@kalpanasoftware.com',
     phone: '+91 98765 00001',
     gender: 'Male',
     dateOfBirth: '1988-04-12',
@@ -43,10 +46,10 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     joiningDate: '2020-01-01',
     employmentType: 'Full-Time',
     reportingManager: 'Board of Directors',
-    workLocation: 'Kalpana Main Office HQ, Bengaluru',
+    workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
     status: 'Active',
     shift: 'General Shift (09:00 - 18:00)',
-    address: 'Executive Suite 01, Kalpana Towers',
+    address: 'Executive Suite 01, Kalpanaaa Towers',
     city: 'Hyderabad',
     state: 'Telangana',
     postalCode: '500081',
@@ -71,7 +74,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     designation: 'Chief Technology Officer (CTO)',
     joiningDate: '2020-01-15',
     employmentType: 'Full-Time',
-    reportingManager: 'Akshith (CEO)',
+    reportingManager: 'Akshit',
     workLocation: 'Kalpana Main Office HQ, Bengaluru',
     status: 'Active',
     shift: 'General Shift (09:00 - 18:00)',
@@ -216,7 +219,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     designation: 'Project Manager',
     joiningDate: '2023-05-10',
     employmentType: 'Full-Time',
-    reportingManager: 'Akshith (CEO)',
+    reportingManager: 'Akshit',
     workLocation: 'AGPS Nagar HQ Campus',
     status: 'Active',
     shift: 'General Shift (09:00 - 18:00)',

@@ -30,11 +30,18 @@ import {
   Zap,
   Save,
   RotateCcw,
-  Printer
+  Printer,
+  Coffee,
+  UtensilsCrossed,
+  Home,
+  Timer,
+  PlayCircle,
+  StopCircle
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { generateEmployeeQrToken, calculateGpsDistanceMeters } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
+import { BreakEntry } from '../../types';
 
 interface EmployeePortalProps {
   activeTab: string;
@@ -52,7 +59,7 @@ const AVATAR_PRESETS = [
 ];
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
-  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone } = useAuth();
+  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord } = useAuth();
 
   // Time-aware greeting
   const getGreeting = () => {
@@ -92,6 +99,31 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const todayStr = new Date().toISOString().split('T')[0];
   const todayRecord = attendance.find(a => (a.employeeId === activeEmployee?.id || a.employeeCode === activeEmployee?.employeeId) && a.date === todayStr);
   const empHistory = attendance.filter(a => a.employeeId === activeEmployee?.id || a.employeeCode === activeEmployee?.employeeId);
+
+  // Break & WFH state
+  const [activeBreak, setActiveBreak] = useState<{ type: 'Tea Break' | 'Lunch Break'; startAt: string } | null>(null);
+  const [breakElapsedSec, setBreakElapsedSec] = useState(0);
+  const [isWfh, setIsWfh] = useState(false);
+
+  // Sync WFH flag from today's record
+  useEffect(() => {
+    setIsWfh(todayRecord?.isWfh ?? false);
+  }, [todayRecord?.id]);
+
+  // Break live timer ticker
+  useEffect(() => {
+    if (!activeBreak) { setBreakElapsedSec(0); return; }
+    const interval = setInterval(() => {
+      setBreakElapsedSec(Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeBreak]);
+
+  const formatBreakTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}m ${s.toString().padStart(2, '0')}s`;
+  };
 
   // Sync profile state when active employee changes
   useEffect(() => {
@@ -163,13 +195,56 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const handleSelfCheckIn = () => {
     setActionFeedback(null);
     const res = recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
+    if (res.success && res.record && isWfh) {
+      updateAttendanceRecord(res.record.id, { isWfh: true, status: 'Work From Home', notes: 'Self check-in — Work From Home' });
+    }
     setActionFeedback({ success: res.success, message: res.message });
   };
 
   const handleSelfCheckOut = () => {
     setActionFeedback(null);
+    // Auto-end any open break before checkout
+    if (activeBreak && todayRecord) {
+      const durationMinutes = Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 60000);
+      const completedBreak: BreakEntry = { type: activeBreak.type, startAt: activeBreak.startAt, endAt: new Date().toISOString(), durationMinutes };
+      const existingBreaks = todayRecord.breaks || [];
+      updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, completedBreak], totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
+      setActiveBreak(null);
+    }
     const res = recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     setActionFeedback({ success: res.success, message: res.message });
+  };
+
+  const handleStartBreak = (type: 'Tea Break' | 'Lunch Break') => {
+    if (!todayRecord || activeBreak) return;
+    const startAt = new Date().toISOString();
+    setActiveBreak({ type, startAt });
+    setBreakElapsedSec(0);
+    setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ☕` });
+  };
+
+  const handleEndBreak = () => {
+    if (!activeBreak || !todayRecord) return;
+    const endAt = new Date().toISOString();
+    const durationMinutes = Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 60000);
+    const completedBreak: BreakEntry = { type: activeBreak.type, startAt: activeBreak.startAt, endAt, durationMinutes };
+    const existingBreaks = todayRecord.breaks || [];
+    updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, completedBreak], totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
+    setActiveBreak(null);
+    setActionFeedback({ success: true, message: `${completedBreak.type} ended — ${durationMinutes}m recorded. Welcome back! 👋` });
+  };
+
+  const handleToggleWfh = () => {
+    const newVal = !isWfh;
+    setIsWfh(newVal);
+    if (todayRecord) {
+      updateAttendanceRecord(todayRecord.id, {
+        isWfh: newVal,
+        status: newVal ? 'Work From Home' : 'Present',
+        notes: newVal ? 'Employee marked as Work From Home' : 'Switched to office attendance'
+      });
+    }
+    setActionFeedback({ success: true, message: newVal ? '🏠 Work From Home mode activated for today.' : '🏢 Office attendance mode restored.' });
   };
 
   // Handle Photo File Upload
@@ -278,12 +353,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         <div className="bg-slate-950/80 p-5 rounded-2xl border border-slate-800 w-full md:w-auto text-center md:text-right space-y-3">
           <div className="text-xs text-slate-400 font-medium flex items-center justify-center md:justify-end gap-2">
             <span>Today's Status:</span>
-            <strong className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+            <strong className={`font-bold px-2 py-0.5 rounded-md border text-xs ${
+              todayRecord?.isWfh
+                ? 'text-sky-400 bg-sky-500/10 border-sky-500/20'
+                : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+            }`}>
               {todayRecord?.status || 'Not Checked In'}
+              {todayRecord?.isWfh && ' 🏠'}
             </strong>
           </div>
 
-          <div className="flex items-center justify-center md:justify-end gap-2">
+          <div className="flex items-center justify-center md:justify-end gap-2 flex-wrap">
             {!todayRecord?.checkInAt ? (
               <button
                 onClick={handleSelfCheckIn}
@@ -306,6 +386,21 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               </span>
             )}
           </div>
+
+          {/* WFH Toggle — visible when checked in but not yet checked out */}
+          {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+            <button
+              onClick={handleToggleWfh}
+              className={`w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                isWfh
+                  ? 'bg-sky-500/20 border-sky-500/40 text-sky-300 hover:bg-sky-500/30'
+                  : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-sky-300 hover:border-sky-500/40'
+              }`}
+            >
+              <Home className="w-3.5 h-3.5" />
+              {isWfh ? '🏠 WFH Active — Click to Switch to Office' : 'Mark as Work From Home Today'}
+            </button>
+          )}
         </div>
       </motion.div>
 
@@ -437,11 +532,21 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </span>
               </div>
 
+              {(todayRecord?.totalBreakMinutes ?? 0) > 0 && (
+                <div className="flex justify-between py-2 border-b border-slate-800/60">
+                  <span className="text-slate-400 flex items-center gap-1"><Coffee className="w-3 h-3" /> Total Breaks</span>
+                  <span className="font-bold text-amber-400 font-mono">{todayRecord!.totalBreakMinutes}m</span>
+                </div>
+              )}
+
               <div className="flex justify-between py-2">
                 <span className="text-slate-400">Location Status</span>
-                <span className="font-bold text-emerald-400 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5" />
-                  {settings.officeName}
+                <span className="font-bold flex items-center gap-1">
+                  {todayRecord?.isWfh ? (
+                    <><Home className="w-3.5 h-3.5 text-sky-400" /><span className="text-sky-400">Work From Home</span></>
+                  ) : (
+                    <><MapPin className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">{settings.officeName}</span></>
+                  )}
                 </span>
               </div>
             </div>
@@ -495,6 +600,89 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             </div>
           </div>
         </div>
+
+        {/* ── Break Management Panel ── shown only when actively checked in */}
+        {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+          <div className="bg-slate-900/90 rounded-3xl border border-amber-500/25 p-6 shadow-xl space-y-4">
+            <h3 className="font-bold text-xs uppercase tracking-wider text-amber-400 flex items-center gap-2 border-b border-slate-800/80 pb-3">
+              <Timer className="w-4 h-4" />
+              Break Management
+              {activeBreak && (
+                <span className="ml-auto text-xs font-bold text-amber-300 bg-amber-500/20 border border-amber-500/30 px-3 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                  {activeBreak.type} — {formatBreakTime(breakElapsedSec)}
+                </span>
+              )}
+            </h3>
+
+            {activeBreak ? (
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="flex-1 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-center w-full">
+                  <p className="text-[11px] text-amber-300 font-semibold mb-1">Currently on {activeBreak.type}</p>
+                  <p className="text-4xl font-black font-mono text-white tracking-tight">{formatBreakTime(breakElapsedSec)}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Started at {new Date(activeBreak.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                </div>
+                <button
+                  onClick={handleEndBreak}
+                  className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs rounded-2xl cursor-pointer flex items-center gap-2 shadow-lg shadow-amber-900/40 hover:scale-[1.02] transition-all"
+                >
+                  <StopCircle className="w-4 h-4" />
+                  End Break & Return to Work
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  onClick={() => handleStartBreak('Tea Break')}
+                  className="flex items-center gap-3 px-5 py-4 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-500/30 hover:border-amber-500/60 text-white rounded-2xl cursor-pointer transition-all hover:scale-[1.01] group"
+                >
+                  <div className="p-2.5 bg-amber-500/20 rounded-xl group-hover:bg-amber-500/30 transition-colors">
+                    <Coffee className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-extrabold text-sm text-white">Tea Break</p>
+                    <p className="text-[11px] text-slate-400">Std: {settings.teaBreakDurationMinutes ?? 10}min — click to start timer</p>
+                  </div>
+                  <PlayCircle className="w-5 h-5 text-amber-400/60 ml-auto group-hover:text-amber-400 transition-colors" />
+                </button>
+
+                <button
+                  onClick={() => handleStartBreak('Lunch Break')}
+                  className="flex items-center gap-3 px-5 py-4 bg-orange-900/30 hover:bg-orange-900/50 border border-orange-500/30 hover:border-orange-500/60 text-white rounded-2xl cursor-pointer transition-all hover:scale-[1.01] group"
+                >
+                  <div className="p-2.5 bg-orange-500/20 rounded-xl group-hover:bg-orange-500/30 transition-colors">
+                    <UtensilsCrossed className="w-5 h-5 text-orange-400" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-extrabold text-sm text-white">Lunch Break</p>
+                    <p className="text-[11px] text-slate-400">Std: {settings.lunchBreakDurationMinutes ?? 30}min — click to start timer</p>
+                  </div>
+                  <PlayCircle className="w-5 h-5 text-orange-400/60 ml-auto group-hover:text-orange-400 transition-colors" />
+                </button>
+              </div>
+            )}
+
+            {/* Break log for today */}
+            {(todayRecord?.breaks?.length ?? 0) > 0 && (
+              <div className="space-y-2 pt-2 border-t border-slate-800/60">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Today's Break Log</p>
+                {todayRecord!.breaks!.map((b, i) => (
+                  <div key={i} className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-950/60 px-3 py-2 rounded-xl border border-slate-800">
+                    <span className="flex items-center gap-2">
+                      {b.type === 'Tea Break' ? <Coffee className="w-3 h-3 text-amber-400" /> : <UtensilsCrossed className="w-3 h-3 text-orange-400" />}
+                      {b.type}
+                    </span>
+                    <span className="font-mono text-slate-400">
+                      {new Date(b.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → {b.endAt ? new Date(b.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                    </span>
+                    <span className="font-bold text-amber-400">{b.durationMinutes}m</span>
+                  </div>
+                ))}
+                <p className="text-right text-[11px] font-bold text-amber-400">Total break time: {todayRecord!.totalBreakMinutes}m</p>
+              </div>
+            )}
+          </div>
+        )}
         </div>
       )}
 
@@ -517,6 +705,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   <th className="py-3 px-4">Check In</th>
                   <th className="py-3 px-4">Check Out</th>
                   <th className="py-3 px-4">Working Time</th>
+                  <th className="py-3 px-4">Breaks</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Verification</th>
                 </tr>
@@ -524,7 +713,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {empHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-500">
+                    <td colSpan={7} className="py-8 text-center text-slate-500">
                       No attendance records found yet. Perform a check in today!
                     </td>
                   </tr>
@@ -541,9 +730,29 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       <td className="py-3 px-4 font-mono text-blue-400 font-semibold">
                         {rec.workingMinutes ? `${Math.floor(rec.workingMinutes/60)}h ${rec.workingMinutes%60}m` : '--'}
                       </td>
-                      <td className="py-3 px-4 font-bold text-emerald-400">{rec.status}</td>
+                      <td className="py-3 px-4">
+                        {(rec.totalBreakMinutes ?? 0) > 0 ? (
+                          <span className="flex items-center gap-1 text-amber-400 font-semibold">
+                            <Coffee className="w-3 h-3" />
+                            {rec.totalBreakMinutes}m
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center gap-1 font-bold text-[11px] ${
+                          rec.isWfh ? 'text-sky-400' :
+                          rec.status === 'Present' ? 'text-emerald-400' :
+                          rec.status === 'Late' ? 'text-amber-400' :
+                          rec.status === 'Absent' ? 'text-rose-400' : 'text-slate-400'
+                        }`}>
+                          {rec.isWfh && <Home className="w-3 h-3" />}
+                          {rec.status}
+                        </span>
+                      </td>
                       <td className="py-3 px-4 text-slate-400 text-[11px]">
-                        {rec.locationVerified ? '✓ Geofenced GPS' : 'Standard'}
+                        {rec.isWfh ? '🏠 WFH' : rec.locationVerified ? '✓ Geofenced GPS' : 'Standard'}
                       </td>
                     </tr>
                   ))

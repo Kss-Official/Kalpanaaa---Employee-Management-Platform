@@ -295,13 +295,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                     }`}
                   >
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-base border transition-all ${
-                      loginEmail.includes('akshith') ? 'bg-purple-600 border-purple-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'
+                      loginEmail.includes('akshit') ? 'bg-purple-600 border-purple-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'
                     }`}>A</div>
                     <div className="text-center">
-                      <p className="text-xs font-bold text-white">Akshith</p>
+                      <p className="text-xs font-bold text-white">Akshit</p>
                       <p className="text-[10px] text-purple-400 font-semibold">CEO · Super Admin</p>
                     </div>
-                    {loginEmail.includes('akshith') && (
+                    {loginEmail.includes('akshit') && (
                       <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-purple-400" />
                     )}
                   </button>

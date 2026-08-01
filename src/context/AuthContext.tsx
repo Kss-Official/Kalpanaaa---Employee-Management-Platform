@@ -90,7 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = localStorage.getItem('hrms_work_zone');
     if (saved) return JSON.parse(saved);
     return {
-      name: 'Kalpana Software Solutions — Main Office',
+      name: 'Kalpanaaa Software Solutions — Main Office',
       latitude: INITIAL_COMPANY_SETTINGS.officeLatitude || 13.0143043,
       longitude: INITIAL_COMPANY_SETTINGS.officeLongitude || 77.6459944,
       radiusMeters: INITIAL_COMPANY_SETTINGS.allowedRadiusMeters || 100,
@@ -212,7 +212,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }));
           } else {
             const defaultZone: WorkZone = {
-              name: 'Kalpana Software Solutions — Main Office',
+              name: 'Kalpanaaa Software Solutions — Main Office',
               latitude: 13.0143043,
               longitude: 77.6459944,
               radiusMeters: 100,
@@ -328,13 +328,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, message: 'Please enter both your company email address and password.' };
       }
 
-      // Explicit matchers for CEO Akshith and CTO Gaurav
-      const isCeoLogin = cleanEmail === 'akshith@kalpanasoftware.com' || cleanEmail === 'ceo@kalpanasoftware.com';
+      // Explicit matchers for CEO Akshit and CTO Gaurav
+      const isCeoLogin = cleanEmail === 'akshit@kalpanasoftware.com' || cleanEmail === 'akshith@kalpanasoftware.com' || cleanEmail === 'ceo@kalpanasoftware.com';
       const isCtoLogin = cleanEmail === 'gaurav@kalpanasoftware.com' || cleanEmail === 'cto@kalpanasoftware.com';
 
       // 1. Strict CEO Authentication — does NOT depend on employees[] being loaded
       if (isCeoLogin) {
-        const isValidCeoPass = cleanPass === 'Akshith@Kalpana2026!' || cleanPass === 'Akshith@2026' || cleanPass === 'admin123';
+        const isValidCeoPass = cleanPass === 'Akshit@Kalpana2026!' || cleanPass === 'Akshit@2026' || cleanPass === 'Akshith@Kalpana2026!' || cleanPass === 'Akshith@2026' || cleanPass === 'admin123';
         if (!isValidCeoPass) {
           setIsLoading(false);
           return { success: false, message: 'Access Denied: Invalid CEO Executive Password.' };
@@ -342,7 +342,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Find in employees array, or fall back to hardcoded CEO profile
         const ceoEmp = employees.find(e => e.employeeId === 'CEO001' || e.email.toLowerCase() === cleanEmail) ?? {
-          id: 'emp-001', employeeId: 'CEO001', fullName: 'Akshith', email: cleanEmail,
+          id: 'emp-001', employeeId: 'CEO001', fullName: 'Akshit', email: cleanEmail,
           role: 'SUPER_ADMIN' as const, department: 'Executive Leadership',
           designation: 'Chief Executive Officer (CEO)', status: 'Active' as const,
           phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
@@ -355,9 +355,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setRole('SUPER_ADMIN');
         setIsAuthenticated(true);
         localStorage.setItem('hrms_session', ceoEmp.id);
-        addAuditLog('USER_LOGIN', 'Akshith (CEO)', 'Authenticated with CEO Executive Password (SUPER_ADMIN)');
+        addAuditLog('USER_LOGIN', 'Akshit', 'Authenticated with CEO Executive Password (SUPER_ADMIN)');
         setIsLoading(false);
-        return { success: true, message: 'Welcome, CEO Akshith! Full Executive Workspace Access Granted.' };
+        return { success: true, message: 'Welcome back, Akshit! Full Executive Workspace Access Granted.' };
       }
 
       // 2. Strict CTO Authentication — does NOT depend on employees[] being loaded
@@ -375,7 +375,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
           address: '', city: '', state: '', postalCode: '', emergencyContact: '', emergencyRelationship: '',
           shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpana Main Office HQ, Bengaluru',
-          reportingManager: 'Akshith (CEO)', qrToken: 'QR-TOKEN-CTO001-SECURE-HASH-4912',
+          reportingManager: 'Akshit', qrToken: 'QR-TOKEN-CTO001-SECURE-HASH-4912',
           createdAt: '2020-01-15T09:00:00Z', updatedAt: new Date().toISOString()
         };
         setActiveEmployee(ctoEmp);
@@ -553,7 +553,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       addAuditLog('USER_SIGNUP', newEmp.fullName, `Registered new account (${newEmp.role})`);
       setIsLoading(false);
-      return { success: true, message: `Account created! Welcome to Kalpana Software Solutions, ${newEmp.fullName}.` };
+      return { success: true, message: `Account created! Welcome to Kalpanaaa Software Solutions, ${newEmp.fullName}.` };
     } catch (err: any) {
       setIsLoading(false);
       return { success: false, message: err.message || 'Registration failed.' };
@@ -565,7 +565,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTimeout(() => {
       let targetEmp: Employee | undefined;
       if (targetRole === 'CEO' || targetRole === 'SUPER_ADMIN') {
-        targetEmp = employees.find(e => e.employeeId === 'CEO001' || e.fullName.toLowerCase().includes('akshith')) || employees[0];
+        targetEmp = employees.find(e => e.employeeId === 'CEO001' || e.fullName.toLowerCase().includes('akshit')) || employees[0];
       } else if (targetRole === 'CTO') {
         targetEmp = employees.find(e => e.employeeId === 'CTO001' || e.fullName.toLowerCase().includes('gaurav')) || employees[1];
       } else if (targetRole === 'HR_ADMIN') {
@@ -838,7 +838,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuditLogs(INITIAL_AUDIT_LOGS);
     setSettings(INITIAL_COMPANY_SETTINGS);
     const defaultZone: WorkZone = {
-      name: 'Kalpana Software Solutions — Main Office',
+      name: 'Kalpanaaa Software Solutions — Main Office',
       latitude: 13.0143043,
       longitude: 77.6459944,
       radiusMeters: 100,

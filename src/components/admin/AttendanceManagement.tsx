@@ -60,6 +60,7 @@ export const AttendanceManagement: React.FC = () => {
       case 'Absent': return 'bg-rose-500/20 text-rose-300 border-rose-500/30';
       case 'Half Day': return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
       case 'On Leave': return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+      case 'Work From Home': return 'bg-sky-500/20 text-sky-300 border-sky-500/30';
       default: return 'bg-slate-800 text-slate-300 border-slate-700';
     }
   };
@@ -153,6 +154,7 @@ export const AttendanceManagement: React.FC = () => {
             <option value="Absent">Absent</option>
             <option value="Half Day">Half Day</option>
             <option value="On Leave">On Leave</option>
+            <option value="Work From Home">Work From Home</option>
           </select>
         </div>
       </div>
@@ -281,6 +283,7 @@ export const AttendanceManagement: React.FC = () => {
                   <option value="Absent">Absent</option>
                   <option value="Half Day">Half Day</option>
                   <option value="On Leave">On Leave</option>
+                  <option value="Work From Home">Work From Home 🏠</option>
                 </select>
               </div>
 

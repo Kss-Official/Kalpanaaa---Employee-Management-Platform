@@ -248,7 +248,7 @@ export const WorkLocation: React.FC = () => {
   const handleSaveToFirestore = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isExecutive) {
-      alert('Access Denied: Only CEO (Akshith) or CTO (Gaurav) can update executive work locations.');
+      alert('Access Denied: Only CEO (Akshit) or CTO (Gaurav) can update executive work locations.');
       return;
     }
 
@@ -308,7 +308,7 @@ export const WorkLocation: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
-            Authoritative office coordinates & attendance boundary managed directly by Executive Leadership (<strong className="text-slate-200">CEO Akshith & CTO Gaurav</strong>). Synced live to Firestore.
+            Authoritative office coordinates & attendance boundary managed directly by Executive Leadership (<strong className="text-slate-200">CEO Akshit & CTO Gaurav</strong>). Synced live to Firestore.
           </p>
         </div>
 
