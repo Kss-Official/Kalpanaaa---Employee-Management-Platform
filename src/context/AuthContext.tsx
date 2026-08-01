@@ -1064,7 +1064,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (req && status === 'Approved' && req.type === 'WFH') {
       const targetEmp = employees.find(e => e.employeeId === req.employeeId);
       if (targetEmp) {
-        const dates = new Set(targetEmp.approvedWfhDates || []);
+        const dates = new Set<string>(targetEmp.approvedWfhDates || []);
         let curr = new Date(req.startDate);
         const end = new Date(req.endDate);
         while (curr <= end) {
