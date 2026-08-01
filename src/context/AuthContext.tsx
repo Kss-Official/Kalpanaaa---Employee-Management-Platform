@@ -559,7 +559,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true, message: 'Welcome, CTO Gaurav! Technology & Architecture Access Granted.' };
       }
 
-      // 3. Try Firebase Auth (for registered employees)
+      // 3. Strict PM Authentication (Koushik)
+      const isPmLogin = cleanEmail === 'koushik@kalpanaaasoftware.com' || cleanEmail === 'pm@kalpanaaasoftware.com';
+      if (isPmLogin) {
+        const isValidPmPass = cleanPass === 'Koushik@Kalpana2026!' || cleanPass === 'Koushik@2026' || cleanPass === 'pm123';
+        if (!isValidPmPass) {
+          recordFailure();
+          setIsLoading(false);
+          return { success: false, message: 'Access Denied: Invalid PM Password.' };
+        }
+
+        const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const newFingerprint = generateDeviceFingerprint();
+
+        const pmEmp = employees.find(e => e.employeeId === 'KSS2407003' || e.email.toLowerCase() === cleanEmail) ?? {
+          id: 'emp-003', employeeId: 'KSS2407003', fullName: 'Koushik', email: cleanEmail,
+          role: 'SUPER_ADMIN' as const, department: 'Software Engineering',
+          designation: 'Project Manager', status: 'Active' as const,
+          phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
+          address: '', city: '', state: '', postalCode: '', emergencyContact: '', emergencyRelationship: '',
+          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
+          reportingManager: 'Akshit', qrToken: 'QR-TOKEN-KSS2407003-SECURE-HASH-4912',
+          createdAt: '2024-07-01T09:00:00Z', updatedAt: new Date().toISOString()
+        };
+
+        const updatedPmEmp = { ...pmEmp, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
+        setActiveEmployee(updatedPmEmp);
+        // Note: Assigning SUPER_ADMIN to allow admin panel access similar to CEO/CTO.
+        setRole('SUPER_ADMIN');
+        setIsAuthenticated(true);
+        localStorage.setItem('kss_v1_session', updatedPmEmp.id);
+        localStorage.setItem('kss_v1_session_id', newSessionId);
+        setDoc(doc(db, 'employees', updatedPmEmp.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => {});
+
+        addAuditLog('USER_LOGIN', 'Koushik (PM)', 'Authenticated with PM Password (SUPER_ADMIN)');
+        clearLockout(updatedPmEmp.id);
+        setIsLoading(false);
+        return { success: true, message: 'Welcome, Project Manager Koushik! Access Granted.' };
+      }
+
+      // 4. Try Firebase Auth (for registered employees)
       try {
         const userCred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
         if (userCred.user) {

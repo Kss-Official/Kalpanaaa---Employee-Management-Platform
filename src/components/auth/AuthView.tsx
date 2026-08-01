@@ -283,8 +283,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                   <p className="text-xs text-slate-400 mt-1">Restricted to <strong className="text-purple-300">CEO</strong> and <strong className="text-purple-300">CTO</strong> only. Routes directly to the Admin Control Panel.</p>
                 </div>
 
-                {/* CEO / CTO Quick Role Selector Chips */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* CEO / CTO / PM Quick Role Selector Chips */}
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     type="button"
                     onClick={() => { setLoginEmail('akshit@kalpanaaasoftware.com'); setLoginPassword(''); setFeedback(null); }}
@@ -324,6 +324,27 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                     </div>
                     {loginEmail.includes('gaurav') && (
                       <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-400" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { setLoginEmail('koushik@kalpanaaasoftware.com'); setLoginPassword(''); setFeedback(null); }}
+                    className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all cursor-pointer ${
+                      loginEmail.includes('koushik')
+                        ? 'bg-emerald-600/20 border-emerald-500/60 shadow-lg shadow-emerald-900/30'
+                        : 'bg-slate-950 border-slate-800 hover:border-emerald-600/50 hover:bg-emerald-950/20'
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-base border transition-all ${
+                      loginEmail.includes('koushik') ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'
+                    }`}>K</div>
+                    <div className="text-center">
+                      <p className="text-xs font-bold text-white">Koushik</p>
+                      <p className="text-[10px] text-emerald-400 font-semibold">PM · Super Admin</p>
+                    </div>
+                    {loginEmail.includes('koushik') && (
+                      <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-400" />
                     )}
                   </button>
                 </div>
