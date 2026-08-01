@@ -175,7 +175,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Generate Static QR Code for ID Card (Company Website)
   useEffect(() => {
     if (activeEmployee) {
-      const payload = `https://kalpanaaasoftwaresolutions.in/verify?empId=${encodeURIComponent(activeEmployee.employeeId)}`;
+      const payload = 'https://www.kalpanaaasoftwaresolutions.in/';
       QRCode.toDataURL(payload, { 
         width: 320, 
         margin: 2,
@@ -825,15 +825,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             {/* The Print Container */}
             <div id="employee-id-card-element" className="flex flex-col sm:flex-row gap-6 bg-transparent pb-8">
               
-              {/* FRONT OF CARD - QR CODE */}
+              {/* FRONT OF CARD - BARCODE */}
               <div className="w-[340px] h-[580px] bg-white rounded-3xl shadow-2xl overflow-hidden relative print:shadow-none print:border print:border-slate-300 flex flex-col scale-[0.7] origin-top sm:scale-[0.8] md:scale-[0.85] lg:scale-100 mx-auto items-center justify-center p-8">
                 <div className="w-full flex flex-col items-center justify-center bg-white p-6 rounded-2xl border border-slate-100 shadow-sm gap-4">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Scan to Verify Employee</div>
-                  {qrUrl ? (
-                    <img src={qrUrl} alt="Scan to Verify" className="w-40 h-40 object-contain" />
-                  ) : (
-                    <div className="w-40 h-40 bg-slate-100 animate-pulse rounded-xl" />
-                  )}
+                  <div className="flex justify-center overflow-hidden w-full bg-white py-2">
+                    <Barcode value={activeEmployee.employeeId} width={1.8} height={50} displayValue={false} margin={0} background="#ffffff" />
+                  </div>
                   <div className="text-xl text-center text-slate-800 font-black tracking-[0.2em]">{activeEmployee.employeeId}</div>
                   <div className="text-sm text-center text-slate-500 font-bold uppercase tracking-widest border-t border-slate-200 pt-3 w-full">{activeEmployee.fullName}</div>
                 </div>
