@@ -8,6 +8,7 @@ import {
   QrCode,
   Menu,
   X,
+  Download
 } from 'lucide-react';
 import { UserRole } from '../../types';
 
@@ -34,6 +35,28 @@ export const Header: React.FC<HeaderProps> = ({
     const timer = setInterval(updateClock, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // PWA Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+    setShowUserDropdown(false);
+  };
 
   const getRoleBadgeColor = (r: UserRole) => {
     switch (r) {
@@ -137,6 +160,19 @@ export const Header: React.FC<HeaderProps> = ({
                   {role}
                 </span>
               </div>
+
+              {/* Install App Button */}
+              {deferredPrompt && (
+                <div className="px-2 py-1">
+                  <button
+                    onClick={handleInstallApp}
+                    className="w-full text-left px-4 py-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-950/40 rounded-xl flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    Install App
+                  </button>
+                </div>
+              )}
 
               {/* Sign out */}
               <button

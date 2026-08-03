@@ -12,6 +12,10 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: 'auto',
+        devOptions: {
+          enabled: true,
+          type: 'module'
+        },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg}'],
           maximumFileSizeToCacheInBytes: 6000000 // 6MB to accommodate large JS bundles and logo
