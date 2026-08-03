@@ -13,7 +13,8 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         injectRegister: 'auto',
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg}']
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg}'],
+          maximumFileSizeToCacheInBytes: 6000000 // 6MB to accommodate large JS bundles and logo
         },
         manifest: {
           name: 'Kalpanaaa Software Solutions',
