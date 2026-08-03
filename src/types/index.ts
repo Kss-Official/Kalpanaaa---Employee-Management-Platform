@@ -52,7 +52,8 @@ export interface Employee {
   shift: string; // e.g., 'Day Shift (09:00 - 18:00)'
 
   // Personal & Profile
-  address: string;
+  permanentAddress: string;
+  currentAddress: string;
   city: string;
   state: string;
   postalCode: string;

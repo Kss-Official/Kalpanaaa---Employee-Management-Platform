@@ -295,12 +295,39 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">Role Type</label>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Role / Designation <span className="text-rose-500">*</span></label>
                     <select
-                      value={signUpRole}
-                      onChange={e => handleSignUpRoleChange(e.target.value as UserRole)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none"
+                      value={signUpDesignation}
+                      onChange={e => {
+                        const newDesig = e.target.value;
+                        setSignUpDesignation(newDesig);
+                        if (['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(newDesig)) {
+                          handleSignUpRoleChange('SUPER_ADMIN');
+                        } else {
+                          handleSignUpRoleChange('EMPLOYEE');
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none font-semibold"
                     >
+                      <option value="Chief Executive Officer (CEO)">Chief Executive Officer (CEO)</option>
+                      <option value="Chief Technology Officer (CTO)">Chief Technology Officer (CTO)</option>
+                      <option value="Project Manager">Project Manager</option>
+                      <option value="Software Engineer">Software Engineer</option>
+                      <option value="Frontend Developer">Frontend Developer</option>
+                      <option value="Backend Developer">Backend Developer</option>
+                      <option value="UI/UX Designer">UI/UX Designer</option>
+                      <option value="HR Manager">HR Manager</option>
+                    </select>
+                  </div>
+
+                  {!['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(signUpDesignation) && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">System Role Type</label>
+                      <select
+                        value={signUpRole}
+                        onChange={e => handleSignUpRoleChange(e.target.value as UserRole)}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none"
+                      >
                       <option value="EMPLOYEE">Employee</option>
                       <option value="HR_ADMIN">HR Operations Team</option>
                       <option value="SUPER_ADMIN">CEO / CTO — Executive Admin</option>
@@ -309,6 +336,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                       <p className="text-[10px] text-purple-400 mt-1 font-medium">⚡ CEO/CTO accounts get full Admin Control Panel access.</p>
                     )}
                   </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">Department</label>
@@ -322,31 +350,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                       <option value="Project Management">Project Management</option>
                       <option value="Human Resources">Human Resources</option>
                       <option value="Operations">Operations</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">Role / Designation *</label>
-                    <select
-                      value={signUpDesignation}
-                      onChange={e => setSignUpDesignation(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none font-semibold"
-                    >
-                      {signUpRole === 'SUPER_ADMIN' ? (
-                        <>
-                          <option value="Chief Executive Officer (CEO)">Chief Executive Officer (CEO)</option>
-                          <option value="Chief Technology Officer (CTO)">Chief Technology Officer (CTO)</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="Software Engineer">Software Engineer</option>
-                          <option value="Frontend Developer">Frontend Developer</option>
-                          <option value="Backend Developer">Backend Developer</option>
-                          <option value="UI/UX Designer">UI/UX Designer</option>
-                          <option value="Project Manager">Project Manager</option>
-                          <option value="HR Manager">HR Manager</option>
-                        </>
-                      )}
                     </select>
                   </div>
 

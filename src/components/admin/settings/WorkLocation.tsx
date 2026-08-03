@@ -22,8 +22,8 @@ import {
 const OFFICE_PRESETS = [
   {
     name: "Kalpanaaa HQ — AGPS Nagar, Hyderabad",
-    latitude: 13.0143043,
-    longitude: 77.6459944,
+    latitude: 13.014316,
+    longitude: 77.64052,
     radiusMeters: 100
   },
   {
@@ -63,8 +63,8 @@ export const WorkLocation: React.FC = () => {
     activeEmployee?.designation?.toLowerCase().includes('cto');
 
   const [officeName, setOfficeName] = useState(companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office');
-  const [latitude, setLatitude] = useState<number>(companyWorkZone.latitude ?? 13.0143043);
-  const [longitude, setLongitude] = useState<number>(companyWorkZone.longitude ?? 77.6459944);
+  const [latitude, setLatitude] = useState<number>(companyWorkZone.latitude ?? 13.014316);
+  const [longitude, setLongitude] = useState<number>(companyWorkZone.longitude ?? 77.64052);
   const [radiusMeters, setRadiusMeters] = useState<number>(companyWorkZone.radiusMeters ?? 100);
   const [isActive, setIsActive] = useState<boolean>(companyWorkZone.active ?? true);
 
@@ -83,8 +83,8 @@ export const WorkLocation: React.FC = () => {
   useEffect(() => {
     if (companyWorkZone) {
       setOfficeName(companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office');
-      setLatitude(companyWorkZone.latitude ?? 13.0143043);
-      setLongitude(companyWorkZone.longitude ?? 77.6459944);
+      setLatitude(companyWorkZone.latitude ?? 13.014316);
+      setLongitude(companyWorkZone.longitude ?? 77.64052);
       setRadiusMeters(companyWorkZone.radiusMeters ?? 100);
       setIsActive(companyWorkZone.active ?? true);
     }
@@ -106,8 +106,8 @@ export const WorkLocation: React.FC = () => {
     if (!mapContainerRef.current) return;
 
     if (!mapInstanceRef.current) {
-      const initialLat = latitude || 13.0143043;
-      const initialLng = longitude || 77.6459944;
+      const initialLat = latitude || 13.014316;
+      const initialLng = longitude || 77.64052;
 
       const map = L.map(mapContainerRef.current, {
         center: [initialLat, initialLng],

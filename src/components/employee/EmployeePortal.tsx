@@ -83,7 +83,8 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [phone, setPhone] = useState(activeEmployee?.phone || '');
   const [gender, setGender] = useState(activeEmployee?.gender || 'Prefer not to say');
   const [dateOfBirth, setDateOfBirth] = useState(activeEmployee?.dateOfBirth || '');
-  const [address, setAddress] = useState(activeEmployee?.address || '');
+  const [permanentAddress, setPermanentAddress] = useState(activeEmployee?.permanentAddress || '');
+  const [currentAddress, setCurrentAddress] = useState(activeEmployee?.currentAddress || '');
   const [city, setCity] = useState(activeEmployee?.city || '');
   const [state, setState] = useState(activeEmployee?.state || '');
   const [postalCode, setPostalCode] = useState(activeEmployee?.postalCode || '');
@@ -96,6 +97,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [linkedinUrl, setLinkedinUrl] = useState(activeEmployee?.linkedinUrl || 'https://linkedin.com/in/employee');
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [isCapturingCamera, setIsCapturingCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -136,14 +138,15 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       setPhone(activeEmployee.phone);
       setGender(activeEmployee.gender);
       setDateOfBirth(activeEmployee.dateOfBirth);
-      setAddress(activeEmployee.address);
+      setPermanentAddress(activeEmployee.permanentAddress || '');
+      setCurrentAddress(activeEmployee.currentAddress || '');
       setCity(activeEmployee.city);
       setState(activeEmployee.state);
       setPostalCode(activeEmployee.postalCode);
       setEmergencyContact(activeEmployee.emergencyContact);
       setEmergencyRelationship(activeEmployee.emergencyRelationship);
       setBio(activeEmployee.bio || 'Dedicated software & operations engineering professional.');
-      setSkills(activeEmployee.skills || ['React', 'TypeScript', 'HR Operations']);
+      setSkills(activeEmployee.skills || []);
       setPreferredShift(activeEmployee.preferredShift || activeEmployee.shift);
       setLinkedinUrl(activeEmployee.linkedinUrl || '');
     }
@@ -297,13 +300,15 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     updateEmployee(activeEmployee.id, {
       fullName,
       phone,
       gender: gender as any,
       dateOfBirth,
       profilePhotoUrl: profilePhoto,
-      address,
+      permanentAddress,
+      currentAddress,
       city,
       state,
       postalCode,
@@ -315,6 +320,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       linkedinUrl
     });
     setSavedSuccess(true);
+    setIsSaving(false);
     setTimeout(() => setSavedSuccess(false), 2500);
   };
 
@@ -993,7 +999,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Full Name</label>
+                  <label className="block text-slate-400 font-semibold mb-1">Full Name <span className="text-rose-500">*</span></label>
                   <input
                     type="text"
                     value={fullName}
@@ -1003,7 +1009,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Phone Number</label>
+                  <label className="block text-slate-400 font-semibold mb-1">Phone Number <span className="text-rose-500">*</span></label>
                   <input
                     type="text"
                     value={phone}
@@ -1013,7 +1019,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Gender</label>
+                  <label className="block text-slate-400 font-semibold mb-1">Gender <span className="text-rose-500">*</span></label>
                   <select
                     value={gender}
                     onChange={e => setGender(e.target.value)}
@@ -1027,7 +1033,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Date of Birth</label>
+                  <label className="block text-slate-400 font-semibold mb-1">Date of Birth <span className="text-rose-500">*</span></label>
                   <input
                     type="date"
                     value={dateOfBirth}
@@ -1046,18 +1052,29 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-400 font-semibold mb-1">Street Address</label>
-                  <input
-                    type="text"
-                    value={address}
-                    onChange={e => setAddress(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
-                  />
+                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1">Permanent Address <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      value={permanentAddress}
+                      onChange={e => setPermanentAddress(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1">Current Address <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      value={currentAddress}
+                      onChange={e => setCurrentAddress(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
+                    />
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">City</label>
+                  <label className="block text-slate-400 font-semibold mb-1">City <span className="text-rose-500">*</span></label>
                   <input
                     type="text"
                     value={city}
@@ -1067,7 +1084,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">State / Postal Code</label>
+                  <label className="block text-slate-400 font-semibold mb-1">State / Postal Code <span className="text-rose-500">*</span></label>
                   <div className="grid grid-cols-2 gap-2">
                     <input
                       type="text"
@@ -1147,7 +1164,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   <div className="flex items-center gap-2 max-w-sm">
                     <input
                       type="text"
-                      placeholder="Add new skill..."
+                      placeholder="e.g. JavaScript, HR Operations, Figma"
                       value={newSkillInput}
                       onChange={e => setNewSkillInput(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddSkill(); } }}
@@ -1169,7 +1186,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
               <button
                 type="submit"
-                className="px-8 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-extrabold text-xs rounded-2xl shadow-xl shadow-blue-600/30 hover:scale-[1.01] cursor-pointer flex items-center gap-2 transition-all"
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50 shadow-md"
               >
                 <Save className="w-4 h-4" />
                 <span>{savedSuccess ? 'Changes Saved Successfully!' : 'Save & Update Profile'}</span>

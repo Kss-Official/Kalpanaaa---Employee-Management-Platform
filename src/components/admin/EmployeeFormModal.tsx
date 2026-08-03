@@ -19,11 +19,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   // Form State
   const [formData, setFormData] = useState({
     employeeId: employeeToEdit?.employeeId || (() => {
-      const now = new Date();
-      const yy = String(now.getFullYear()).slice(2);
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
       const seq = String(employees.length + 1).padStart(3, '0');
-      return `KSS${yy}${mm}${seq}`;
+      return `KSS2707${seq}`;
     })(),
     fullName: employeeToEdit?.fullName || '',
     email: employeeToEdit?.email || '',
@@ -39,7 +36,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     workLocation: employeeToEdit?.workLocation || 'AGPS Nagar HQ Campus',
     status: employeeToEdit?.status || ('Active' as EmployeeStatus),
     shift: employeeToEdit?.shift || 'General Shift (09:00 - 18:00)',
-    address: employeeToEdit?.address || 'Hitech City Road',
+    permanentAddress: employeeToEdit?.permanentAddress || 'Hitech City Road',
+    currentAddress: employeeToEdit?.currentAddress || 'Hitech City Road',
     city: employeeToEdit?.city || 'Hyderabad',
     state: employeeToEdit?.state || 'Telangana',
     postalCode: employeeToEdit?.postalCode || '500081',
@@ -57,7 +55,15 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       const dates = e.target.value.split(',').map(d => d.trim()).filter(d => d);
       setFormData(prev => ({ ...prev, approvedWfhDates: dates }));
     } else {
-      setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+      setFormData(prev => {
+        const newData = { ...prev, [e.target.name]: e.target.value };
+        if (e.target.name === 'designation') {
+          if (['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(e.target.value)) {
+            newData.role = 'SUPER_ADMIN';
+          }
+        }
+        return newData;
+      });
     }
   };
 
@@ -135,7 +141,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Employee ID *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Employee ID <span className="text-rose-500">*</span></label>
                 <input
                   type="text"
                   name="employeeId"
@@ -147,7 +153,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Full Name *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Full Name <span className="text-rose-500">*</span></label>
                 <input
                   type="text"
                   name="fullName"
@@ -160,7 +166,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Official Email *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Official Email <span className="text-rose-500">*</span></label>
                 <input
                   type="email"
                   name="email"
@@ -173,7 +179,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Phone Number *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Phone Number <span className="text-rose-500">*</span></label>
                 <input
                   type="text"
                   name="phone"
@@ -186,7 +192,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Gender *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Gender <span className="text-rose-500">*</span></label>
                 <select
                   name="gender"
                   value={formData.gender}
@@ -201,7 +207,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Date of Birth *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Date of Birth <span className="text-rose-500">*</span></label>
                 <input
                   type="date"
                   name="dateOfBirth"
@@ -213,7 +219,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Profile Image URL *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Profile Image URL <span className="text-rose-500">*</span></label>
                 <input
                   type="url"
                   name="profilePhotoUrl"
@@ -226,7 +232,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Resume URL (PDF) *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Resume URL (PDF) <span className="text-rose-500">*</span></label>
                 <input
                   type="url"
                   name="resumeUrl"
@@ -319,19 +325,21 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">System Role Access</label>
-                <select
-                  name="role"
-                  value={formData.role}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl font-bold text-purple-400 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="EMPLOYEE">EMPLOYEE</option>
-                  <option value="HR_ADMIN">HR_ADMIN</option>
-                  <option value="SUPER_ADMIN">SUPER_ADMIN</option>
-                </select>
-              </div>
+              {!['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(formData.designation) && (
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">System Role Access</label>
+                  <select
+                    name="role"
+                    value={formData.role}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl font-bold text-purple-400 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="EMPLOYEE">EMPLOYEE</option>
+                    <option value="HR_ADMIN">HR_ADMIN</option>
+                    <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Account Status</label>
@@ -379,6 +387,67 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   placeholder="e.g. 2026-08-01, 2026-08-02"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500 font-mono text-xs"
                 />
+              </div>
+
+              {/* Address Fields */}
+              <div className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-800">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Permanent Address <span className="text-rose-500">*</span></label>
+                  <input
+                    type="text"
+                    name="permanentAddress"
+                    value={formData.permanentAddress}
+                    onChange={handleChange}
+                    required
+                    placeholder="e.g. 123 Main St, Apt 4"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Current Address <span className="text-rose-500">*</span></label>
+                  <input
+                    type="text"
+                    name="currentAddress"
+                    value={formData.currentAddress}
+                    onChange={handleChange}
+                    required
+                    placeholder="e.g. 456 Tech Park Rd"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">City <span className="text-rose-500">*</span></label>
+                  <input
+                    type="text"
+                    name="city"
+                    value={formData.city}
+                    onChange={handleChange}
+                    required
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">State & Postal Code <span className="text-rose-500">*</span></label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      name="state"
+                      value={formData.state}
+                      onChange={handleChange}
+                      required
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                    />
+                    <input
+                      type="text"
+                      name="postalCode"
+                      value={formData.postalCode}
+                      onChange={handleChange}
+                      required
+                      placeholder="ZIP"
+                      className="w-24 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
