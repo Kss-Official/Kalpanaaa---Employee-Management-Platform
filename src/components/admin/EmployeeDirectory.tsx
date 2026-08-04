@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { AllEmployeeBarcodesView } from './AllEmployeeBarcodesView';
 import { Employee, EmployeeStatus } from '../../types';
 import { 
   Search, 
@@ -38,6 +39,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
+  const [showPrintAllBarcodes, setShowPrintAllBarcodes] = useState(false);
 
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
@@ -63,6 +65,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     }
   };
 
+  if (showPrintAllBarcodes) {
+    return <AllEmployeeBarcodesView onBack={() => setShowPrintAllBarcodes(false)} />;
+  }
+
   return (
     <div className="space-y-6">
       {/* Top Header Controls */}
@@ -75,13 +81,22 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         </div>
 
         {isAdmin && (
-          <button
-            onClick={onOpenAddModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
-          >
-            <Plus className="w-4 h-4" />
-            Add New Employee
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowPrintAllBarcodes(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md"
+            >
+              <CreditCard className="w-4 h-4" />
+              Print All Barcodes
+            </button>
+            <button
+              onClick={onOpenAddModal}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
+            >
+              <Plus className="w-4 h-4" />
+              Add New Employee
+            </button>
+          </div>
         )}
       </div>
 

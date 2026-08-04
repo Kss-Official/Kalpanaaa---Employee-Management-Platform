@@ -665,7 +665,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Strict Format Validation
       if (isExecutive) {
-        if (!cleanEmail.endsWith('@kalpanaaa.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresolutions.in')) {
+        if (!cleanEmail.endsWith('@kalpanaaa.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresolutions.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresoutions.in')) {
           setIsLoading(false);
           return { success: false, message: `Executive email must end with @kalpanaaa.in or @kalpanaaasoftwaresolutions.in` };
         }

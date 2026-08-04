@@ -38,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const executiveNavItems = [
     { id: 'dashboard', label: 'Executive Overview', icon: LayoutDashboard },
     { id: 'employees', label: 'Team Directory', icon: Users },
+    { id: 'my_id_card', label: 'My ID Card (QR/Barcode)', icon: CreditCard },
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
     { id: 'reports', label: 'Reports & Intelligence', icon: FileSpreadsheet },
     { id: 'leave_approvals', label: 'Leave & WFH Sanctions', icon: FileText },
@@ -49,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const hrNavItems = [
     { id: 'dashboard', label: 'Workspace Overview', icon: LayoutDashboard },
     { id: 'employees', label: 'Team Directory', icon: Users },
+    { id: 'my_id_card', label: 'My ID Card (QR/Barcode)', icon: CreditCard },
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
     { id: 'reports', label: 'Reports & Issuance', icon: FileSpreadsheet },
     { id: 'leave_approvals', label: 'Leave & WFH Sanctions', icon: FileText },

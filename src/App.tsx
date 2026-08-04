@@ -20,7 +20,7 @@ import { EmployeePortal } from './components/employee/EmployeePortal';
 import { SplashScreen } from './components/common/SplashScreen';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
 import { Employee } from './types';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, CreditCard } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const { role, isAuthenticated, activeEmployee } = useAuth();
@@ -138,6 +138,22 @@ const MainLayout: React.FC = () => {
                   onNavigateTab={tab => setActiveTab(tab)}
                   onOpenAddEmployee={() => setIsAddModalOpen(true)}
                 />
+              )}
+
+              {activeTab === 'my_id_card' && (
+                <div className="flex flex-col items-center justify-center p-8 bg-slate-900 rounded-3xl border border-slate-800 shadow-xl mt-12 mx-auto max-w-lg text-center animate-in fade-in zoom-in-95">
+                  <div className="w-16 h-16 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center mx-auto mb-4">
+                    <CreditCard className="w-8 h-8" />
+                  </div>
+                  <h2 className="text-2xl font-bold mb-3 text-white">My Official ID Card</h2>
+                  <p className="text-sm text-slate-400 mb-8 leading-relaxed">Click the button below to view, print, or share your official corporate ID badge containing your secure QR code and barcode.</p>
+                  <button 
+                    onClick={() => setIdCardEmployee(activeEmployee)}
+                    className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+                  >
+                    <CreditCard className="w-5 h-5" /> Open ID Card Viewer
+                  </button>
+                </div>
               )}
               
               {activeTab === 'employees' && (
