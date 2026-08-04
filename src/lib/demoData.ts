@@ -5,7 +5,7 @@ export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
   logoUrl: 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=120&auto=format&fit=crop&q=80',
   companyAddress: 'No. 14, Bhoganahalli, Sarjapur Road, Bengaluru, KA 560102',
   companyPhone: '+91 (040) 4821-9900',
-  companyEmail: 'hr@kalpanaaasoftware.com',
+  companyEmail: 'hr@kalpanaaasoftware.in',
   
   officeName: 'Kalpanaaa Main Office HQ',
   officeLatitude: 13.014316,

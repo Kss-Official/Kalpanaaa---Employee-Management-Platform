@@ -212,7 +212,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                         required
                         value={loginEmail}
                         onChange={e => setLoginEmail(e.target.value)}
-                        placeholder="employee@kalpanaaasoftware.com"
+                        placeholder="employee@kalpanaaasoftware.in"
                         className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-all"
                       />
                     </div>
@@ -289,7 +289,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                       required
                       value={signUpEmail}
                       onChange={e => setSignUpEmail(e.target.value)}
-                      placeholder="sarah@kalpanaaasoftware.com"
+                      placeholder="sarah@kalpanaaasoftware.in"
                       className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none"
                     />
                   </div>
@@ -430,7 +430,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                     required
                     value={resetEmail}
                     onChange={e => setResetEmail(e.target.value)}
-                    placeholder="name@company.com"
+                    placeholder="name@kalpanaaasoftware.in"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none"
                   />
                 </div>

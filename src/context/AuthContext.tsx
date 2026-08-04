@@ -155,7 +155,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return {
             ...emp,
             fullName: 'Akshit',
-            email: 'akshit@kalpanaaasoftware.com'
+            email: 'akshit@kalpanaaasoftware.in',
+            department: 'Executive Management'
           };
         }
         return emp;
@@ -299,13 +300,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // LIVE AUTOCORRECT CEO SPELLING AND EMAIL IN FIREBASE
               if (data.employeeId === 'CEO001') {
                 let needsUpdate = false;
-                if (data.fullName !== 'Akshit') {
-                  data.fullName = 'Akshit';
-                  needsUpdate = true;
-                }
-                if (data.email !== 'akshit@kalpanaaasoftware.com') {
-                  data.email = 'akshit@kalpanaaasoftware.com';
-                  needsUpdate = true;
+                // Intercept CEO registration if needed
+                if (data.role === 'SUPER_ADMIN' && data.fullName.toLowerCase().includes('akshit')) {
+                  if (data.email !== 'akshit@kalpanaaasoftware.in') {
+                    data.email = 'akshit@kalpanaaasoftware.in';
+                    needsUpdate = true;
+                  }
                 }
 
                 if (needsUpdate) {
@@ -545,8 +545,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       // Explicit matchers for CEO Akshit and CTO Gaurav
-      const isCeoLogin = cleanEmail === 'akshit@kalpanaaasoftware.com' || cleanEmail === 'ceo@kalpanaaasoftware.com';
-      const isCtoLogin = cleanEmail === 'gaurav@kalpanaaasoftware.com' || cleanEmail === 'cto@kalpanaaasoftware.com';
+      const isCeoLogin = cleanEmail === 'akshit@kalpanaaasoftware.in' || cleanEmail === 'ceo@kalpanaaasoftware.in';
+      const isCtoLogin = cleanEmail === 'gaurav@kalpanaaasoftware.in' || cleanEmail === 'cto@kalpanaaasoftware.in';
 
       // 1. Strict CEO Authentication — does NOT depend on employees[] being loaded
       if (isCeoLogin) {
@@ -623,7 +623,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 3. Strict PM Authentication (Koushik)
-      const isPmLogin = cleanEmail === 'koushik@kalpanaaasoftware.com' || cleanEmail === 'pm@kalpanaaasoftware.com';
+      const isPmLogin = cleanEmail === 'koushik@kalpanaaasoftware.in' || cleanEmail === 'pm@kalpanaaasoftware.in';
       if (isPmLogin) {
         const isValidPmPass = cleanPass === 'Koushik@Kalpana2026!' || cleanPass === 'Koushik@2026' || cleanPass === 'pm123';
         if (!isValidPmPass) {
@@ -755,11 +755,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Strict Format Validation: employee name + domain
       const firstName = data.fullName.trim().split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-      const expectedEmailFormat = `${firstName}@kalpanaaasoftware.com`;
+      const expectedEmailFormat = `${firstName}@kalpanaaasoftware.in`;
 
-      if (!cleanEmail.endsWith('@kalpanaaasoftware.com')) {
+      if (!cleanEmail.endsWith('@kalpanaaasoftware.in')) {
         setIsLoading(false);
-        return { success: false, message: `Email strictly must end with @kalpanaaasoftware.com (e.g., ${expectedEmailFormat})` };
+        return { success: false, message: `Email strictly must end with @kalpanaaasoftware.in (e.g., ${expectedEmailFormat})` };
       }
 
       // Unique Email Flag Validation
