@@ -155,7 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return {
             ...emp,
             fullName: 'Akshit',
-            email: 'akshit@kalpanaaasoftware.in',
+            email: 'akshit@kalpanaaa.in',
             department: 'Executive Management'
           };
         }
@@ -302,8 +302,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 let needsUpdate = false;
                 // Intercept CEO registration if needed
                 if (data.role === 'SUPER_ADMIN' && data.fullName.toLowerCase().includes('akshit')) {
-                  if (data.email !== 'akshit@kalpanaaasoftware.in') {
-                    data.email = 'akshit@kalpanaaasoftware.in';
+                  if (data.email !== 'akshit@kalpanaaa.in') {
+                    data.email = 'akshit@kalpanaaa.in';
                     needsUpdate = true;
                   }
                 }
@@ -545,8 +545,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       // Explicit matchers for CEO Akshit and CTO Gaurav
-      const isCeoLogin = cleanEmail === 'akshit@kalpanaaasoftware.in' || cleanEmail === 'ceo@kalpanaaasoftware.in';
-      const isCtoLogin = cleanEmail === 'gaurav@kalpanaaasoftware.in' || cleanEmail === 'cto@kalpanaaasoftware.in';
+      const isCeoLogin = cleanEmail === 'akshit@kalpanaaa.in' || cleanEmail === 'ceo@kalpanaaa.in';
+      const isCtoLogin = cleanEmail === 'gaurav@kalpanaaa.in' || cleanEmail === 'cto@kalpanaaa.in';
 
       // 1. Strict CEO Authentication — does NOT depend on employees[] being loaded
       if (isCeoLogin) {
@@ -623,7 +623,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 3. Strict PM Authentication (Koushik)
-      const isPmLogin = cleanEmail === 'koushik@kalpanaaasoftware.in' || cleanEmail === 'pm@kalpanaaasoftware.in';
+      const isPmLogin = cleanEmail === 'koushik@kalpanaaa.in' || cleanEmail === 'pm@kalpanaaa.in';
       if (isPmLogin) {
         const isValidPmPass = cleanPass === 'Koushik@Kalpana2026!' || cleanPass === 'Koushik@2026' || cleanPass === 'pm123';
         if (!isValidPmPass) {
@@ -755,11 +755,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Strict Format Validation: employee name + domain
       const firstName = data.fullName.trim().split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-      const expectedEmailFormat = `${firstName}@kalpanaaasoftware.in`;
+      const expectedEmailFormat = `${firstName}@kalpanaaa.in`;
 
-      if (!cleanEmail.endsWith('@kalpanaaasoftware.in')) {
+      if (!cleanEmail.endsWith('@kalpanaaa.in')) {
         setIsLoading(false);
-        return { success: false, message: `Email strictly must end with @kalpanaaasoftware.in (e.g., ${expectedEmailFormat})` };
+        return { success: false, message: `Email strictly must end with @kalpanaaa.in (e.g., ${expectedEmailFormat})` };
       }
 
       // Unique Email Flag Validation

@@ -102,8 +102,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       return;
     }
 
-    if (!formData.email.trim().toLowerCase().endsWith('@kalpanaaasoftware.in')) {
-      setErrorMsg('All employee emails strictly must end with @kalpanaaasoftware.in');
+    if (!formData.email.trim().toLowerCase().endsWith('@kalpanaaa.in')) {
+      setErrorMsg('All employee emails strictly must end with @kalpanaaa.in');
       return;
     }
 
