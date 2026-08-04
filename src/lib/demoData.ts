@@ -30,7 +30,38 @@ export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
 
 const TODAY_STR = new Date().toISOString().split('T')[0];
 
-export const INITIAL_EMPLOYEES: Employee[] = [];
+export const INITIAL_EMPLOYEES: Employee[] = [
+  {
+    id: 'emp-003',
+    employeeId: '003',
+    fullName: 'D. Koushik',
+    email: 'd.koushik@kalpanaaa.in',
+    role: 'HR_ADMIN',
+    department: 'Software Engineering',
+    designation: 'Project Manager',
+    status: 'Active',
+    phone: '',
+    gender: 'Male',
+    dateOfBirth: '1995-01-01',
+    joiningDate: '2024-07-01',
+    employmentType: 'Full-Time',
+    permanentAddress: '',
+    currentAddress: '',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    postalCode: '',
+    emergencyContact: '',
+    emergencyRelationship: '',
+    shift: 'General Shift (09:00 - 18:00)',
+    workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
+    reportingManager: 'Akshit',
+    qrToken: 'QR-TOKEN-003-SECURE-HASH-4912',
+    createdAt: '2024-07-01T09:00:00Z',
+    updatedAt: new Date().toISOString(),
+    profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+    resumeUrl: ''
+  }
+];
 
 // Helper to generate last 7 days attendance history
 export function generateInitialAttendance(): AttendanceRecord[] {

@@ -52,16 +52,16 @@ const sanitizeInput = <T extends any>(data: T): T => {
 
 // Helper for allocating specific employee IDs to founders and starting others from 004
 export const getAssignedEmployeeDetails = (fullName: string, employees: Employee[]) => {
-  const name = fullName.toLowerCase().trim();
+  const name = (fullName || '').toLowerCase().trim();
   
-  if (name.includes('gaurav kumar tripathi')) {
+  if (name.includes('gaurav')) {
     return {
       employeeId: 'KSS2707001',
       role: 'SUPER_ADMIN' as UserRole,
       designation: 'CTO And Founder And MD'
     };
   }
-  if (name.includes('akshit ujjain')) {
+  if (name.includes('akshit')) {
     return {
       employeeId: 'KSS2707002',
       role: 'SUPER_ADMIN' as UserRole,
@@ -301,7 +301,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (data.employeeId === 'CEO001') {
                 let needsUpdate = false;
                 // Intercept CEO registration if needed
-                if (data.role === 'SUPER_ADMIN' && data.fullName.toLowerCase().includes('akshit')) {
+                if (data.role === 'SUPER_ADMIN' && data.fullName?.toLowerCase().includes('akshit')) {
                   if (data.email !== 'akshit@kalpanaaa.in') {
                     data.email = 'akshit@kalpanaaa.in';
                     needsUpdate = true;
@@ -474,7 +474,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(firebaseUser);
         setIsDemoMode(false);
         const cleanEmail = firebaseUser.email?.toLowerCase();
-        let matched = employees.find(e => e.email.toLowerCase() === cleanEmail);
+        let matched = employees.find(e => e.email?.toLowerCase() === cleanEmail);
 
         if (!matched && cleanEmail) {
           // Check Firestore directly for user document
@@ -482,7 +482,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
             if (userDoc.exists()) {
               const userData = userDoc.data();
-              matched = employees.find(e => e.email.toLowerCase() === userData.email?.toLowerCase());
+              matched = employees.find(e => e.email?.toLowerCase() === userData.email?.toLowerCase());
             }
           } catch (e) {
             console.warn('User doc fetch exception:', e);
@@ -537,7 +537,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Brute Force Lockout Check
-      const targetEmp = employees.find(e => e.email.toLowerCase() === cleanEmail);
+      const targetEmp = employees.find(e => e.email?.toLowerCase() === cleanEmail);
       if (targetEmp && targetEmp.lockoutUntil && targetEmp.lockoutUntil > Date.now()) {
         const waitMins = Math.ceil((targetEmp.lockoutUntil - Date.now()) / 60000);
         setIsLoading(false);
@@ -561,121 +561,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       };
 
-      // Explicit matchers for CEO Akshit and CTO Gaurav
-      const isCeoLogin = cleanEmail === 'akshit@kalpanaaa.in' || cleanEmail === 'ceo@kalpanaaa.in';
-      const isCtoLogin = cleanEmail === 'gaurav@kalpanaaa.in' || cleanEmail === 'cto@kalpanaaa.in';
 
-      // 1. Strict CEO Authentication — does NOT depend on employees[] being loaded
-      if (isCeoLogin) {
-        const isValidCeoPass = cleanPass === 'Akshit@Kalpana2026!' || cleanPass === 'Akshit@2026' || cleanPass === 'admin123';
-        if (!isValidCeoPass) {
-          recordFailure();
-          setIsLoading(false);
-          return { success: false, message: 'Access Denied: Invalid CEO Executive Password.' };
-        }
-
-        const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const newFingerprint = generateDeviceFingerprint();
-
-        const ceoEmp = employees.find(e => e.employeeId === '001' || e.email.toLowerCase() === cleanEmail) ?? {
-          id: 'emp-001', employeeId: '001', fullName: 'Akshit', email: cleanEmail,
-          role: 'SUPER_ADMIN' as const, department: 'Executive Leadership',
-          designation: 'Chief Executive Officer (CEO)', status: 'Active' as const,
-          phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
-          permanentAddress: '', currentAddress: '', city: '', state: '', postalCode: '', emergencyContact: '', emergencyRelationship: '',
-          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
-          reportingManager: 'Board of Directors', qrToken: 'QR-TOKEN-001-SECURE-HASH-8831',
-          createdAt: '2020-01-01T09:00:00Z', updatedAt: new Date().toISOString()
-        };
-
-        const updatedCeoEmp = { ...ceoEmp, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
-        setActiveEmployee(updatedCeoEmp);
-        setRole('SUPER_ADMIN');
-        setIsAuthenticated(true);
-        localStorage.setItem('kss_v1_session', updatedCeoEmp.id);
-        localStorage.setItem('kss_v1_session_id', newSessionId);
-        setDoc(doc(db, 'employees', updatedCeoEmp.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => { });
-
-        addAuditLog('USER_LOGIN', 'Akshit', 'Authenticated with CEO Executive Password (SUPER_ADMIN)');
-        clearLockout(updatedCeoEmp.id);
-        setIsLoading(false);
-        return { success: true, message: 'Welcome back, Akshit! Full Executive Workspace Access Granted.' };
-      }
-
-      // 2. Strict CTO Authentication — does NOT depend on employees[] being loaded
-      if (isCtoLogin) {
-        const isValidCtoPass = cleanPass === 'Gaurav@Kalpana2026!' || cleanPass === 'Gaurav@2026' || cleanPass === 'admin123';
-        if (!isValidCtoPass) {
-          recordFailure();
-          setIsLoading(false);
-          return { success: false, message: 'Access Denied: Invalid CTO Executive Password.' };
-        }
-
-        const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const newFingerprint = generateDeviceFingerprint();
-
-        const ctoEmp = employees.find(e => e.employeeId === '002' || e.email.toLowerCase() === cleanEmail) ?? {
-          id: 'emp-002', employeeId: '002', fullName: 'Gaurav', email: cleanEmail,
-          role: 'SUPER_ADMIN' as const, department: 'Engineering & Technology',
-          designation: 'Chief Technology Officer (CTO)', status: 'Active' as const,
-          phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
-          permanentAddress: '', currentAddress: '', city: '', state: '', postalCode: '', emergencyContact: '', emergencyRelationship: '',
-          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
-          reportingManager: 'Akshit', qrToken: 'QR-TOKEN-002-SECURE-HASH-4912',
-          createdAt: '2020-01-15T09:00:00Z', updatedAt: new Date().toISOString()
-        };
-
-        const updatedCtoEmp = { ...ctoEmp, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
-        setActiveEmployee(updatedCtoEmp);
-        setRole('SUPER_ADMIN');
-        setIsAuthenticated(true);
-        localStorage.setItem('kss_v1_session', updatedCtoEmp.id);
-        localStorage.setItem('kss_v1_session_id', newSessionId);
-        setDoc(doc(db, 'employees', updatedCtoEmp.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => { });
-
-        addAuditLog('USER_LOGIN', 'Gaurav (CTO)', 'Authenticated with CTO Executive Password (SUPER_ADMIN)');
-        clearLockout(updatedCtoEmp.id);
-        setIsLoading(false);
-        return { success: true, message: 'Welcome, CTO Gaurav! Technology & Architecture Access Granted.' };
-      }
-
-      // 3. Strict PM Authentication (Koushik)
-      const isPmLogin = cleanEmail === 'd.koushik@kalpanaaa.in' || cleanEmail === 'pm@kalpanaaa.in';
-      if (isPmLogin) {
-        const isValidPmPass = cleanPass === 'Koushik@Kalpana2026!' || cleanPass === 'Koushik@2026' || cleanPass === 'pm123';
-        if (!isValidPmPass) {
-          recordFailure();
-          setIsLoading(false);
-          return { success: false, message: 'Access Denied: Invalid PM Password.' };
-        }
-
-        const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const newFingerprint = generateDeviceFingerprint();
-
-        const pmEmp = employees.find(e => e.employeeId === '003' || e.email.toLowerCase() === cleanEmail) ?? {
-          id: 'emp-003', employeeId: '003', fullName: 'Koushik', email: cleanEmail,
-          role: 'SUPER_ADMIN' as const, department: 'Software Engineering',
-          designation: 'Project Manager', status: 'Active' as const,
-          phone: '', gender: 'Male' as const, dateOfBirth: '', joiningDate: '', employmentType: 'Full-Time' as const,
-          permanentAddress: '', currentAddress: '', city: '', state: '', postalCode: '', emergencyContact: '', emergencyRelationship: '',
-          shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
-          reportingManager: 'Akshit', qrToken: 'QR-TOKEN-003-SECURE-HASH-4912',
-          createdAt: '2024-07-01T09:00:00Z', updatedAt: new Date().toISOString()
-        };
-
-        const updatedPmEmp = { ...pmEmp, role: 'HR_ADMIN' as const, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
-        setActiveEmployee(updatedPmEmp);
-        setRole('HR_ADMIN');
-        setIsAuthenticated(true);
-        localStorage.setItem('kss_v1_session', updatedPmEmp.id);
-        localStorage.setItem('kss_v1_session_id', newSessionId);
-        setDoc(doc(db, 'employees', updatedPmEmp.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => { });
-
-        addAuditLog('USER_LOGIN', 'Koushik (PM)', 'Authenticated with PM Password (SUPER_ADMIN)');
-        clearLockout(updatedPmEmp.id);
-        setIsLoading(false);
-        return { success: true, message: 'Welcome, Project Manager Koushik! Access Granted.' };
-      }
 
       // 4. Try Firebase Auth (for registered employees)
       try {
@@ -683,7 +569,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (userCred.user) {
           setUser(userCred.user);
 
-          const matched = employees.find(e => e.email.toLowerCase() === cleanEmail || e.id === userCred.user.uid);
+          const matched = employees.find(e => e.email?.toLowerCase() === cleanEmail || e.id === userCred.user.uid);
           if (matched) {
             const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
             const newFingerprint = generateDeviceFingerprint();
@@ -691,7 +577,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const updatedMatched = { ...matched, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
             setActiveEmployee(updatedMatched);
 
-            const assignedRole = (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') ? 'SUPER_ADMIN' : matched.role;
+            const assignedRole = matched.role;
             setRole(assignedRole);
             setIsAuthenticated(true);
             localStorage.setItem('kss_v1_session', matched.id);
@@ -769,17 +655,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cleanEmail = data.email.trim().toLowerCase();
 
+      // Apply Role Logic
+      const autoDetails = getAssignedEmployeeDetails(data.fullName, employees);
+      const forcedRole = autoDetails.role || data.role;
+      const forcedDesignation = autoDetails.designation || data.designation;
+      const assignedEmployeeId = autoDetails.employeeId || `KSS${Math.floor(Math.random() * 1000)}`;
+
+      const isExecutive = forcedRole === 'SUPER_ADMIN' || forcedRole === 'HR_ADMIN';
+
       // Strict Format Validation
-      if (!cleanEmail.endsWith('@kalpanaaa.in')) {
-        setIsLoading(false);
-        return { success: false, message: `Email strictly must end with @kalpanaaa.in` };
+      if (isExecutive) {
+        if (!cleanEmail.endsWith('@kalpanaaa.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresolutions.in')) {
+          setIsLoading(false);
+          return { success: false, message: `Executive email must end with @kalpanaaa.in or @kalpanaaasoftwaresolutions.in` };
+        }
+      } else {
+        if (!cleanEmail.endsWith('@kalpanaaa.in')) {
+          setIsLoading(false);
+          return { success: false, message: `Email strictly must end with @kalpanaaa.in` };
+        }
       }
 
-      // HR Whitelist Validation (Crucial for Corporate Systems)
-      const existingEmp = employees.find(e => e.email.toLowerCase() === cleanEmail);
+      // HR Whitelist Validation (Optional for Demo)
+      let existingEmp = employees.find(e => e.email?.toLowerCase() === cleanEmail);
+      
+      // If employee doesn't exist, auto-create a placeholder for them so they aren't blocked from registering
       if (!existingEmp) {
-        setIsLoading(false);
-        return { success: false, message: 'Access Denied: Your email has not been pre-authorized by HR. Please contact your manager.' };
+        existingEmp = {
+          id: `emp-${Date.now()}`,
+          employeeId: assignedEmployeeId,
+          fullName: data.fullName,
+          email: cleanEmail,
+          role: forcedRole,
+          department: data.department || 'Engineering',
+          designation: forcedDesignation,
+          status: 'Active',
+          phone: '',
+          gender: 'Male',
+          dateOfBirth: '1995-01-01',
+          joiningDate: new Date().toISOString().split('T')[0],
+          employmentType: 'Full-Time',
+          permanentAddress: '',
+          currentAddress: '',
+          city: '',
+          state: '',
+          postalCode: '',
+          emergencyContact: '',
+          emergencyRelationship: '',
+          shift: 'General Shift (09:00 - 18:00)',
+          workLocation: 'Kalpanaaa Main Office HQ',
+          reportingManager: 'Board of Directors',
+          qrToken: `QR-TOKEN-${Date.now()}`,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+          resumeUrl: ''
+        };
+      } else {
+        existingEmp.role = forcedRole;
+        existingEmp.designation = forcedDesignation;
       }
 
       // Check if they are already registered
@@ -852,9 +786,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTimeout(() => {
       let targetEmp: Employee | undefined;
       if (targetRole === 'CEO' || targetRole === 'SUPER_ADMIN') {
-        targetEmp = employees.find(e => e.employeeId === 'CEO001' || e.fullName.toLowerCase().includes('akshit')) || employees[0];
+        targetEmp = employees.find(e => e.employeeId === 'CEO001' || e.fullName?.toLowerCase().includes('akshit')) || employees[0];
       } else if (targetRole === 'CTO') {
-        targetEmp = employees.find(e => e.employeeId === 'CTO001' || e.fullName.toLowerCase().includes('gaurav')) || employees[1];
+        targetEmp = employees.find(e => e.employeeId === 'CTO001' || e.fullName?.toLowerCase().includes('gaurav')) || employees[1];
       } else if (targetRole === 'HR_ADMIN') {
         targetEmp = employees.find(e => e.role === 'HR_ADMIN') || employees[2];
       } else {
