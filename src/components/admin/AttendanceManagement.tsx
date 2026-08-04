@@ -69,7 +69,22 @@ export const AttendanceManagement: React.FC = () => {
     if (!editingRecord) return;
     updateAttendanceRecord(editingRecord.id, {
       status: editStatus,
-      notes: editNotes || 'HR Manual Correction'
+      notes: editNotes ? `HR Correction: ${editNotes}` : editingRecord.notes
+    });
+    setEditingRecord(null);
+  };
+
+  const handleUndoCheckout = () => {
+    if (!editingRecord) return;
+    const confirmUndo = window.confirm(
+      "Are you sure you want to undo the Check-Out for this employee?\n\n" +
+      "This will clear their Check-Out time and allow them to Check-Out again today."
+    );
+    if (!confirmUndo) return;
+    
+    updateAttendanceRecord(editingRecord.id, {
+      checkOutAt: null,
+      notes: editNotes ? `HR Undo Checkout: ${editNotes}` : (editingRecord.notes ? `${editingRecord.notes} | HR Undo Checkout` : 'HR Undo Checkout')
     });
     setEditingRecord(null);
   };
@@ -302,10 +317,18 @@ export const AttendanceManagement: React.FC = () => {
             <div className="mt-6 flex items-center justify-end gap-2">
               <button
                 onClick={() => setEditingRecord(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer transition-colors"
+                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer transition-colors mr-auto"
               >
                 Cancel
               </button>
+              {editingRecord.checkOutAt && (
+                <button
+                  onClick={handleUndoCheckout}
+                  className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-500 border border-amber-500/50 text-xs font-semibold rounded-xl cursor-pointer shadow-md transition-colors"
+                >
+                  Undo Check-Out
+                </button>
+              )}
               <button
                 onClick={handleSaveCorrection}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl cursor-pointer shadow-md transition-colors"

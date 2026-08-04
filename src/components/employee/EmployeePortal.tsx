@@ -75,6 +75,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const [qrUrl, setQrUrl] = useState<string>('');
   const [gpsLocation, setGpsLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ success: boolean; message: string } | null>(null);
 
   // Profile Edit State
@@ -156,14 +157,22 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   useEffect(() => {
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        pos => setGpsLocation({ 
-          lat: pos.coords.latitude, 
-          lon: pos.coords.longitude,
-          accuracy: Math.round(pos.coords.accuracy) || 8
-        }),
-        err => console.warn('Employee location prompt:', err.message),
+        pos => {
+          setGpsLocation({ 
+            lat: pos.coords.latitude, 
+            lon: pos.coords.longitude,
+            accuracy: Math.round(pos.coords.accuracy) || 8
+          });
+          setGpsError(null);
+        },
+        err => {
+          console.warn('Employee location prompt:', err.message);
+          setGpsError(err.message || 'Location access denied or unavailable.');
+        },
         { enableHighAccuracy: true }
       );
+    } else {
+      setGpsError('Geolocation is not supported by your browser.');
     }
   }, []);
 
@@ -208,6 +217,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   };
 
   const handleSelfCheckOut = async () => {
+    const isFinal = window.confirm(
+      "Are you sure you want to Check Out for the day?\n\n" +
+      "⚠️ YOUR WORKING TIME WILL END HERE.\n" +
+      "If you are just going on a break, please use the 'Tea Break' or 'Lunch Break' options instead.\n\n" +
+      "Click OK to permanently end your shift today."
+    );
+    if (!isFinal) return;
+
     setActionFeedback(null);
     // Auto-end any open break before checkout
     if (activeBreak && todayRecord) {
@@ -503,9 +520,37 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
                   <div className="flex flex-col gap-3">
                     {!todayRecord?.checkInAt ? (
-                      <button onClick={handleSelfCheckIn} className="w-full px-4 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
-                        <Clock className="w-4 h-4" /> Check In
-                      </button>
+                      <div className="flex flex-col gap-2">
+                        {settings.gpsRequired && (
+                          <div className={`text-xs p-2.5 rounded-lg border flex items-center justify-center gap-2 font-medium ${
+                            gpsError ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                            !gpsLocation ? 'bg-blue-500/10 border-blue-500/20 text-blue-400 animate-pulse' :
+                            isVerifiedLocation ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                            'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                          }`}>
+                            {gpsError ? (
+                              <><AlertTriangle className="w-4 h-4" /> {gpsError}</>
+                            ) : !gpsLocation ? (
+                              <><Clock className="w-4 h-4" /> Acquiring GPS...</>
+                            ) : (
+                              <>
+                                {isVerifiedLocation ? <CheckCircle2 className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
+                                {liveDistanceMeters}m from office (Limit: {companyWorkZone.radiusMeters}m)
+                              </>
+                            )}
+                          </div>
+                        )}
+                        <button 
+                          onClick={handleSelfCheckIn} 
+                          disabled={settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)}
+                          className={`w-full px-4 py-3 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm ${
+                            settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
+                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                              : 'bg-white hover:bg-slate-100 text-slate-900'
+                          }`}>
+                          <Clock className="w-4 h-4" /> Check In
+                        </button>
+                      </div>
                     ) : !todayRecord?.checkOutAt ? (
                       <>
                         {activeBreak ? (
@@ -513,8 +558,15 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                             <button onClick={handleEndBreak} className="w-full px-4 py-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/50 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm animate-pulse">
                               <StopCircle className="w-5 h-5" /> End Break ({String(Math.floor(breakElapsedSec / 60)).padStart(2, '0')}:{String(breakElapsedSec % 60).padStart(2, '0')})
                             </button>
-                            <button onClick={handleSelfCheckOut} className="w-full px-4 py-2 bg-transparent text-slate-500 hover:text-red-400 font-semibold text-xs rounded-lg transition-colors border border-transparent hover:border-red-400/30 flex items-center justify-center gap-2">
-                              <LogOut className="w-3.5 h-3.5" /> Force Check Out
+                            <button 
+                              onClick={handleSelfCheckOut} 
+                              disabled={settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)}
+                              className={`w-full px-4 py-2 font-semibold text-xs rounded-lg transition-colors border flex items-center justify-center gap-2 ${
+                                settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
+                                  ? 'bg-transparent text-slate-600 border-transparent cursor-not-allowed'
+                                  : 'bg-transparent text-slate-500 hover:text-red-400 border-transparent hover:border-red-400/30'
+                              }`}>
+                              <LogOut className="w-3.5 h-3.5" /> Force Check Out {settings.gpsRequired && (!isVerifiedLocation || !gpsLocation) && '(Out of Range)'}
                             </button>
                           </div>
                         ) : (
@@ -527,7 +579,35 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                                 <UtensilsCrossed className="w-4 h-4 text-orange-400" /> Lunch Break
                               </button>
                             </div>
-                            <button onClick={handleSelfCheckOut} className="w-full px-4 py-3 bg-slate-800 hover:bg-red-500/20 text-white hover:text-red-400 font-bold text-sm rounded-lg transition-colors border border-slate-700 hover:border-red-500/50 flex items-center justify-center gap-2 shadow-sm">
+                            
+                            {settings.gpsRequired && (
+                              <div className={`text-xs p-2.5 rounded-lg border flex items-center justify-center gap-2 font-medium ${
+                                gpsError ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                                !gpsLocation ? 'bg-blue-500/10 border-blue-500/20 text-blue-400 animate-pulse' :
+                                isVerifiedLocation ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                                'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                              }`}>
+                                {gpsError ? (
+                                  <><AlertTriangle className="w-4 h-4" /> {gpsError}</>
+                                ) : !gpsLocation ? (
+                                  <><Clock className="w-4 h-4" /> Acquiring GPS...</>
+                                ) : (
+                                  <>
+                                    {isVerifiedLocation ? <CheckCircle2 className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
+                                    {liveDistanceMeters}m from office (Limit: {companyWorkZone.radiusMeters}m)
+                                  </>
+                                )}
+                              </div>
+                            )}
+
+                            <button 
+                              onClick={handleSelfCheckOut} 
+                              disabled={settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)}
+                              className={`w-full px-4 py-3 font-bold text-sm rounded-lg transition-colors border flex items-center justify-center gap-2 shadow-sm ${
+                                settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
+                                  ? 'bg-slate-800 text-slate-600 border-slate-700 cursor-not-allowed'
+                                  : 'bg-slate-800 hover:bg-red-500/20 text-white hover:text-red-400 border-slate-700 hover:border-red-500/50'
+                              }`}>
                               <LogOut className="w-4 h-4" /> Check Out
                             </button>
                           </>

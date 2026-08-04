@@ -366,10 +366,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             // Auto-correct stale GPS coordinates from previous Firestore states
             let needsUpdate = false;
-            if (fetchedZone.latitude === 13.014316 || fetchedZone.longitude === 77.64052) {
+            if (fetchedZone.latitude === 13.014316 || fetchedZone.longitude === 77.64052 || fetchedZone.radiusMeters === 500) {
               fetchedZone.latitude = 13.014333;
               fetchedZone.longitude = 77.646000;
-              fetchedZone.radiusMeters = 500; // Increase radius to 500m to be safe
+              fetchedZone.radiusMeters = 300; // Adjusted to 300m as requested by user
               needsUpdate = true;
             }
 
@@ -448,8 +448,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const matched = employees.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
       if (matched) {
         setActiveEmployee(matched);
-        // Restore correct role: CEO/CTO always get SUPER_ADMIN
-        const assignedRole = (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') ? 'SUPER_ADMIN' : matched.role;
+        // Restore correct role: Executive override for CEO, CTO, and PM(003)
+        let assignedRole = matched.role;
+        if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
+        if (matched.employeeId === '003' || matched.email?.toLowerCase() === 'd.koushik@kalpanaaa.in') assignedRole = 'HR_ADMIN';
+        
         setRole(assignedRole);
         setIsAuthenticated(true);
       } else {
@@ -637,7 +640,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 3. Strict PM Authentication (Koushik)
-      const isPmLogin = cleanEmail === 'koushik@kalpanaaa.in' || cleanEmail === 'pm@kalpanaaa.in';
+      const isPmLogin = cleanEmail === 'd.koushik@kalpanaaa.in' || cleanEmail === 'pm@kalpanaaa.in';
       if (isPmLogin) {
         const isValidPmPass = cleanPass === 'Koushik@Kalpana2026!' || cleanPass === 'Koushik@2026' || cleanPass === 'pm123';
         if (!isValidPmPass) {
@@ -660,10 +663,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: '2024-07-01T09:00:00Z', updatedAt: new Date().toISOString()
         };
 
-        const updatedPmEmp = { ...pmEmp, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
+        const updatedPmEmp = { ...pmEmp, role: 'HR_ADMIN' as const, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
         setActiveEmployee(updatedPmEmp);
-        // Note: Assigning SUPER_ADMIN to allow admin panel access similar to CEO/CTO.
-        setRole('SUPER_ADMIN');
+        setRole('HR_ADMIN');
         setIsAuthenticated(true);
         localStorage.setItem('kss_v1_session', updatedPmEmp.id);
         localStorage.setItem('kss_v1_session_id', newSessionId);
@@ -767,36 +769,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cleanEmail = data.email.trim().toLowerCase();
 
-      // Strict Format Validation: employee name + domain
-      const firstName = data.fullName.trim().split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-      const expectedEmailFormat = `${firstName}@kalpanaaa.in`;
-
+      // Strict Format Validation
       if (!cleanEmail.endsWith('@kalpanaaa.in')) {
         setIsLoading(false);
-        return { success: false, message: `Email strictly must end with @kalpanaaa.in (e.g., ${expectedEmailFormat})` };
+        return { success: false, message: `Email strictly must end with @kalpanaaa.in` };
       }
 
-      // Unique Email Flag Validation
-      const existing = employees.find(e => e.email.toLowerCase() === cleanEmail);
-      if (existing) {
+      // HR Whitelist Validation (Crucial for Corporate Systems)
+      const existingEmp = employees.find(e => e.email.toLowerCase() === cleanEmail);
+      if (!existingEmp) {
         setIsLoading(false);
-        return { success: false, message: 'UNIQUE FLAG: An account with this exact email address already exists in the system.' };
+        return { success: false, message: 'Access Denied: Your email has not been pre-authorized by HR. Please contact your manager.' };
       }
 
-      let uid = `emp-${Date.now()}`;
+      // Check if they are already registered
+      if (existingEmp.uid) {
+        setIsLoading(false);
+        return { success: false, message: 'You have already registered. Please sign in instead.' };
+      }
+
+      let newUid = `emp-${Date.now()}`;
+      
       // Attempt Firebase Auth sign up
       try {
         const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, data.password);
         if (userCred.user) {
-          uid = userCred.user.uid;
+          newUid = userCred.user.uid;
           setUser(userCred.user);
 
-          // Write user record to Firestore
-          await setDoc(doc(db, 'users', uid), {
-            uid,
+          // Write user mapping record to Firestore
+          await setDoc(doc(db, 'users', newUid), {
+            uid: newUid,
             email: cleanEmail,
-            role: data.role,
-            fullName: data.fullName,
+            role: existingEmp.role,
+            fullName: existingEmp.fullName,
             createdAt: new Date().toISOString()
           }).catch(() => { });
         }
@@ -814,54 +820,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // Generate sequential employee ID based on current count and locked profiles
-      const autoDetails = getAssignedEmployeeDetails(data.fullName, employees);
-      const empCode = autoDetails.employeeId;
-      
-      const newEmp: Employee = {
-        id: uid,
-        employeeId: empCode,
-        fullName: data.fullName,
-        email: cleanEmail,
-        department: data.department || 'General Operations',
-        designation: autoDetails.designation || data.designation || (data.role === 'SUPER_ADMIN' ? 'System Administrator' : data.role === 'HR_ADMIN' ? 'HR Manager' : 'Software Engineer'),
-        role: autoDetails.role || data.role,
-        phone: '+1 (555) 019-2831',
-        gender: 'Prefer not to say',
-        dateOfBirth: '1995-06-15',
-        joiningDate: new Date().toISOString().split('T')[0],
-        employmentType: 'Full-Time',
-        permanentAddress: '100 Technology Way',
-        currentAddress: '100 Technology Way',
-        city: 'San Jose',
-        state: 'CA',
-        postalCode: '95110',
-        emergencyContact: '+1 (555) 999-1122',
-        emergencyRelationship: 'Spouse',
-        status: 'Active',
-        shift: 'General Shift (09:00 - 18:00)',
-        workLocation: settings.officeName,
-        reportingManager: 'Sarah Jenkins',
-        qrToken: empCode,
-        profilePhotoUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200`,
-        createdAt: new Date().toISOString(),
+      // Update the EXISTING employee record with the new Firebase UID
+      const updatedEmp = {
+        ...existingEmp,
+        uid: newUid,
         updatedAt: new Date().toISOString()
       };
 
       // Persist to Firestore
-      await setDoc(doc(db, 'employees', newEmp.id), newEmp).catch(err => {
-        handleFirestoreError(err, OperationType.WRITE, `employees/${newEmp.id}`);
+      await setDoc(doc(db, 'employees', updatedEmp.id), updatedEmp, { merge: true }).catch(err => {
+        handleFirestoreError(err, OperationType.WRITE, `employees/${updatedEmp.id}`);
       });
 
-      setEmployees(prev => [newEmp, ...prev.filter(e => e.id !== newEmp.id)]);
-      setActiveEmployee(newEmp);
-      setRole(newEmp.role);
+      setEmployees(prev => [updatedEmp, ...prev.filter(e => e.id !== updatedEmp.id)]);
+      setActiveEmployee(updatedEmp);
+      setRole(updatedEmp.role);
       setIsAuthenticated(true);
-      localStorage.setItem('kss_v1_session', newEmp.id);
+      localStorage.setItem('kss_v1_session', updatedEmp.id);
 
-      addAuditLog('USER_SIGNUP', newEmp.fullName, `Registered new account (${newEmp.role})`);
+      addAuditLog('USER_SIGNUP', updatedEmp.fullName, `Activated pre-authorized account (${updatedEmp.role})`);
       setIsLoading(false);
-      return { success: true, message: `Account created! Welcome to Kalpanaaa Software Solutions, ${newEmp.fullName}.` };
+      return { success: true, message: `Account activated! Welcome to Kalpanaaa Software Solutions, ${updatedEmp.fullName}.` };
     } catch (err: any) {
       setIsLoading(false);
       return { success: false, message: err.message || 'Registration failed.' };

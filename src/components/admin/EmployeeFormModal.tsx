@@ -19,18 +19,22 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   // Form State
   const [formData, setFormData] = useState({
     employeeId: employeeToEdit?.employeeId || (() => {
-      let maxSeq = 3; 
+      let maxSeq = 0; 
       employees.forEach(emp => {
-        if (emp.employeeId?.startsWith('KSS2707')) {
-          const numStr = emp.employeeId.replace('KSS2707', '');
-          const num = parseInt(numStr, 10);
-          if (!isNaN(num) && num > maxSeq) {
-            maxSeq = num;
+        if (emp.employeeId) {
+          // Extract the numeric part at the end of the ID string (e.g., '003' -> 3, 'KSS004' -> 4)
+          const numMatch = emp.employeeId.match(/\d+$/);
+          if (numMatch) {
+            const num = parseInt(numMatch[0], 10);
+            if (!isNaN(num) && num > maxSeq) {
+              maxSeq = num;
+            }
           }
         }
       });
-      const seq = String(maxSeq + 1).padStart(3, '0');
-      return `KSS2707${seq}`;
+      // Fallback base to 3 if database is totally empty, else +1
+      maxSeq = Math.max(maxSeq, 3);
+      return String(maxSeq + 1).padStart(3, '0');
     })(),
     fullName: employeeToEdit?.fullName || '',
     email: employeeToEdit?.email || '',

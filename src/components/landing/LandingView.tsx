@@ -316,9 +316,9 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
             {/* Render 1 other employee, excluding executives to avoid duplicates */}
             {employees
               .filter(emp => 
-                !emp.fullName.toLowerCase().includes('gaurav') && 
-                !emp.fullName.toLowerCase().includes('akshit') &&
-                !emp.fullName.toLowerCase().includes('koushik')
+                !(emp.fullName || '').toLowerCase().includes('gaurav') && 
+                !(emp.fullName || '').toLowerCase().includes('akshit') &&
+                !(emp.fullName || '').toLowerCase().includes('koushik')
               )
               .slice(0, 1)
               .map((emp) => (
@@ -353,19 +353,19 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
                 <span className="text-slate-400 text-xs block">Engineering & Development</span>
                 <span className="text-lg font-bold text-white mt-1 block">
-                  {employees.filter(e => e.department.toLowerCase().includes('engine') || e.department.toLowerCase().includes('soft')).length} Engineers
+                  {employees.filter(e => (e.department || '').toLowerCase().includes('engine') || (e.department || '').toLowerCase().includes('soft')).length} Engineers
                 </span>
               </div>
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
                 <span className="text-slate-400 text-xs block">Operations & HR</span>
                 <span className="text-lg font-bold text-white mt-1 block">
-                  {employees.filter(e => e.department.toLowerCase().includes('hr') || e.department.toLowerCase().includes('oper')).length} Members
+                  {employees.filter(e => (e.department || '').toLowerCase().includes('hr') || (e.department || '').toLowerCase().includes('oper')).length} Members
                 </span>
               </div>
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
                 <span className="text-slate-400 text-xs block">Quality & Management</span>
                 <span className="text-lg font-bold text-white mt-1 block">
-                  {employees.filter(e => e.department.toLowerCase().includes('quality') || e.department.toLowerCase().includes('exec')).length} Members
+                  {employees.filter(e => (e.department || '').toLowerCase().includes('quality') || (e.department || '').toLowerCase().includes('exec')).length} Members
                 </span>
               </div>
             </div>

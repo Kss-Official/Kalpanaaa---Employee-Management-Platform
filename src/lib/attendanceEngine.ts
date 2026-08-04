@@ -108,15 +108,19 @@ export function evaluateAttendanceScan(
   let locationVerified = true;
   let distanceMeters = 0;
   
-  if (settings.gpsRequired && userLat !== undefined && userLon !== undefined) {
-    distanceMeters = calculateGpsDistanceMeters(
-      userLat,
-      userLon,
-      settings.officeLatitude,
-      settings.officeLongitude
-    );
-    if (distanceMeters > settings.allowedRadiusMeters) {
+  if (settings.gpsRequired) {
+    if (userLat === undefined || userLon === undefined) {
       locationVerified = false;
+    } else {
+      distanceMeters = calculateGpsDistanceMeters(
+        userLat,
+        userLon,
+        settings.officeLatitude,
+        settings.officeLongitude
+      );
+      if (distanceMeters > settings.allowedRadiusMeters) {
+        locationVerified = false;
+      }
     }
   }
 
@@ -142,7 +146,9 @@ export function evaluateAttendanceScan(
         status,
         locationVerified: false,
         distanceMeters,
-        message: `Outside authorized office location (${distanceMeters}m away, limit is ${settings.allowedRadiusMeters}m).`
+        message: userLat === undefined || userLon === undefined 
+          ? 'GPS Location is required. Please grant location permissions and wait for signal.'
+          : `Outside authorized office location (${distanceMeters}m away, limit is ${settings.allowedRadiusMeters}m).`
       };
     }
 

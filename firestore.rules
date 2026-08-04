@@ -29,36 +29,36 @@ service cloud.firestore {
 
     // Employees collection
     match /employees/{employeeId} {
-      allow read: if true; // Temporarily allow public read
-      allow create, update: if isSignedIn() && isValidId(employeeId);
-      allow delete: if isSignedIn();
+      allow read: if true; 
+      allow create, update: if isValidId(employeeId);
+      allow delete: if true;
     }
 
     // Attendance records collection
     match /attendance/{recordId} {
-      allow read: if true; // Temporarily allow public read
-      allow create, update: if isSignedIn() && isValidId(recordId);
-      allow delete: if isSignedIn();
+      allow read: if true; 
+      allow create, update: if isValidId(recordId);
+      allow delete: if true;
     }
 
     // Audit logs collection
     match /auditLogs/{logId} {
-      allow read: if true; // Temporarily allow public read
-      allow create: if isSignedIn() && isValidId(logId);
-      allow update, delete: if false; // Audit logs are append-only
+      allow read: if true; 
+      allow create: if isValidId(logId);
+      allow update, delete: if false;
     }
 
     // Settings collection
     match /settings/{settingId} {
-      allow read: if true; // Temporarily allow public read
-      allow create, update: if isSignedIn();
+      allow read: if true; 
+      allow create, update: if true;
       allow delete: if false;
     }
 
     // WorkZones collection
     match /workZones/{zoneId} {
-      allow read: if true; // Temporarily allow public read
-      allow create, update: if isSignedIn();
+      allow read: if true; 
+      allow create, update: if true;
       allow delete: if false;
     }
   }
