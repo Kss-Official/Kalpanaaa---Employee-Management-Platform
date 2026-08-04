@@ -676,41 +676,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // HR Whitelist Validation (Optional for Demo)
+      // HR Whitelist Validation
       let existingEmp = employees.find(e => e.email?.toLowerCase() === cleanEmail);
       
-      // If employee doesn't exist, auto-create a placeholder for them so they aren't blocked from registering
+      // If employee doesn't exist, block the registration
       if (!existingEmp) {
-        existingEmp = {
-          id: `emp-${Date.now()}`,
-          employeeId: assignedEmployeeId,
-          fullName: data.fullName,
-          email: cleanEmail,
-          role: forcedRole,
-          department: data.department || 'Engineering',
-          designation: forcedDesignation,
-          status: 'Active',
-          phone: '',
-          gender: 'Male',
-          dateOfBirth: '1995-01-01',
-          joiningDate: new Date().toISOString().split('T')[0],
-          employmentType: 'Full-Time',
-          permanentAddress: '',
-          currentAddress: '',
-          city: '',
-          state: '',
-          postalCode: '',
-          emergencyContact: '',
-          emergencyRelationship: '',
-          shift: 'General Shift (09:00 - 18:00)',
-          workLocation: 'Kalpanaaa Main Office HQ',
-          reportingManager: 'Board of Directors',
-          qrToken: `QR-TOKEN-${Date.now()}`,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
-          resumeUrl: ''
-        };
+        setIsLoading(false);
+        return { success: false, message: 'Unauthorized Registration: Your email must be pre-approved and added to the directory by HR before you can register.' };
       } else {
         existingEmp.role = forcedRole;
         existingEmp.designation = forcedDesignation;
@@ -925,12 +897,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (existingRec && existingRec.checkInAt) {
       if (existingRec.checkOutAt) {
-        // TEMPORARY TESTING OVERRIDE: Revert the checkout to allow checking in again
-        const updatedRecord = { ...existingRec, checkOutAt: null, notes: (existingRec.notes ? existingRec.notes + ' | ' : '') + 'TESTING: Re-checked in.' };
-        setAttendance(prev => prev.map(a => a.id === existingRec.id ? updatedRecord : a));
-        setDoc(doc(db, 'attendance', existingRec.id), { checkOutAt: null, notes: updatedRecord.notes }, { merge: true }).catch(() => {});
-        addAuditLog('ATTENDANCE_CHECKIN', emp.employeeId, 'Testing Mode: Re-checked in after checkout.');
-        return { success: true, message: 'Testing Mode: Checked back in successfully.', record: updatedRecord };
+        return { success: false, message: 'You have already completed your shift and checked out for today.' };
       }
       return { success: false, message: 'Employee is already checked in for today.' };
     }

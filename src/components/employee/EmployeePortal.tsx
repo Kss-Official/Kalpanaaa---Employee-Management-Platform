@@ -425,18 +425,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 <span>Check Out Now</span>
               </button>
             ) : (
-              <div className="flex gap-2 items-center flex-wrap">
-                <span className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-slate-700">
-                  ✓ Attendance Completed
-                </span>
-                <button
-                  onClick={handleSelfCheckIn}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow-lg shadow-emerald-900/40 hover:scale-[1.02] flex items-center gap-2"
-                >
-                  <Clock className="w-4 h-4" />
-                  <span>Re-Check In (Test)</span>
-                </button>
-              </div>
+              <span className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-slate-700">
+                ✓ Attendance Completed
+              </span>
             )}
           </div>
 
