@@ -2,6 +2,9 @@ import React from 'react';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { motion } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
+import gauravImg from '../../assets/images/GauravCTO.jpeg';
+import akshitImg from '../../assets/images/Akshit.png';
+import koushikImg from '../../assets/images/Koushik.png';
 import { 
   Building2, 
   ShieldCheck, 
@@ -69,7 +72,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
           {onShowSplash && (
             <button
               onClick={onShowSplash}
-              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-blue-300 border border-blue-800/60 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+              className="hidden sm:flex px-3 py-2 bg-slate-900 hover:bg-slate-800 text-blue-300 border border-blue-800/60 text-xs font-bold rounded-xl transition-all cursor-pointer items-center gap-1.5 shadow-sm"
               title="View Company Splash Screen"
             >
               <span className="hidden sm:inline">Company Splash</span>
@@ -273,7 +276,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
             {/* Hardcoded Founders Showcase */}
             <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
               <img
-                src="/GauravCTO.jpeg"
+                src={gauravImg}
                 alt="Gaurav Kumar Tripathi"
                 className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
               />
@@ -286,7 +289,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
 
             <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
               <img
-                src="/Akshit.png"
+                src={akshitImg}
                 alt="Akshit Ujjain"
                 className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
               />
@@ -299,7 +302,7 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
             
             <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
               <img
-                src="/image.png"
+                src={koushikImg}
                 alt="Koushik"
                 className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
               />
