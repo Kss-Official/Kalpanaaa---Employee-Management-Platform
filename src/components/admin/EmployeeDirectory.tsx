@@ -215,7 +215,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
 
                     <td className="py-3 px-6">
                       <div className="text-slate-400 font-bold">{emp.employmentType}</div>
-                      <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift.split(' ')[0]}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift?.split(' ')[0] || 'General'}</div>
                     </td>
 
                     <td className="py-3 px-6">
