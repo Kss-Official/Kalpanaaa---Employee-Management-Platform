@@ -28,7 +28,7 @@ export const AllEmployeeBarcodesView: React.FC<{ onBack: () => void }> = ({ onBa
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 print:grid-cols-4">
-        {employees.map(emp => (
+        {employees.filter(emp => emp.fullName && emp.fullName.trim() !== '').map(emp => (
           <div key={emp.id} className="border-2 border-slate-200 p-4 rounded-xl flex flex-col items-center justify-center break-inside-avoid text-center">
             <img src={kalpanaLogo} alt="Logo" className="w-10 h-10 object-contain mb-2" />
             <h3 className="font-bold text-base text-slate-900 leading-tight mb-1">{emp.fullName}</h3>

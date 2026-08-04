@@ -44,6 +44,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
   const filteredEmployees = employees.filter(emp => {
+    if (!emp.fullName || emp.fullName.trim() === '') return false;
+    
     const matchesSearch = 
       (emp.fullName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
       (emp.employeeId?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
