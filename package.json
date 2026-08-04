@@ -43,5 +43,14 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "vite-plugin-pwa": "^1.3.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@firebase/util",
+      "@google/genai",
+      "core-js",
+      "esbuild",
+      "protobufjs"
+    ]
   }
 }
