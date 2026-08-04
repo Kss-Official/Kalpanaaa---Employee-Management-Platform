@@ -44,16 +44,24 @@ export const PWAInstallPrompt: React.FC = () => {
     };
   }, [isDismissed]);
 
-  // FALLBACK: Force the UI to show after 2 seconds if it hasn't appeared yet
-  // This is helpful for desktops or situations where the browser heuristics block the native event.
+  // FALLBACK & AUTO-HIDE LOGIC
   useEffect(() => {
-    const timer = setTimeout(() => {
+    // 1. Show after 5 seconds (waits for splash screen)
+    const showTimer = setTimeout(() => {
       if (!isVisible && !isDismissed) {
         setIsVisible(true);
       }
-    }, 2000);
+    }, 5000);
     
-    return () => clearTimeout(timer);
+    // 2. Hide automatically 25 seconds after it appears (total 30s from load)
+    const hideTimer = setTimeout(() => {
+      setIsVisible(false);
+    }, 30000); // 5s wait + 25s visible
+    
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
   }, [isVisible, isDismissed]);
 
   const handleInstallClick = async () => {
@@ -89,7 +97,7 @@ export const PWAInstallPrompt: React.FC = () => {
   if (!isVisible) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-[9999] bg-slate-900 border border-blue-500/40 shadow-2xl shadow-blue-500/20 rounded-2xl p-5 max-w-sm flex items-start gap-4 animate-slide-in-up">
+    <div className="fixed top-20 right-4 sm:top-24 sm:right-8 z-[9999] bg-slate-900 border border-blue-500/40 shadow-2xl shadow-blue-500/20 rounded-2xl p-5 max-w-sm flex items-start gap-4 animate-slide-in-up">
       <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-lg shadow-blue-500/30">
         <Download className="w-6 h-6" />
       </div>

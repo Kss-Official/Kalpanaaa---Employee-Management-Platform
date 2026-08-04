@@ -69,43 +69,32 @@ const MainLayout: React.FC = () => {
     setViewMode('auth');
   };
 
-  // If user unauthenticated or in landing view mode
-  if (viewMode === 'landing' && (!isAuthenticated || !activeEmployee)) {
-    return (
-      <>
-        {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
+  // Render the views based on viewMode and authentication state
+  const renderView = () => {
+    // If user unauthenticated or in landing view mode
+    if (viewMode === 'landing' && (!isAuthenticated || !activeEmployee)) {
+      return (
         <LandingView 
           onGetStarted={handleLandingGetStarted} 
           onShowSplash={() => setShowSplash(true)}
         />
-      </>
-    );
-  }
+      );
+    }
 
-  // If user selected Auth login/signup explicitly
-  if (viewMode === 'auth' || (!isAuthenticated || !activeEmployee)) {
+    // If user selected Auth login/signup explicitly
+    if (viewMode === 'auth' || (!isAuthenticated || !activeEmployee)) {
+      return <AuthView onBackToLanding={() => setViewMode('landing')} />;
+    }
+
     return (
-      <>
-        {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
-        <AuthView onBackToLanding={() => setViewMode('landing')} />
-      </>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased flex flex-col selection:bg-blue-600 selection:text-white">
-      {/* Optional Fullscreen Company Splash Screen */}
-      {showSplash && (
-        <SplashScreen onFinish={() => setShowSplash(false)} />
-      )}
-
-      {/* Top Header Navigation */}
-      <Header 
-        onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-        isMobileSidebarOpen={isMobileSidebarOpen}
-        onShowLanding={() => setViewMode('landing')}
-        onShowSplash={() => setShowSplash(true)}
-      />
+      <div className="flex-1 flex flex-col relative w-full h-full">
+        {/* Top Header Navigation */}
+        <Header 
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+          isMobileSidebarOpen={isMobileSidebarOpen}
+          onShowLanding={() => setViewMode('landing')}
+          onShowSplash={() => setShowSplash(true)}
+        />
 
       {/* Body Area */}
       <div className="flex-1 flex w-full max-w-[1700px] mx-auto relative">
@@ -213,6 +202,18 @@ const MainLayout: React.FC = () => {
           onClose={() => setIdCardEmployee(null)}
         />
       )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased flex flex-col selection:bg-blue-600 selection:text-white">
+      {/* Optional Fullscreen Company Splash Screen */}
+      {showSplash && (
+        <SplashScreen onFinish={() => setShowSplash(false)} />
+      )}
+
+      {renderView()}
 
       <PWAInstallPrompt />
     </div>
