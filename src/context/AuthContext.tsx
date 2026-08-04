@@ -50,6 +50,52 @@ const sanitizeInput = <T extends any>(data: T): T => {
   return data;
 };
 
+// Helper for allocating specific employee IDs to founders and starting others from 004
+export const getAssignedEmployeeDetails = (fullName: string, employees: Employee[]) => {
+  const name = fullName.toLowerCase().trim();
+  
+  if (name.includes('gaurav kumar tripathi')) {
+    return {
+      employeeId: 'KSS2707001',
+      role: 'SUPER_ADMIN' as UserRole,
+      designation: 'CTO And Founder And MD'
+    };
+  }
+  if (name.includes('akshit ujjain')) {
+    return {
+      employeeId: 'KSS2707002',
+      role: 'SUPER_ADMIN' as UserRole,
+      designation: 'CEO'
+    };
+  }
+  if (name.includes('koushik')) {
+    return {
+      employeeId: 'KSS2707003',
+      role: 'HR_ADMIN' as UserRole, // Project Manager
+      designation: 'Project Manager'
+    };
+  }
+
+  // General employees start from KSS2707004
+  let maxSeq = 3; 
+  employees.forEach(emp => {
+    if (emp.employeeId?.startsWith('KSS2707')) {
+      const numStr = emp.employeeId.replace('KSS2707', '');
+      const num = parseInt(numStr, 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  });
+
+  const nextSeq = String(maxSeq + 1).padStart(3, '0');
+  return {
+    employeeId: `KSS2707${nextSeq}`,
+    role: null,
+    designation: null
+  };
+};
+
 interface AuthContextType {
   user: User | null;
   activeEmployee: Employee | null;
@@ -645,13 +691,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Firebase auth succeeded but no employee record yet — create a basic one
           const uid = userCred.user.uid;
           const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          const nextSeq = employees.length + 1;
-          const empCode = `KSS2707${String(nextSeq).padStart(3, '0')}`;
+          const fullName = userCred.user.displayName || cleanEmail.split('@')[0];
+          const autoDetails = getAssignedEmployeeDetails(fullName, employees);
+          const empCode = autoDetails.employeeId;
+          
           const basicEmp: Employee = {
             id: uid, employeeId: empCode,
-            fullName: userCred.user.displayName || cleanEmail.split('@')[0],
-            email: cleanEmail, role: 'EMPLOYEE', department: 'General Operations',
-            designation: 'Software Engineer', status: 'Active',
+            fullName: fullName,
+            email: cleanEmail, 
+            role: autoDetails.role || 'EMPLOYEE', 
+            department: 'General Operations',
+            designation: autoDetails.designation || 'Software Engineer', 
+            status: 'Active',
             phone: '', gender: 'Prefer not to say', dateOfBirth: '', joiningDate: new Date().toISOString().split('T')[0],
             employmentType: 'Full-Time', permanentAddress: '', currentAddress: '', city: '', state: '', postalCode: '',
             emergencyContact: '', emergencyRelationship: '',
@@ -749,18 +800,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // Generate sequential employee ID based on current count
-      // This will start from KSS2707001 and continue sequentially
-      const nextSequence = employees.length + 1;
-      const empCode = `KSS2707${nextSequence.toString().padStart(3, '0')}`;
+      // Generate sequential employee ID based on current count and locked profiles
+      const autoDetails = getAssignedEmployeeDetails(data.fullName, employees);
+      const empCode = autoDetails.employeeId;
+      
       const newEmp: Employee = {
         id: uid,
         employeeId: empCode,
         fullName: data.fullName,
         email: cleanEmail,
         department: data.department || 'General Operations',
-        designation: data.designation || (data.role === 'SUPER_ADMIN' ? 'System Administrator' : data.role === 'HR_ADMIN' ? 'HR Manager' : 'Software Engineer'),
-        role: data.role,
+        designation: autoDetails.designation || data.designation || (data.role === 'SUPER_ADMIN' ? 'System Administrator' : data.role === 'HR_ADMIN' ? 'HR Manager' : 'Software Engineer'),
+        role: autoDetails.role || data.role,
         phone: '+1 (555) 019-2831',
         gender: 'Prefer not to say',
         dateOfBirth: '1995-06-15',

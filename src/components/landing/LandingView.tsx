@@ -270,20 +270,68 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {employees.slice(0, 4).map((emp) => (
-              <div key={emp.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
-                <img
-                  src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                  alt={emp.fullName}
-                  className="w-12 h-12 rounded-xl object-cover border border-slate-700 shrink-0"
-                />
-                <div className="min-w-0">
-                  <h3 className="text-xs font-bold text-white truncate">{emp.fullName}</h3>
-                  <p className="text-[11px] text-blue-400 truncate">{emp.designation}</p>
-                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">{emp.department}</p>
-                </div>
+            {/* Hardcoded Founders Showcase */}
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
+              <img
+                src="/GauravCTO.jpeg"
+                alt="Gaurav Kumar Tripathi"
+                className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
+              />
+              <div className="min-w-0">
+                <h3 className="text-xs font-bold text-white truncate">Gaurav K Tripathi</h3>
+                <p className="text-[11px] text-blue-400 truncate">CTO, Founder & MD</p>
+                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Executive</p>
               </div>
-            ))}
+            </div>
+
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
+              <img
+                src="/Akshit.png"
+                alt="Akshit Ujjain"
+                className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
+              />
+              <div className="min-w-0">
+                <h3 className="text-xs font-bold text-white truncate">Akshit Ujjain</h3>
+                <p className="text-[11px] text-blue-400 truncate">CEO</p>
+                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Executive</p>
+              </div>
+            </div>
+            
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
+              <img
+                src="/image.png"
+                alt="Koushik"
+                className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
+              />
+              <div className="min-w-0">
+                <h3 className="text-xs font-bold text-white truncate">Koushik</h3>
+                <p className="text-[11px] text-blue-400 truncate">Project Manager</p>
+                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Management</p>
+              </div>
+            </div>
+
+            {/* Render 1 other employee, excluding executives to avoid duplicates */}
+            {employees
+              .filter(emp => 
+                !emp.fullName.toLowerCase().includes('gaurav') && 
+                !emp.fullName.toLowerCase().includes('akshit') &&
+                !emp.fullName.toLowerCase().includes('koushik')
+              )
+              .slice(0, 1)
+              .map((emp) => (
+                <div key={emp.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
+                  <img
+                    src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                    alt={emp.fullName}
+                    className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-bold text-white truncate">{emp.fullName}</h3>
+                    <p className="text-[11px] text-blue-400 truncate">{emp.designation}</p>
+                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">{emp.department}</p>
+                  </div>
+                </div>
+              ))}
           </div>
         </section>
 

@@ -19,7 +19,17 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   // Form State
   const [formData, setFormData] = useState({
     employeeId: employeeToEdit?.employeeId || (() => {
-      const seq = String(employees.length + 1).padStart(3, '0');
+      let maxSeq = 3; 
+      employees.forEach(emp => {
+        if (emp.employeeId?.startsWith('KSS2707')) {
+          const numStr = emp.employeeId.replace('KSS2707', '');
+          const num = parseInt(numStr, 10);
+          if (!isNaN(num) && num > maxSeq) {
+            maxSeq = num;
+          }
+        }
+      });
+      const seq = String(maxSeq + 1).padStart(3, '0');
       return `KSS2707${seq}`;
     })(),
     fullName: employeeToEdit?.fullName || '',
