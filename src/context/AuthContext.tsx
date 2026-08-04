@@ -363,6 +363,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubWorkZone = onSnapshot(doc(db, 'workZones', 'company'), (docSnap) => {
           if (docSnap.exists()) {
             const fetchedZone = docSnap.data() as WorkZone;
+            
+            // Auto-correct stale GPS coordinates from previous Firestore states
+            let needsUpdate = false;
+            if (fetchedZone.latitude === 13.014316 || fetchedZone.longitude === 77.64052) {
+              fetchedZone.latitude = 13.014333;
+              fetchedZone.longitude = 77.646000;
+              fetchedZone.radiusMeters = 500; // Increase radius to 500m to be safe
+              needsUpdate = true;
+            }
+
             setCompanyWorkZone(fetchedZone);
             setSettings(prev => ({
               ...prev,
@@ -371,6 +381,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               officeLongitude: fetchedZone.longitude,
               allowedRadiusMeters: fetchedZone.radiusMeters
             }));
+
+            if (needsUpdate) {
+              setDoc(doc(db, 'workZones', 'company'), fetchedZone, { merge: true }).catch(() => {});
+            }
           } else {
             const defaultZone: WorkZone = {
               name: 'Kalpanaaa Software Solutions — Main Office',
