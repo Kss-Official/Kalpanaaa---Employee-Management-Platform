@@ -56,31 +56,31 @@ export const getAssignedEmployeeDetails = (fullName: string, employees: Employee
   
   if (name.includes('gaurav')) {
     return {
-      employeeId: 'KSS2707001',
+      employeeId: 'KS2407001',
       role: 'SUPER_ADMIN' as UserRole,
       designation: 'CTO And Founder And MD'
     };
   }
   if (name.includes('akshit')) {
     return {
-      employeeId: 'KSS2707002',
+      employeeId: 'KS2407002',
       role: 'SUPER_ADMIN' as UserRole,
       designation: 'CEO'
     };
   }
   if (name.includes('koushik')) {
     return {
-      employeeId: 'KSS2707003',
+      employeeId: 'KS2407003',
       role: 'HR_ADMIN' as UserRole, // Project Manager
       designation: 'Project Manager'
     };
   }
 
-  // General employees start from KSS2707004
+  // General employees start from KS2407004
   let maxSeq = 3; 
   employees.forEach(emp => {
-    if (emp.employeeId?.startsWith('KSS2707')) {
-      const numStr = emp.employeeId.replace('KSS2707', '');
+    if (emp.employeeId?.startsWith('KS2407') || emp.employeeId?.startsWith('KSS2707')) {
+      const numStr = emp.employeeId.replace('KS2407', '').replace('KSS2707', '');
       const num = parseInt(numStr, 10);
       if (!isNaN(num) && num > maxSeq) {
         maxSeq = num;
@@ -90,7 +90,7 @@ export const getAssignedEmployeeDetails = (fullName: string, employees: Employee
 
   const nextSeq = String(maxSeq + 1).padStart(3, '0');
   return {
-    employeeId: `KSS2707${nextSeq}`,
+    employeeId: `KS2407${nextSeq}`,
     role: null,
     designation: null
   };
@@ -314,6 +314,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // LIVE MIGRATION FOR ID PREFIX KSS2707 -> KS2407
+              if (data.employeeId && data.employeeId.includes('KSS2707')) {
+                data.employeeId = data.employeeId.replace('KSS2707', 'KS2407');
+                setDoc(doc(db, 'employees', data.id), { employeeId: data.employeeId }, { merge: true }).catch(() => { });
+              }
+
               fetched.push(data);
             });
             if (fetched.length > 0) {
@@ -334,7 +340,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (!snapshot.empty) {
             const fetched: AttendanceRecord[] = [];
             snapshot.forEach(docSnap => {
-              fetched.push({ id: docSnap.id, ...docSnap.data() } as AttendanceRecord);
+              const data = { id: docSnap.id, ...docSnap.data() } as AttendanceRecord;
+              
+              // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KS2407
+              if (data.employeeCode && data.employeeCode.includes('KSS2707')) {
+                data.employeeCode = data.employeeCode.replace('KSS2707', 'KS2407');
+                setDoc(doc(db, 'attendance', data.id), { employeeCode: data.employeeCode }, { merge: true }).catch(() => { });
+              }
+
+              fetched.push(data);
             });
             if (fetched.length > 0) {
               // Sort descending by checkInAt / date

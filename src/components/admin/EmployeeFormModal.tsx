@@ -34,7 +34,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       });
       // Fallback base to 3 if database is totally empty, else +1
       maxSeq = Math.max(maxSeq, 3);
-      return String(maxSeq + 1).padStart(3, '0');
+      return `KS2407${String(maxSeq + 1).padStart(3, '0')}`;
     })(),
     fullName: employeeToEdit?.fullName || '',
     email: employeeToEdit?.email || '',
