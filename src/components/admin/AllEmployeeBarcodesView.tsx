@@ -12,12 +12,12 @@ export const AllEmployeeBarcodesView: React.FC<{ onBack: () => void }> = ({ onBa
   };
 
   return (
-    <div id="all-barcodes-print-container" className="bg-white min-h-screen text-black p-8 relative">
-      <div className="print:hidden flex justify-between items-center mb-8 border-b border-slate-200 pb-4">
-        <button onClick={onBack} className="flex items-center gap-2 text-slate-600 hover:text-black font-semibold cursor-pointer">
+    <div id="all-barcodes-print-container" className="bg-white min-h-screen text-black p-4 sm:p-8 relative">
+      <div className="print:hidden flex flex-col sm:flex-row justify-between items-stretch sm:items-center mb-6 sm:mb-8 border-b border-slate-200 pb-4 gap-3">
+        <button onClick={onBack} className="flex items-center justify-center sm:justify-start gap-2 text-slate-600 hover:text-black font-semibold cursor-pointer py-2">
           <ArrowLeft className="w-5 h-5" /> Back to Directory
         </button>
-        <button onClick={handlePrint} className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-bold cursor-pointer shadow-lg">
+        <button onClick={handlePrint} className="flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-xl hover:bg-blue-700 font-bold cursor-pointer shadow-lg">
           <Printer className="w-5 h-5" /> Print All Barcodes
         </button>
       </div>

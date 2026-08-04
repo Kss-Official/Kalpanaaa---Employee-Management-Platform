@@ -19,6 +19,7 @@ import { VerificationView } from './components/public/VerificationView';
 import { EmployeePortal } from './components/employee/EmployeePortal';
 import { SplashScreen } from './components/common/SplashScreen';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
+import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { Employee } from './types';
 import { ShieldCheck, CreditCard } from 'lucide-react';
 
@@ -108,7 +109,7 @@ const MainLayout: React.FC = () => {
         />
 
         {/* Primary Main Workspace View */}
-        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto">
           
           {/* Executive & HR Security Check Guard */}
           {!activeTab.startsWith('emp_') && role === 'EMPLOYEE' ? (
@@ -185,6 +186,13 @@ const MainLayout: React.FC = () => {
           )}
         </main>
       </div>
+
+      {/* Mobile Glassmorphic Bottom Navigation Bar */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+      />
 
       {/* Modals Container */}
       {selectedEmpProfile && (

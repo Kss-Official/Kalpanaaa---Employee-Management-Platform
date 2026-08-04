@@ -131,10 +131,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl w-full max-w-3xl overflow-hidden my-8 text-white">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+      <div className="bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-800 shadow-2xl w-full max-w-3xl overflow-hidden text-white max-h-[92vh] sm:max-h-[85vh] flex flex-col">
         {/* Header */}
-        <div className="bg-slate-950 text-white p-5 flex items-center justify-between border-b border-slate-800">
+        <div className="bg-slate-950 text-white p-4 sm:p-5 flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-600 rounded-xl">
               <User className="w-5 h-5 text-white" />
@@ -154,7 +154,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[75vh] overflow-y-auto text-xs bg-slate-900">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-6 overflow-y-auto text-xs bg-slate-900 flex-1">
           {errorMsg && (
             <div className="p-3 bg-rose-500/20 border border-rose-500/30 text-rose-300 rounded-xl font-medium">
               {errorMsg}
@@ -523,18 +523,18 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             </div>
           </div>
 
-          {/* Form Actions */}
-          <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+          {/* Form Actions - Sticky Footer */}
+          <div className="pt-3 pb-3 sm:pt-4 border-t border-slate-800 flex items-center justify-end gap-3 sticky bottom-0 bg-slate-900/95 backdrop-blur-md z-10 -mx-4 -mb-4 px-4 sm:-mx-6 sm:-mb-6 sm:px-6">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer"
+              className="px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
             >
               <Save className="w-4 h-4" />
               {isEdit ? 'Update Employee' : 'Create Employee Record'}

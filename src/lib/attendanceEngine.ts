@@ -128,14 +128,12 @@ export function evaluateAttendanceScan(
   if (!todayRecord || !todayRecord.checkInAt) {
     // Perform CHECK_IN
     const now = new Date();
-    const [startH, startM] = settings.workStartTime.split(':').map(Number);
-    const workStart = new Date();
-    workStart.setHours(startH, startM, 0, 0);
-    
-    const graceCutoff = new Date(workStart.getTime() + settings.gracePeriodMinutes * 60000);
+    // 11:00 AM Cutoff for Late status
+    const elevenAm = new Date();
+    elevenAm.setHours(11, 0, 0, 0);
     
     let status: 'Present' | 'Late' = 'Present';
-    if (now > graceCutoff) {
+    if (now > elevenAm) {
       status = 'Late';
     }
 
@@ -159,7 +157,7 @@ export function evaluateAttendanceScan(
       locationVerified: true,
       distanceMeters,
       message: status === 'Late' 
-        ? 'Checked In (Marked as Late Arrival)' 
+        ? 'Checked In (Late Arrival — After 11:00 AM)' 
         : 'Checked In Successfully'
     };
   } 

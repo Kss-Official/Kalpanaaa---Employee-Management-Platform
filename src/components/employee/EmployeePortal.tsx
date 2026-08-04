@@ -411,7 +411,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             {!todayRecord?.checkInAt ? (
               <button
                 onClick={handleSelfCheckIn}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow-lg shadow-emerald-900/40 hover:scale-[1.02] flex items-center gap-2"
+                className="w-full md:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs sm:text-xs rounded-xl cursor-pointer transition-all shadow-lg shadow-emerald-900/40 hover:scale-[1.02] flex items-center justify-center gap-2"
               >
                 <Clock className="w-4 h-4" />
                 <span>Check In Now</span>
@@ -419,13 +419,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             ) : !todayRecord?.checkOutAt ? (
               <button
                 onClick={handleSelfCheckOut}
-                className="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow-lg shadow-rose-900/40 hover:scale-[1.02] flex items-center gap-2"
+                className="w-full md:w-auto px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs sm:text-xs rounded-xl cursor-pointer transition-all shadow-lg shadow-rose-900/40 hover:scale-[1.02] flex items-center justify-center gap-2"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Check Out Now</span>
               </button>
             ) : (
-              <span className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-slate-700">
+              <span className="w-full md:w-auto text-center px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-slate-700">
                 ✓ Attendance Completed
               </span>
             )}

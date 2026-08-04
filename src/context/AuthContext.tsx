@@ -224,39 +224,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('kss_v1_leave_requests', JSON.stringify(leaveRequests));
   }, [leaveRequests]);
 
-  // TOP 1% SECURITY: Midnight Auto-Checkout (Ghosting Prevention)
+  // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
   useEffect(() => {
-    const checkGhosting = async () => {
+    const checkAutoCheckout = async () => {
       if (attendance.length === 0) return;
       const absoluteNow = await fetchAbsoluteTime();
       const todayStr = absoluteNow.toISOString().split('T')[0];
+      const currentHours = absoluteNow.getHours();
+      const currentMinutes = absoluteNow.getMinutes();
+      const isPastSevenThirtyPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 30);
 
       attendance.forEach(record => {
-        if (record.date < todayStr && !record.checkOutAt) {
-          const forceCheckOutTime = `${record.date}T23:59:59.999Z`;
-          // Compute rough working minutes (start to midnight)
+        const isPastDay = record.date < todayStr;
+        const isTodayPastCutoff = record.date === todayStr && isPastSevenThirtyPm;
+
+        if (!record.checkOutAt && (isPastDay || isTodayPastCutoff)) {
+          // Construct 7:30 PM ISO cutoff timestamp for the record date
+          const autoCheckOutDate = new Date(`${record.date}T19:30:00`);
+          const forceCheckOutTime = autoCheckOutDate.toISOString();
+
           let totalMins = 0;
           if (record.checkInAt) {
-            totalMins = Math.floor((new Date(forceCheckOutTime).getTime() - new Date(record.checkInAt).getTime()) / 60000);
+            totalMins = Math.floor((autoCheckOutDate.getTime() - new Date(record.checkInAt).getTime()) / 60000);
             if (record.totalBreakMinutes) {
               totalMins = Math.max(0, totalMins - record.totalBreakMinutes);
             }
           }
+          totalMins = Math.max(0, totalMins);
 
-          // Auto close the record
+          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:30 PM (Default Shift End)';
+
+          // Update local state
+          setAttendance(prev => prev.map(a => a.id === record.id ? {
+            ...a,
+            checkOutAt: forceCheckOutTime,
+            workingMinutes: totalMins,
+            notes: updatedNotes
+          } : a));
+
+          // Auto close the record in Firestore
           setDoc(doc(db, 'attendance', record.id), {
             checkOutAt: forceCheckOutTime,
             workingMinutes: totalMins,
-            notes: (record.notes ? record.notes + ' | ' : '') + 'SECURITY SYSTEM: Auto-checked out at midnight (Ghosting blocked)'
+            notes: updatedNotes
           }, { merge: true }).catch(() => { });
 
-          addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Force closed ghost session from ${record.date}`);
+          addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Auto-checked out at 7:30 PM for ${record.date}`);
         }
       });
     };
 
-    const interval = setInterval(checkGhosting, 60000); // Check every 60s
-    checkGhosting(); // Check immediately on mount/update
+    const interval = setInterval(checkAutoCheckout, 30000); // Check every 30s
+    checkAutoCheckout(); // Check immediately on mount/update
 
     return () => clearInterval(interval);
   }, [attendance]);
