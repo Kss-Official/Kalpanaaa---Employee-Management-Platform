@@ -516,7 +516,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     // Discord alerts for major events
-    const majorEvents = ['EMPLOYEE_CREATED', 'EMPLOYEE_DELETED', 'USER_SIGNUP', 'USER_LOGIN', 'ATTENDANCE_CHECKIN', 'ATTENDANCE_CHECKOUT'];
+    const majorEvents = ['EMPLOYEE_CREATED', 'EMPLOYEE_DELETED', 'USER_SIGNUP', 'USER_LOGIN', 'ATTENDANCE_CHECKIN', 'ATTENDANCE_CHECKOUT', 'ATTENDANCE_BREAK_START', 'ATTENDANCE_BREAK_END'];
     if (majorEvents.includes(action)) {
       sendDiscordAlert(`**Event:** ${action}\n**Target:** ${target}\n**Details:** ${details}\n**By:** ${newLog.actorName}`);
     }

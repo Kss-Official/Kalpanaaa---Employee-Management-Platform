@@ -62,7 +62,7 @@ const AVATAR_PRESETS = [
 ];
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
-  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord } = useAuth();
+  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog } = useAuth();
 
   // Time-aware greeting
   const getGreeting = () => {
@@ -226,6 +226,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const startAt = new Date().toISOString();
     setActiveBreak({ type, startAt });
     setBreakElapsedSec(0);
+    
+    if (activeEmployee) {
+      addAuditLog('ATTENDANCE_BREAK_START', todayRecord.id, `${activeEmployee.fullName} started a ${type}.`);
+    }
+    
     setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ☕` });
   };
 
@@ -237,6 +242,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const existingBreaks = todayRecord.breaks || [];
     updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, completedBreak], totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
     setActiveBreak(null);
+    
+    if (activeEmployee) {
+      addAuditLog('ATTENDANCE_BREAK_END', todayRecord.id, `${activeEmployee.fullName} ended their ${activeBreak.type} after ${durationMinutes} minutes.`);
+    }
+
     setActionFeedback({ success: true, message: `${completedBreak.type} ended — ${durationMinutes}m recorded. Welcome back! 👋` });
   };
 
@@ -482,31 +492,55 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   <div className="flex items-center justify-between">
                     <span className="text-xs uppercase tracking-wider font-semibold text-slate-400">Current Status</span>
                     <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide ${
+                      activeBreak ? 'text-amber-400 bg-amber-400/10 border border-amber-400/20' :
                       todayRecord?.isWfh
                         ? 'text-sky-400 bg-sky-400/10 border border-sky-400/20'
                         : 'text-emerald-400 bg-emerald-400/10 border border-emerald-400/20'
                     }`}>
-                      {todayRecord?.status || 'Not Checked In'} {todayRecord?.isWfh && ' (WFH)'}
+                      {activeBreak ? `On ${activeBreak.type}` : todayRecord?.status || 'Not Checked In'} {todayRecord?.isWfh && !activeBreak && ' (WFH)'}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-3">
                     {!todayRecord?.checkInAt ? (
-                      <button onClick={handleSelfCheckIn} className="flex-1 px-4 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                      <button onClick={handleSelfCheckIn} className="w-full px-4 py-3 bg-white hover:bg-slate-100 text-slate-900 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
                         <Clock className="w-4 h-4" /> Check In
                       </button>
                     ) : !todayRecord?.checkOutAt ? (
-                      <button onClick={handleSelfCheckOut} className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm rounded-lg transition-colors border border-slate-700 flex items-center justify-center gap-2 shadow-sm">
-                        <LogOut className="w-4 h-4" /> Check Out
-                      </button>
+                      <>
+                        {activeBreak ? (
+                          <div className="flex flex-col gap-3">
+                            <button onClick={handleEndBreak} className="w-full px-4 py-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/50 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm animate-pulse">
+                              <StopCircle className="w-5 h-5" /> End Break ({String(Math.floor(breakElapsedSec / 60)).padStart(2, '0')}:{String(breakElapsedSec % 60).padStart(2, '0')})
+                            </button>
+                            <button onClick={handleSelfCheckOut} className="w-full px-4 py-2 bg-transparent text-slate-500 hover:text-red-400 font-semibold text-xs rounded-lg transition-colors border border-transparent hover:border-red-400/30 flex items-center justify-center gap-2">
+                              <LogOut className="w-3.5 h-3.5" /> Force Check Out
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => handleStartBreak('Tea Break')} className="flex-1 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-lg transition-colors border border-slate-700 flex flex-col items-center justify-center gap-1.5">
+                                <Coffee className="w-4 h-4 text-amber-400" /> Tea Break
+                              </button>
+                              <button onClick={() => handleStartBreak('Lunch Break')} className="flex-1 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-lg transition-colors border border-slate-700 flex flex-col items-center justify-center gap-1.5">
+                                <UtensilsCrossed className="w-4 h-4 text-orange-400" /> Lunch Break
+                              </button>
+                            </div>
+                            <button onClick={handleSelfCheckOut} className="w-full px-4 py-3 bg-slate-800 hover:bg-red-500/20 text-white hover:text-red-400 font-bold text-sm rounded-lg transition-colors border border-slate-700 hover:border-red-500/50 flex items-center justify-center gap-2 shadow-sm">
+                              <LogOut className="w-4 h-4" /> Check Out
+                            </button>
+                          </>
+                        )}
+                      </>
                     ) : (
-                      <div className="flex-1 px-4 py-3 bg-slate-900 text-slate-500 font-bold text-sm rounded-lg border border-slate-800 text-center">
+                      <div className="w-full px-4 py-3 bg-slate-900 text-slate-500 font-bold text-sm rounded-lg border border-slate-800 text-center">
                         ✓ Shift Completed
                       </div>
                     )}
                   </div>
 
-                  {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+                  {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && !activeBreak && (
                     <button
                       onClick={handleToggleWfh}
                       className={`w-full py-2 rounded-lg text-xs font-semibold transition-colors border ${
@@ -540,6 +574,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       {todayRecord?.workingMinutes ? `${Math.floor(todayRecord.workingMinutes/60)}h ${todayRecord.workingMinutes%60}m` : '0h 0m'}
                     </span>
                   </div>
+                  {todayRecord?.totalBreakMinutes !== undefined && todayRecord.totalBreakMinutes > 0 && (
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Break Time</span>
+                      <span className="text-xs font-mono font-bold text-amber-400">
+                        {Math.floor(todayRecord.totalBreakMinutes/60)}h {todayRecord.totalBreakMinutes%60}m
+                      </span>
+                    </div>
+                  )}
                   {isVerifiedLocation !== null && !todayRecord?.isWfh && (
                     <div>
                       <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Location</span>
