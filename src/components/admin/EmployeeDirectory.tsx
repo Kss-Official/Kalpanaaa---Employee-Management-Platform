@@ -43,10 +43,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
 
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = 
-      emp.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      emp.employeeId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      emp.designation.toLowerCase().includes(searchTerm.toLowerCase());
+      (emp.fullName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (emp.employeeId?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (emp.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (emp.designation?.toLowerCase() || '').includes(searchTerm.toLowerCase());
 
     const matchesDept = deptFilter === 'ALL' || emp.department === deptFilter;
     const matchesStatus = statusFilter === 'ALL' || emp.status === statusFilter;

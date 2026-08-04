@@ -924,6 +924,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (existingRec && existingRec.checkInAt) {
+      if (existingRec.checkOutAt) {
+        // TEMPORARY TESTING OVERRIDE: Revert the checkout to allow checking in again
+        const updatedRecord = { ...existingRec, checkOutAt: null, notes: (existingRec.notes ? existingRec.notes + ' | ' : '') + 'TESTING: Re-checked in.' };
+        setAttendance(prev => prev.map(a => a.id === existingRec.id ? updatedRecord : a));
+        setDoc(doc(db, 'attendance', existingRec.id), { checkOutAt: null, notes: updatedRecord.notes }, { merge: true }).catch(() => {});
+        addAuditLog('ATTENDANCE_CHECKIN', emp.employeeId, 'Testing Mode: Re-checked in after checkout.');
+        return { success: true, message: 'Testing Mode: Checked back in successfully.', record: updatedRecord };
+      }
       return { success: false, message: 'Employee is already checked in for today.' };
     }
 
