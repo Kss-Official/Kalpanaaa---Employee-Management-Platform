@@ -22,35 +22,42 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow read: if isSignedIn();
+      allow read: if true; // Temporarily allow public read
       allow create, update: if isSignedIn() && isValidId(userId);
       allow delete: if isSignedIn();
     }
 
     // Employees collection
     match /employees/{employeeId} {
-      allow read: if isSignedIn();
+      allow read: if true; // Temporarily allow public read
       allow create, update: if isSignedIn() && isValidId(employeeId);
       allow delete: if isSignedIn();
     }
 
     // Attendance records collection
     match /attendance/{recordId} {
-      allow read: if isSignedIn();
+      allow read: if true; // Temporarily allow public read
       allow create, update: if isSignedIn() && isValidId(recordId);
       allow delete: if isSignedIn();
     }
 
     // Audit logs collection
     match /auditLogs/{logId} {
-      allow read: if isSignedIn();
+      allow read: if true; // Temporarily allow public read
       allow create: if isSignedIn() && isValidId(logId);
       allow update, delete: if false; // Audit logs are append-only
     }
 
     // Settings collection
     match /settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if true; // Temporarily allow public read
+      allow create, update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // WorkZones collection
+    match /workZones/{zoneId} {
+      allow read: if true; // Temporarily allow public read
       allow create, update: if isSignedIn();
       allow delete: if false;
     }

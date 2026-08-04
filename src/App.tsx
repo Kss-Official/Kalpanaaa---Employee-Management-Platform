@@ -18,6 +18,7 @@ import { LeaveApprovalsView } from './components/admin/LeaveApprovalsView';
 import { VerificationView } from './components/public/VerificationView';
 import { EmployeePortal } from './components/employee/EmployeePortal';
 import { SplashScreen } from './components/common/SplashScreen';
+import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
 import { Employee } from './types';
 import { ShieldCheck } from 'lucide-react';
 
@@ -212,6 +213,8 @@ const MainLayout: React.FC = () => {
           onClose={() => setIdCardEmployee(null)}
         />
       )}
+
+      <PWAInstallPrompt />
     </div>
   );
 };

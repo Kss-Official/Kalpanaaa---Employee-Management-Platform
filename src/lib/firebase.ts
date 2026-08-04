@@ -9,7 +9,7 @@ import {
   User 
 } from "firebase/auth";
 import { 
-  getFirestore, 
+  initializeFirestore, 
   collection, 
   doc, 
   getDoc, 
@@ -52,7 +52,9 @@ if (typeof window !== "undefined") {
 }
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true
+});
 
 // Error Handling Helper as per Firebase skill guidelines
 export enum OperationType {
