@@ -33,10 +33,11 @@
   }
   #printable-id-card-element, #printable-id-card-element *,
   #document-preview-paper, #document-preview-paper *,
-  #employee-pass-download-element, #employee-pass-download-element * {
+  #employee-pass-download-element, #employee-pass-download-element *,
+  #all-barcodes-print-container, #all-barcodes-print-container * {
     visibility: visible;
   }
-  #printable-id-card-element, #document-preview-paper, #employee-pass-download-element {
+  #printable-id-card-element, #document-preview-paper, #employee-pass-download-element, #all-barcodes-print-container {
     position: absolute;
     left: 0;
     top: 0;

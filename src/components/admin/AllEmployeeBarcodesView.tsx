@@ -12,7 +12,7 @@ export const AllEmployeeBarcodesView: React.FC<{ onBack: () => void }> = ({ onBa
   };
 
   return (
-    <div className="bg-white min-h-screen text-black p-8 relative">
+    <div id="all-barcodes-print-container" className="bg-white min-h-screen text-black p-8 relative">
       <div className="print:hidden flex justify-between items-center mb-8 border-b border-slate-200 pb-4">
         <button onClick={onBack} className="flex items-center gap-2 text-slate-600 hover:text-black font-semibold cursor-pointer">
           <ArrowLeft className="w-5 h-5" /> Back to Directory
