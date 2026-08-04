@@ -21,10 +21,10 @@ import {
 
 const OFFICE_PRESETS = [
   {
-    name: "Kalpanaaa HQ — AGPS Nagar, Hyderabad",
-    latitude: 13.014316,
-    longitude: 77.64052,
-    radiusMeters: 100
+    name: "Kalpanaaa HQ — Bhoganahalli, Bengaluru",
+    latitude: 13.014333,
+    longitude: 77.646000,
+    radiusMeters: 500
   },
   {
     name: "Hitec City Cyber Towers Office",
@@ -63,8 +63,8 @@ export const WorkLocation: React.FC = () => {
     activeEmployee?.designation?.toLowerCase().includes('cto');
 
   const [officeName, setOfficeName] = useState(companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office');
-  const [latitude, setLatitude] = useState<number>(companyWorkZone.latitude ?? 13.014316);
-  const [longitude, setLongitude] = useState<number>(companyWorkZone.longitude ?? 77.64052);
+  const [latitude, setLatitude] = useState<number>(companyWorkZone.latitude ?? 13.014333);
+  const [longitude, setLongitude] = useState<number>(companyWorkZone.longitude ?? 77.646000);
   const [radiusMeters, setRadiusMeters] = useState<number>(companyWorkZone.radiusMeters ?? 100);
   const [isActive, setIsActive] = useState<boolean>(companyWorkZone.active ?? true);
 
@@ -83,8 +83,8 @@ export const WorkLocation: React.FC = () => {
   useEffect(() => {
     if (companyWorkZone) {
       setOfficeName(companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office');
-      setLatitude(companyWorkZone.latitude ?? 13.014316);
-      setLongitude(companyWorkZone.longitude ?? 77.64052);
+      setLatitude(companyWorkZone.latitude ?? 13.014333);
+      setLongitude(companyWorkZone.longitude ?? 77.646000);
       setRadiusMeters(companyWorkZone.radiusMeters ?? 100);
       setIsActive(companyWorkZone.active ?? true);
     }
@@ -106,8 +106,8 @@ export const WorkLocation: React.FC = () => {
     if (!mapContainerRef.current) return;
 
     if (!mapInstanceRef.current) {
-      const initialLat = latitude || 13.014316;
-      const initialLng = longitude || 77.64052;
+      const initialLat = latitude || 13.014333;
+      const initialLng = longitude || 77.646000;
 
       const map = L.map(mapContainerRef.current, {
         center: [initialLat, initialLng],

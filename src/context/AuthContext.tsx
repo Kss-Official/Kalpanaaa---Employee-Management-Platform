@@ -374,8 +374,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else {
             const defaultZone: WorkZone = {
               name: 'Kalpanaaa Software Solutions — Main Office',
-              latitude: 13.014316,
-              longitude: 77.64052,
+              latitude: 13.014333,
+              longitude: 77.646000,
               radiusMeters: 100,
               active: true,
               updatedBy: 'System Init',
@@ -1197,8 +1197,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSettings(INITIAL_COMPANY_SETTINGS);
     const defaultZone: WorkZone = {
       name: 'Kalpanaaa Software Solutions — Main Office',
-      latitude: 13.014316,
-      longitude: 77.64052,
+      latitude: 13.014333,
+      longitude: 77.646000,
       radiusMeters: 100,
       active: true,
       updatedBy: 'System Init',
