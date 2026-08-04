@@ -106,9 +106,19 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       return;
     }
 
-    if (!formData.email.trim().toLowerCase().endsWith('@kalpanaaa.in')) {
-      setErrorMsg('All employee emails strictly must end with @kalpanaaa.in');
-      return;
+    const cleanEmail = formData.email.trim().toLowerCase();
+    const isExecutive = formData.role === 'SUPER_ADMIN' || formData.role === 'HR_ADMIN';
+
+    if (isExecutive) {
+      if (!cleanEmail.endsWith('@kalpanaaa.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresolutions.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresoutions.in')) {
+        setErrorMsg('Executive emails must end with @kalpanaaa.in or @kalpanaaasoftwaresolutions.in');
+        return;
+      }
+    } else {
+      if (!cleanEmail.endsWith('@kalpanaaa.in')) {
+        setErrorMsg('All employee emails strictly must end with @kalpanaaa.in');
+        return;
+      }
     }
 
     if (isEdit && employeeToEdit) {

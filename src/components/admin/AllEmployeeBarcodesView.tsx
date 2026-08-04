@@ -33,14 +33,14 @@ export const AllEmployeeBarcodesView: React.FC<{ onBack: () => void }> = ({ onBa
             <img src={kalpanaLogo} alt="Logo" className="w-10 h-10 object-contain mb-2" />
             <h3 className="font-bold text-base text-slate-900 leading-tight mb-1">{emp.fullName}</h3>
             <p className="text-xs text-slate-600 mb-3 truncate w-full">{emp.designation}</p>
-            <div className="bg-white p-2 rounded-lg">
+            <div className="bg-white p-2 pb-4 rounded-lg overflow-visible w-full flex justify-center">
               <Barcode 
                 value={emp.employeeId} 
                 width={1.5} 
                 height={50} 
-                fontSize={14} 
+                fontSize={16} 
                 background="transparent"
-                margin={0}
+                margin={5}
               />
             </div>
           </div>

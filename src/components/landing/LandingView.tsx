@@ -273,65 +273,28 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {/* Hardcoded Founders Showcase */}
-            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
-              <img
-                src={gauravImg}
-                alt="Gaurav Kumar Tripathi"
-                className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
-              />
-              <div className="min-w-0">
-                <h3 className="text-xs font-bold text-white truncate">Gaurav K Tripathi</h3>
-                <p className="text-[11px] text-blue-400 truncate">CTO, Founder & MD</p>
-                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Executive</p>
-              </div>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
-              <img
-                src={akshitImg}
-                alt="Akshit Ujjain"
-                className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
-              />
-              <div className="min-w-0">
-                <h3 className="text-xs font-bold text-white truncate">Akshit Ujjain</h3>
-                <p className="text-[11px] text-blue-400 truncate">CEO</p>
-                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Executive</p>
-              </div>
-            </div>
-            
-            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
-              <img
-                src={koushikImg}
-                alt="Koushik"
-                className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
-              />
-              <div className="min-w-0">
-                <h3 className="text-xs font-bold text-white truncate">Koushik</h3>
-                <p className="text-[11px] text-blue-400 truncate">Project Manager</p>
-                <p className="text-[10px] text-slate-500 font-mono mt-0.5">Management</p>
-              </div>
-            </div>
-
-            {/* Render 1 other employee, excluding executives to avoid duplicates */}
-            {employees
-              .filter(emp => 
-                !(emp.fullName || '').toLowerCase().includes('gaurav') && 
-                !(emp.fullName || '').toLowerCase().includes('akshit') &&
-                !(emp.fullName || '').toLowerCase().includes('koushik')
-              )
-              .slice(0, 1)
+            {/* Live Employee Showcase (Prioritizes Executives & HR) */}
+            {[...employees]
+              .sort((a, b) => {
+                const roleWeight = (role: string) => {
+                  if (role === 'SUPER_ADMIN') return 3;
+                  if (role === 'HR_ADMIN') return 2;
+                  return 1;
+                };
+                return roleWeight(b.role) - roleWeight(a.role);
+              })
+              .slice(0, 4)
               .map((emp) => (
-                <div key={emp.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4">
+                <div key={emp.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-4 group hover:border-slate-700 transition-all">
                   <img
                     src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
                     alt={emp.fullName}
-                    className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0"
+                    className="w-16 h-16 rounded-xl object-cover object-top border border-slate-700 shrink-0 group-hover:scale-105 transition-transform"
                   />
                   <div className="min-w-0">
                     <h3 className="text-xs font-bold text-white truncate">{emp.fullName}</h3>
                     <p className="text-[11px] text-blue-400 truncate">{emp.designation}</p>
-                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">{emp.department}</p>
+                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">{emp.role === 'SUPER_ADMIN' ? 'Executive' : emp.role === 'HR_ADMIN' ? 'Management' : emp.department}</p>
                   </div>
                 </div>
               ))}
