@@ -70,6 +70,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         if (e.target.name === 'designation') {
           if (['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(e.target.value)) {
             newData.role = 'SUPER_ADMIN';
+          } else if (e.target.value === 'HR Manager') {
+            newData.role = 'HR_ADMIN';
+          } else {
+            newData.role = 'EMPLOYEE';
           }
         }
         return newData;

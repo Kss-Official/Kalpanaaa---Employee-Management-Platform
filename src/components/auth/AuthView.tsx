@@ -47,12 +47,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
 
   const handleSignUpRoleChange = (newRole: UserRole) => {
     setSignUpRole(newRole);
-    // Reset designation to sensible default for the selected role
-    if (newRole === 'SUPER_ADMIN') {
-      setSignUpDesignation('Chief Executive Officer (CEO)');
-    } else {
-      setSignUpDesignation('Software Engineer');
-    }
   };
 
   // Forgot password modal
@@ -303,6 +297,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                         setSignUpDesignation(newDesig);
                         if (['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(newDesig)) {
                           handleSignUpRoleChange('SUPER_ADMIN');
+                        } else if (newDesig === 'HR Manager') {
+                          handleSignUpRoleChange('HR_ADMIN');
                         } else {
                           handleSignUpRoleChange('EMPLOYEE');
                         }
