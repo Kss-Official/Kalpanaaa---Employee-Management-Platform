@@ -19,7 +19,9 @@ export default defineConfig(({ command }) => {
         },
         workbox: {
           globPatterns: command === 'build' ? ['**/*.{js,css,html,ico,png,svg,jpeg}'] : [],
-          maximumFileSizeToCacheInBytes: 6000000 // 6MB to accommodate large JS bundles and logo
+          maximumFileSizeToCacheInBytes: 6000000, // 6MB to accommodate large JS bundles and logo
+          skipWaiting: true,
+          clientsClaim: true
         },
         manifest: {
           name: 'Kalpanaaa Software Solutions',
