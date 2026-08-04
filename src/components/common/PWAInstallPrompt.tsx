@@ -66,8 +66,18 @@ export const PWAInstallPrompt: React.FC = () => {
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) {
-      // If the browser didn't give us the native prompt, we must instruct the user
-      alert("To install: Please look at your browser's address bar (top right) and click the Install icon, or open the browser menu and select 'Install App'.");
+      // Check if user is on iOS (iPhone, iPad, iPod)
+      const isIOS = 
+        /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+        (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+
+      if (isIOS) {
+        alert("To install on iPhone/iPad: \n\n1. Tap the 'Share' icon (square with an up arrow) at the bottom of Safari.\n2. Scroll down and tap 'Add to Home Screen'.");
+      } else {
+        // If the browser didn't give us the native prompt, we must instruct the user
+        alert("To install: Please look at your browser's address bar (top right) and click the Install icon, or open the browser menu and select 'Install App'.");
+      }
+      
       setIsVisible(false);
       return;
     }
@@ -94,7 +104,11 @@ export const PWAInstallPrompt: React.FC = () => {
     localStorage.setItem('pwaPromptDismissed', 'true');
   };
 
-  if (!isVisible) return null;
+  // Do not show if already in standalone mode (already installed)
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches 
+                       || (window.navigator as any).standalone === true;
+                       
+  if (!isVisible || isStandalone) return null;
 
   return (
     <div className="fixed top-20 right-4 sm:top-24 sm:right-8 z-[9999] bg-slate-900 border border-blue-500/40 shadow-2xl shadow-blue-500/20 rounded-2xl p-5 max-w-sm flex items-start gap-4 animate-slide-in-up">
