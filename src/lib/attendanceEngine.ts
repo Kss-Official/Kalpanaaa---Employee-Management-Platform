@@ -179,7 +179,7 @@ export function evaluateAttendanceScan(
   
   if (todayRecord.checkInAt && !todayRecord.checkOutAt) {
     // Perform CHECK_OUT
-    if (settings.gpsRequired && !locationVerified) {
+    if (settings.gpsRequired && !locationVerified && !isApprovedWfh) {
       return {
         allowed: false,
         action: 'CHECK_OUT',

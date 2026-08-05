@@ -1091,7 +1091,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Employee has already checked out for today.' };
     }
 
-    const evalResult = evaluateAttendanceScan(emp, existingRec, settings, lat, lon);
+    const isApprovedWfh = (emp.approvedWfhDates || []).includes(todayStr);
+    const evalResult = evaluateAttendanceScan(emp, existingRec, settings, lat, lon, isApprovedWfh);
     if (!evalResult.allowed) {
       return { success: false, message: evalResult.message };
     }
