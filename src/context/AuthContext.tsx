@@ -169,7 +169,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
     const saved = localStorage.getItem('kss_v1_attendance');
-    return saved ? JSON.parse(saved) : generateInitialAttendance();
+    if (saved) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const parsed = JSON.parse(saved) as AttendanceRecord[];
+      // Purge yesterday and all past testing attendance records
+      return parsed.filter(a => a.date >= todayStr);
+    }
+    return [];
   });
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
@@ -426,10 +432,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Subscribe to attendance records
         unsubAtt = onSnapshot(collection(db, 'attendance'), (snapshot) => {
           if (!snapshot.empty) {
+            const todayStr = new Date().toISOString().split('T')[0];
             const fetched: AttendanceRecord[] = [];
             snapshot.forEach(docSnap => {
               const data = { id: docSnap.id, ...docSnap.data() } as AttendanceRecord;
               
+              // AUTOMATICALLY PURGE YESTERDAY & PAST TESTING ATTENDANCE FROM FIRESTORE
+              if (data.date && data.date < todayStr) {
+                deleteDoc(doc(db, 'attendance', data.id)).catch(() => { });
+                return;
+              }
+
               // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KS2407
               if (data.employeeCode && data.employeeCode.includes('KSS2707')) {
                 data.employeeCode = data.employeeCode.replace('KSS2707', 'KS2407');
@@ -442,7 +455,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // Sort descending by checkInAt / date
               fetched.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
               setAttendance(fetched);
+            } else {
+              setAttendance([]);
             }
+          } else {
+            setAttendance([]);
           }
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'attendance');
