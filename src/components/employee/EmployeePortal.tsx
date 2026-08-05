@@ -501,13 +501,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   {!todayRecord?.checkInAt ? (
                     <button 
                       onClick={handleSelfCheckIn} 
-                      disabled={(settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)) || isCheckingIn}
+                      disabled={isCheckingIn}
                       className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] transition-all cursor-pointer outline-none ${
-                        settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
-                          ? 'border-[var(--border-medium)] bg-[var(--bg-secondary)] text-[var(--text-muted)] cursor-not-allowed grayscale'
-                          : isCheckingIn 
-                            ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
-                            : 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-glow-blue)]'
+                        isCheckingIn 
+                          ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
+                          : 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-glow-blue)]'
                       } ${!isCheckingIn && animations.tap}`}
                     >
                       <div className="absolute inset-1 rounded-full border border-[var(--border-subtle)] opacity-50 pointer-events-none" />
