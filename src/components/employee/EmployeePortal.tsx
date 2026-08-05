@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptic } from '../../hooks/useHaptic';
+import { animations } from '../../lib/animations';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Clock, 
@@ -36,7 +38,9 @@ import {
   Home,
   Timer,
   PlayCircle,
-  StopCircle
+  StopCircle,
+  Fingerprint,
+  Loader2
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
@@ -63,6 +67,7 @@ const AVATAR_PRESETS = [
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
   const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog } = useAuth();
+  const { triggerHaptic } = useHaptic();
 
   // Time-aware greeting
   const getGreeting = () => {
@@ -208,15 +213,32 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   }
 
   const handleSelfCheckIn = async () => {
+    triggerHaptic('medium');
+    setIsCheckingIn(true);
     setActionFeedback(null);
+    
+    // Simulate loading for the animation requirement
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
     const res = await recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     if (res.success && res.record && isWfh) {
       updateAttendanceRecord(res.record.id, { isWfh: true, status: 'Work From Home', notes: 'Self check-in — Work From Home' });
     }
+    
+    if (res.success) {
+      triggerHaptic('success');
+    } else {
+      triggerHaptic('error');
+    }
+    
+    setIsCheckingIn(false);
     setActionFeedback({ success: res.success, message: res.message });
   };
 
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+
   const handleSelfCheckOut = async () => {
+    triggerHaptic('warning');
     const isFinal = window.confirm(
       "Are you sure you want to Check Out for the day?\n\n" +
       "⚠️ YOUR WORKING TIME WILL END HERE.\n" +
@@ -225,6 +247,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     );
     if (!isFinal) return;
 
+    triggerHaptic('medium');
     setActionFeedback(null);
     // Auto-end any open break before checkout
     if (activeBreak && todayRecord) {
@@ -235,11 +258,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       setActiveBreak(null);
     }
     const res = await recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
+    
+    if (res.success) triggerHaptic('success');
+    else triggerHaptic('error');
+    
     setActionFeedback({ success: res.success, message: res.message });
   };
 
   const handleStartBreak = (type: 'Tea Break' | 'Lunch Break') => {
+    triggerHaptic('medium');
     if (!todayRecord || activeBreak) return;
+
     const startAt = new Date().toISOString();
     setActiveBreak({ type, startAt });
     setBreakElapsedSec(0);
@@ -354,22 +383,22 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   return (
     <div className="space-y-6">
       
-      {/* Employee Greeting Hero Banner - Unified Obsidian Theme */}
+      {/* Global Profile Header - Unified Obsidian Theme */}
       <motion.div 
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-slate-900/90 text-white p-6 sm:p-8 rounded-3xl border border-slate-800 shadow-xl backdrop-blur-xl flex flex-col md:flex-row items-center justify-between gap-6"
+        className={`bg-[var(--bg-elevated)] text-[var(--text-primary)] p-5 sm:p-6 rounded-3xl border border-[var(--border-subtle)] shadow-[var(--shadow-md)] backdrop-blur-xl flex flex-col md:flex-row items-center justify-between gap-6 ${animations.stagger.container}`}
       >
-        <div className="flex items-center gap-5 text-center md:text-left">
+        <div className={`flex items-center gap-5 text-center md:text-left ${animations.stagger.item(1)}`}>
           <div className="relative group">
             <img
               src={activeEmployee.profilePhotoUrl || profilePhoto}
               alt={activeEmployee.fullName}
-              className="w-20 h-20 rounded-2xl object-cover border-2 border-blue-500/50 shadow-lg shadow-blue-500/20"
+              className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-[var(--border-strong)] shadow-lg shadow-blue-500/10"
             />
             <button
-              onClick={() => setActiveTab('emp_profile')}
-              className="absolute -bottom-2 -right-2 p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md cursor-pointer transition-transform hover:scale-110"
+              onClick={() => { triggerHaptic('light'); setActiveTab('emp_profile'); }}
+              className={`absolute -bottom-2 -right-2 p-1.5 bg-[var(--accent-blue)] text-white rounded-xl shadow-md cursor-pointer outline-none ${animations.tap}`}
               title="Edit Profile Photo"
             >
               <Camera className="w-3.5 h-3.5" />
@@ -378,79 +407,34 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
           <div>
             <div className="flex items-center justify-center md:justify-start gap-2 mb-1.5 flex-wrap">
-              <span className="font-mono text-xs font-bold bg-blue-500/20 text-blue-300 px-2.5 py-0.5 rounded-lg border border-blue-500/30">
+              <span className="font-mono text-xs font-bold bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] px-2.5 py-0.5 rounded-lg border border-[var(--accent-blue)]/20">
                 {activeEmployee.employeeId}
               </span>
-              <span className="text-xs text-slate-400 font-semibold bg-slate-800/80 px-2.5 py-0.5 rounded-lg border border-slate-700/60">
+              <span className="text-xs text-[var(--text-secondary)] font-semibold bg-[var(--bg-secondary)] px-2.5 py-0.5 rounded-lg border border-[var(--border-subtle)]">
                 {activeEmployee.department}
               </span>
-              <span className="text-xs text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+              <span className="text-xs text-[var(--accent-emerald)] font-semibold bg-[var(--accent-emerald)]/10 px-2 py-0.5 rounded-lg border border-[var(--accent-emerald)]/20">
                 {activeEmployee.status}
               </span>
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-white">{getGreeting()}, {displayName} 👋</h1>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">{activeEmployee.designation} • {settings.companyName}</p>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">{activeEmployee.fullName}</h1>
+            <p className="text-xs text-[var(--text-tertiary)] font-medium mt-0.5">{activeEmployee.designation} • {settings.companyName}</p>
           </div>
         </div>
 
-        {/* Quick Check In / Check Out Action Card */}
-        <div className="bg-slate-950/80 p-5 rounded-2xl border border-slate-800 w-full md:w-auto text-center md:text-right space-y-3">
-          <div className="text-xs text-slate-400 font-medium flex items-center justify-center md:justify-end gap-2">
-            <span>Today's Status:</span>
-            <strong className={`font-bold px-2 py-0.5 rounded-md border text-xs ${
+        {/* Current Status Pill */}
+        <div className={`bg-[var(--bg-secondary)] p-4 rounded-2xl border border-[var(--border-subtle)] w-full md:w-auto text-center md:text-right ${animations.stagger.item(2)}`}>
+          <div className="text-xs text-[var(--text-tertiary)] font-medium flex flex-col items-center justify-center md:items-end gap-1">
+            <span className="uppercase tracking-wider font-semibold text-[10px]">Today's Status</span>
+            <strong className={`font-bold px-3 py-1 rounded-lg border text-sm ${
               todayRecord?.isWfh
                 ? 'text-sky-400 bg-sky-500/10 border-sky-500/20'
-                : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                : 'text-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10 border-[var(--accent-emerald)]/20'
             }`}>
               {todayRecord?.status || 'Not Checked In'}
               {todayRecord?.isWfh && ' 🏠'}
             </strong>
           </div>
-
-          <div className="flex items-center justify-center md:justify-end gap-2 flex-wrap">
-            {!todayRecord?.checkInAt ? (
-              <button
-                onClick={handleSelfCheckIn}
-                className="w-full md:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs sm:text-xs rounded-xl cursor-pointer transition-all shadow-lg shadow-emerald-900/40 hover:scale-[1.02] flex items-center justify-center gap-2"
-              >
-                <Clock className="w-4 h-4" />
-                <span>Check In Now</span>
-              </button>
-            ) : !todayRecord?.checkOutAt ? (
-              <button
-                onClick={handleSelfCheckOut}
-                className="w-full md:w-auto px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs sm:text-xs rounded-xl cursor-pointer transition-all shadow-lg shadow-rose-900/40 hover:scale-[1.02] flex items-center justify-center gap-2"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Check Out Now</span>
-              </button>
-            ) : (
-              <span className="w-full md:w-auto text-center px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-slate-700">
-                ✓ Attendance Completed
-              </span>
-            )}
-          </div>
-
-          {/* WFH Toggle — visible when checked in but not yet checked out */}
-          {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
-            <button
-              onClick={handleToggleWfh}
-              className={`w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
-                !(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
-                  ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed opacity-75'
-                  : isWfh
-                    ? 'bg-sky-500/20 border-sky-500/40 text-sky-300 hover:bg-sky-500/30'
-                    : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-sky-300 hover:border-sky-500/40'
-              }`}
-            >
-              <Home className="w-3.5 h-3.5" />
-              {!(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
-                ? '🔒 WFH Locked (Requires Admin Approval)'
-                : isWfh 
-                  ? '🏠 WFH Active — Click to Switch to Office' 
-                  : 'Mark as Work From Home Today'}
-            </button>
-          )}
         </div>
       </motion.div>
 
@@ -485,198 +469,139 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
       {/* 1. EMPLOYEE DASHBOARD TAB */}
       {activeTab === 'emp_dashboard' && (
-        <div className="space-y-6">
+        <div className={`space-y-6 ${animations.stagger.container}`}>
           
           {/* Section 1: Hero & Command Center */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             {/* Left: Personalized Command Center */}
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 sm:p-8 flex flex-col justify-between relative overflow-hidden shadow-sm">
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-900/0 to-slate-900/0 opacity-50"></div>
+            <div className={`bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-subtle)] p-6 sm:p-8 flex flex-col justify-between relative overflow-hidden shadow-[var(--shadow-sm)] ${animations.stagger.item(1)}`}>
+              <div className="absolute inset-0 bg-[var(--gradient-card)] opacity-30"></div>
               
-              <div className="relative z-10 space-y-6">
-                <div>
-                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-1">
+              <div className="relative z-10 space-y-8 flex flex-col items-center">
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-[var(--accent-blue)] tracking-wider uppercase mb-1">
+                    {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  </p>
+                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
                     {getGreeting()}, {displayName}
                   </h1>
-                  <p className="text-sm text-slate-400 font-medium">
-                    {activeEmployee.designation} <span className="mx-2 text-slate-600">•</span> {settings.companyName}
-                  </p>
                 </div>
 
-                {/* Primary Actions (Check-In / Out) */}
-                <div className="bg-slate-950/60 p-5 rounded-xl border border-slate-800/60 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs uppercase tracking-wider font-semibold text-slate-400">Current Status</span>
-                    <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide ${
-                      activeBreak ? 'text-amber-400 bg-amber-400/10 border border-amber-400/20' :
-                      todayRecord?.isWfh
-                        ? 'text-sky-400 bg-sky-400/10 border border-sky-400/20'
-                        : 'text-emerald-400 bg-emerald-400/10 border border-emerald-400/20'
-                    }`}>
-                      {activeBreak ? `On ${activeBreak.type}` : todayRecord?.status || 'Not Checked In'} {todayRecord?.isWfh && !activeBreak && ' (WFH)'}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col gap-3">
-                    {!todayRecord?.checkInAt ? (
-                      <div className="flex flex-col gap-2">
-                        {settings.gpsRequired && (
-                          <div className={`text-xs p-2.5 rounded-lg border flex items-center justify-center gap-2 font-medium ${
-                            gpsError ? 'bg-red-500/10 border-red-500/20 text-red-400' :
-                            !gpsLocation ? 'bg-blue-500/10 border-blue-500/20 text-blue-400 animate-pulse' :
-                            isVerifiedLocation ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
-                            'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                          }`}>
-                            {gpsError ? (
-                              <><AlertTriangle className="w-4 h-4" /> {gpsError}</>
-                            ) : !gpsLocation ? (
-                              <><Clock className="w-4 h-4" /> Acquiring GPS...</>
-                            ) : (
-                              <>
-                                {isVerifiedLocation ? <CheckCircle2 className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
-                                {liveDistanceMeters}m from office (Limit: {companyWorkZone.radiusMeters}m)
-                              </>
-                            )}
-                          </div>
-                        )}
-                        <button 
-                          onClick={handleSelfCheckIn} 
-                          disabled={settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)}
-                          className={`w-full px-4 py-3 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm ${
-                            settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
-                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                              : 'bg-white hover:bg-slate-100 text-slate-900'
-                          }`}>
-                          <Clock className="w-4 h-4" /> Check In
-                        </button>
-                      </div>
-                    ) : !todayRecord?.checkOutAt ? (
-                      <>
-                        {activeBreak ? (
-                          <div className="flex flex-col gap-3">
-                            <button onClick={handleEndBreak} className="w-full px-4 py-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/50 font-bold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm animate-pulse">
-                              <StopCircle className="w-5 h-5" /> End Break ({String(Math.floor(breakElapsedSec / 60)).padStart(2, '0')}:{String(breakElapsedSec % 60).padStart(2, '0')})
-                            </button>
-                            <button 
-                              onClick={handleSelfCheckOut} 
-                              disabled={settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)}
-                              className={`w-full px-4 py-2 font-semibold text-xs rounded-lg transition-colors border flex items-center justify-center gap-2 ${
-                                settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
-                                  ? 'bg-transparent text-slate-600 border-transparent cursor-not-allowed'
-                                  : 'bg-transparent text-slate-500 hover:text-red-400 border-transparent hover:border-red-400/30'
-                              }`}>
-                              <LogOut className="w-3.5 h-3.5" /> Force Check Out {settings.gpsRequired && (!isVerifiedLocation || !gpsLocation) && '(Out of Range)'}
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex items-center gap-3">
-                              <button onClick={() => handleStartBreak('Tea Break')} className="flex-1 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-lg transition-colors border border-slate-700 flex flex-col items-center justify-center gap-1.5">
-                                <Coffee className="w-4 h-4 text-amber-400" /> Tea Break
-                              </button>
-                              <button onClick={() => handleStartBreak('Lunch Break')} className="flex-1 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-lg transition-colors border border-slate-700 flex flex-col items-center justify-center gap-1.5">
-                                <UtensilsCrossed className="w-4 h-4 text-orange-400" /> Lunch Break
-                              </button>
-                            </div>
-                            
-                            {settings.gpsRequired && (
-                              <div className={`text-xs p-2.5 rounded-lg border flex items-center justify-center gap-2 font-medium ${
-                                gpsError ? 'bg-red-500/10 border-red-500/20 text-red-400' :
-                                !gpsLocation ? 'bg-blue-500/10 border-blue-500/20 text-blue-400 animate-pulse' :
-                                isVerifiedLocation ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
-                                'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                              }`}>
-                                {gpsError ? (
-                                  <><AlertTriangle className="w-4 h-4" /> {gpsError}</>
-                                ) : !gpsLocation ? (
-                                  <><Clock className="w-4 h-4" /> Acquiring GPS...</>
-                                ) : (
-                                  <>
-                                    {isVerifiedLocation ? <CheckCircle2 className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
-                                    {liveDistanceMeters}m from office (Limit: {companyWorkZone.radiusMeters}m)
-                                  </>
-                                )}
-                              </div>
-                            )}
-
-                            <button 
-                              onClick={handleSelfCheckOut} 
-                              disabled={settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)}
-                              className={`w-full px-4 py-3 font-bold text-sm rounded-lg transition-colors border flex items-center justify-center gap-2 shadow-sm ${
-                                settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
-                                  ? 'bg-slate-800 text-slate-600 border-slate-700 cursor-not-allowed'
-                                  : 'bg-slate-800 hover:bg-red-500/20 text-white hover:text-red-400 border-slate-700 hover:border-red-500/50'
-                              }`}>
-                              <LogOut className="w-4 h-4" /> Check Out
-                            </button>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <div className="w-full px-4 py-3 bg-slate-900 text-slate-500 font-bold text-sm rounded-lg border border-slate-800 text-center">
-                        ✓ Shift Completed
-                      </div>
-                    )}
-                  </div>
-
-                  {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && !activeBreak && (
-                    <button
-                      onClick={handleToggleWfh}
-                      className={`w-full py-2 rounded-lg text-xs font-semibold transition-colors border ${
-                        !(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
-                          ? 'bg-transparent border-slate-800 text-slate-500 cursor-not-allowed'
-                          : isWfh
-                            ? 'bg-sky-500/10 border-sky-500/20 text-sky-400 hover:bg-sky-500/20'
-                            : 'bg-transparent border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
-                      }`}
+                {/* Hero Check-In Button */}
+                <div className="flex flex-col items-center justify-center py-6 w-full relative">
+                  {!todayRecord?.checkInAt ? (
+                    <button 
+                      onClick={handleSelfCheckIn} 
+                      disabled={(settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)) || isCheckingIn}
+                      className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] transition-all cursor-pointer outline-none ${
+                        settings.gpsRequired && (!isVerifiedLocation || !gpsLocation)
+                          ? 'border-[var(--border-medium)] bg-[var(--bg-secondary)] text-[var(--text-muted)] cursor-not-allowed grayscale'
+                          : isCheckingIn 
+                            ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
+                            : 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-glow-blue)]'
+                      } ${!isCheckingIn && animations.tap}`}
                     >
-                      {!(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
-                        ? '🔒 WFH Locked (Requires Admin Approval)'
-                        : isWfh 
-                          ? 'Working From Home' 
-                          : 'Switch to WFH'}
+                      <div className="absolute inset-1 rounded-full border border-[var(--border-subtle)] opacity-50 pointer-events-none" />
+                      
+                      {isCheckingIn ? (
+                        <>
+                          <Loader2 className="w-10 h-10 mb-2 animate-spin text-[var(--accent-blue)]" />
+                          <span className="font-semibold text-sm">Verifying...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Fingerprint className="w-12 h-12 mb-3 text-[var(--accent-blue)]" strokeWidth={1.5} />
+                          <span className="font-bold text-sm tracking-wide">Tap to Check In</span>
+                          <span className="text-[10px] text-[var(--text-tertiary)] mt-1">Ready</span>
+                        </>
+                      )}
                     </button>
+                  ) : !todayRecord?.checkOutAt ? (
+                    <button 
+                      onClick={handleSelfCheckOut}
+                      className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] border-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] shadow-[var(--shadow-glow-emerald)] transition-all cursor-pointer outline-none ${animations.tap}`}
+                    >
+                      <div className="absolute inset-0 bg-[var(--gradient-success)] opacity-10 rounded-full" />
+                      <CheckCircle2 className="w-12 h-12 mb-3" strokeWidth={2} />
+                      <span className="font-bold text-sm tracking-wide">Checked In</span>
+                      <span className="text-[10px] font-mono mt-1 opacity-80">
+                        {new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] border-[var(--border-medium)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)]">
+                      <LogOut className="w-10 h-10 mb-2 opacity-50" />
+                      <span className="font-bold text-sm tracking-wide">Shift Complete</span>
+                    </div>
+                  )}
+                  
+                  {/* Break Actions (if checked in) */}
+                  {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+                    <div className="absolute bottom-[-10px] flex gap-2">
+                       {activeBreak ? (
+                         <button onClick={handleEndBreak} className={`px-4 py-1.5 rounded-full bg-[var(--accent-amber)] text-amber-950 font-bold text-xs shadow-lg ${animations.tap}`}>
+                           End Break ({String(Math.floor(breakElapsedSec / 60)).padStart(2, '0')}:{String(breakElapsedSec % 60).padStart(2, '0')})
+                         </button>
+                       ) : (
+                         <>
+                           <button onClick={() => handleStartBreak('Tea Break')} className={`px-4 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-semibold text-xs shadow-md ${animations.tap}`}>
+                             🍵 Tea
+                           </button>
+                           <button onClick={() => handleStartBreak('Lunch Break')} className={`px-4 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-semibold text-xs shadow-md ${animations.tap}`}>
+                             🍽️ Lunch
+                           </button>
+                         </>
+                       )}
+                    </div>
                   )}
                 </div>
 
-                {/* Micro Attendance Summary */}
-                <div className="flex items-center gap-6 pt-2">
-                  <div>
-                    <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Check-In</span>
-                    <span className="text-sm font-mono text-white">
-                      {todayRecord?.checkInAt ? new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Hours Logged</span>
-                    <span className="text-sm font-mono text-white">
-                      {todayRecord?.workingMinutes ? `${Math.floor(todayRecord.workingMinutes/60)}h ${todayRecord.workingMinutes%60}m` : '0h 0m'}
-                    </span>
-                  </div>
-                  {todayRecord?.totalBreakMinutes !== undefined && todayRecord.totalBreakMinutes > 0 && (
-                    <div>
-                      <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Break Time</span>
-                      <span className="text-xs font-mono font-bold text-amber-400">
-                        {Math.floor(todayRecord.totalBreakMinutes/60)}h {todayRecord.totalBreakMinutes%60}m
-                      </span>
-                    </div>
-                  )}
-                  {isVerifiedLocation !== null && !todayRecord?.isWfh && (
-                    <div>
-                      <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Location</span>
-                      <span className={`text-xs font-bold flex items-center gap-1 ${isVerifiedLocation ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {isVerifiedLocation ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                        {isVerifiedLocation ? 'Verified' : 'Unverified'}
-                      </span>
-                    </div>
-                  )}
-                </div>
+                {/* GPS Verification Status */}
+                {settings.gpsRequired && !todayRecord?.checkInAt && (
+                   <div className={`text-xs px-4 py-2 rounded-full border flex items-center justify-center gap-2 font-medium transition-all ${
+                     gpsError ? 'bg-[var(--accent-rose)]/10 border-[var(--accent-rose)]/20 text-[var(--accent-rose)]' :
+                     !gpsLocation ? 'bg-[var(--accent-blue)]/10 border-[var(--accent-blue)]/20 text-[var(--accent-blue)] animate-pulse' :
+                     isVerifiedLocation ? 'bg-[var(--accent-emerald)]/10 border-[var(--accent-emerald)]/20 text-[var(--accent-emerald)]' :
+                     'bg-[var(--accent-amber)]/10 border-[var(--accent-amber)]/20 text-[var(--accent-amber)]'
+                   }`}>
+                     {gpsError ? (
+                       <><AlertTriangle className="w-3.5 h-3.5" /> {gpsError}</>
+                     ) : !gpsLocation ? (
+                       <><Clock className="w-3.5 h-3.5" /> Acquiring GPS...</>
+                     ) : (
+                       <>
+                         {isVerifiedLocation ? <MapPin className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
+                         {liveDistanceMeters}m from office zone
+                       </>
+                     )}
+                   </div>
+                )}
+                
+                {/* WFH Toggle */}
+                {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && !activeBreak && (
+                  <button
+                    onClick={handleToggleWfh}
+                    className={`w-full max-w-[240px] py-2 rounded-xl text-xs font-semibold transition-all border ${
+                      !(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                        ? 'bg-transparent border-[var(--border-subtle)] text-[var(--text-muted)] cursor-not-allowed'
+                        : isWfh
+                          ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
+                          : 'bg-transparent border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-sky-500/30'
+                    } ${animations.tap}`}
+                  >
+                    {!(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                      ? '🔒 WFH Locked (Requires Approval)'
+                      : isWfh 
+                        ? '🏠 Working From Home' 
+                        : 'Switch to WFH'}
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Right: Premium Hero Image */}
-            <div className="rounded-2xl border border-slate-800/80 overflow-hidden relative h-[360px] lg:h-auto shadow-sm">
+            <div className={`rounded-2xl border border-[var(--border-subtle)] overflow-hidden relative h-[360px] lg:h-auto shadow-[var(--shadow-md)] ${animations.stagger.item(2)}`}>
               <img 
                 src="/elite_engineering_team.png" 
                 alt="Kalpanaaa Engineering Team" 

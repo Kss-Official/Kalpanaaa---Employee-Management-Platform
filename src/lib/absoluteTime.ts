@@ -6,7 +6,8 @@ export const fetchAbsoluteTime = async (): Promise<Date> => {
     });
     if (response.ok) {
       const data = await response.json();
-      return new Date(data.dateTime);
+      // timeapi.io returns dateTime without a 'Z', so we must append it to parse as UTC
+      return new Date(data.dateTime + 'Z');
     }
   } catch (error) {
     // Fallback if API fails

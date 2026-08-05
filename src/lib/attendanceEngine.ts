@@ -128,9 +128,24 @@ export function evaluateAttendanceScan(
   if (!todayRecord || !todayRecord.checkInAt) {
     // Perform CHECK_IN
     const now = new Date();
-    // 11:00 AM Cutoff for Late status
+    
+    // Official Timings: Start at 10:00 AM, 1 Hour Extra Time (11:00 AM cutoff for Late)
+    const tenAm = new Date();
+    tenAm.setHours(10, 0, 0, 0);
+    
     const elevenAm = new Date();
     elevenAm.setHours(11, 0, 0, 0);
+
+    if (now < tenAm) {
+      return {
+        allowed: false,
+        action: 'CHECK_IN',
+        status: 'Present',
+        locationVerified,
+        distanceMeters,
+        message: 'Shift has not started yet. Check-ins are only allowed from 10:00 AM onwards.'
+      };
+    }
     
     let status: 'Present' | 'Late' = 'Present';
     if (now > elevenAm) {
@@ -158,7 +173,7 @@ export function evaluateAttendanceScan(
       distanceMeters,
       message: status === 'Late' 
         ? 'Checked In (Late Arrival — After 11:00 AM)' 
-        : 'Checked In Successfully'
+        : 'Successfully Checked In'
     };
   } 
   

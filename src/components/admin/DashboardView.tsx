@@ -29,14 +29,15 @@ import {
   Legend 
 } from 'recharts';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
-
+import { db } from '../../lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
   onOpenAddEmployee: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onOpenAddEmployee }) => {
-  const { employees, attendance, settings, activeEmployee } = useAuth();
+  const { employees, attendance, settings, activeEmployee, auditLogs } = useAuth();
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month'>('today');
 
   // Time-aware greeting
@@ -122,6 +123,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
             New Employee
           </button>
 
+
+          <button
+            onClick={async () => {
+              const todayStr = new Date().toISOString().split('T')[0];
+              const checkinLogs = auditLogs.filter(log => log.action === 'ATTENDANCE_CHECKIN' && log.timestamp.startsWith(todayStr));
+              if (checkinLogs.length === 0) {
+                alert('No check-ins found in Audit Logs for today.'); return;
+              }
+              let restored = 0;
+              for (const log of checkinLogs) {
+                const match = log.target.match(/^(.*?)\s\(/);
+                const empCode = match ? match[1] : log.target;
+                const emp = employees.find(e => e.employeeId === empCode);
+                if (!emp) continue;
+                const recordId = `att-${emp.employeeId}-${todayStr}`;
+                const status = log.details.includes('Status: Late') ? 'Late' : 'Present';
+                const newRecord = {
+                  id: recordId, employeeId: emp.id, employeeCode: emp.employeeId,
+                  employeeName: emp.fullName, department: emp.department, date: todayStr,
+                  checkInAt: log.timestamp, checkOutAt: null, workingMinutes: 0,
+                  status, attendanceMethod: 'Self Portal', locationVerified: log.details.includes('GPS: Verified'),
+                  createdAt: log.timestamp, updatedAt: new Date().toISOString()
+                };
+                try {
+                  await setDoc(doc(db, 'attendance', recordId), newRecord);
+                  restored++;
+                } catch (e) { console.error(e); }
+              }
+              alert(`Successfully restored ${restored} check-ins from Audit Logs!`);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-amber-950/50 hover:bg-amber-800 border border-amber-700/50 text-amber-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            Restore Today's Check-ins
+          </button>
 
           <button
             onClick={() => generateAttendanceReportPdf(todayRecords, settings, 'Daily Attendance Summary Report')}

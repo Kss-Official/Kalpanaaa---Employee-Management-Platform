@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptic } from '../../hooks/useHaptic';
+import { animations } from '../../lib/animations';
 import { 
   Building2, 
   Lock, 
@@ -27,6 +29,7 @@ interface AuthViewProps {
 
 export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
   const { loginWithEmail, signUpUser, quickDemoLogin, isLoading, settings } = useAuth();
+  const { triggerHaptic } = useHaptic();
 
   const [activeTab, setActiveTab] = useState<'signin' | 'admin_login' | 'signup'>('signin');
   const [showPassword, setShowPassword] = useState(false);
@@ -46,6 +49,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
   const [signUpConfirmPass, setSignUpConfirmPass] = useState('');
 
   const handleSignUpRoleChange = (newRole: UserRole) => {
+    triggerHaptic('light');
     setSignUpRole(newRole);
   };
 
@@ -56,30 +60,39 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    triggerHaptic('medium');
     setFeedback(null);
     if (!loginEmail || !loginPassword) {
+      triggerHaptic('error');
       setFeedback({ type: 'error', message: 'Please provide both email and password.' });
       return;
     }
 
     const res = await loginWithEmail(loginEmail, loginPassword);
     if (!res.success) {
+      triggerHaptic('error');
       setFeedback({ type: 'error', message: res.message });
+    } else {
+      triggerHaptic('success');
     }
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+    triggerHaptic('medium');
     setFeedback(null);
     if (!signUpName || !signUpEmail || !signUpPass) {
+      triggerHaptic('error');
       setFeedback({ type: 'error', message: 'Please fill in all required fields.' });
       return;
     }
     if (signUpPass.length < 6) {
+      triggerHaptic('error');
       setFeedback({ type: 'error', message: 'Password must be at least 6 characters long for security.' });
       return;
     }
     if (signUpPass !== signUpConfirmPass) {
+      triggerHaptic('error');
       setFeedback({ type: 'error', message: 'Passwords do not match. Please re-enter your password.' });
       return;
     }
@@ -94,58 +107,70 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
     });
 
     if (!res.success) {
+      triggerHaptic('error');
       setFeedback({ type: 'error', message: res.message });
+    } else {
+      triggerHaptic('success');
     }
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    triggerHaptic('medium');
     if (!resetEmail) return;
     try {
       await sendPasswordResetEmail(auth, resetEmail);
+      triggerHaptic('success');
       setResetSent(true);
     } catch (err: any) {
-      setResetSent(true); // show confirmation regardless for security
+      triggerHaptic('success'); // Show confirmation regardless for security
+      setResetSent(true); 
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-blue-600 selection:text-white font-sans antialiased">
+    <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col justify-between selection:bg-[var(--accent-blue)] selection:text-white font-sans antialiased relative overflow-hidden">
       
+      {/* Subtle animated gradient mesh background */}
+      <div className="absolute inset-0 pointer-events-none opacity-40">
+        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-[var(--accent-blue)] rounded-full blur-[120px] opacity-20 animate-pulse" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-[var(--accent-violet)] rounded-full blur-[150px] opacity-20" />
+      </div>
+
       {/* Top Header Branding Bar */}
-      <header className="px-6 py-4 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md flex items-center justify-between">
+      <header className={`px-6 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80 backdrop-blur-xl flex items-center justify-between relative z-10 ${animations.stagger.container}`}>
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-blue-600/30 shrink-0 border border-slate-700/60">
+          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-blue-600/20 shrink-0 border border-[var(--border-subtle)]">
             <img src={kalpanaLogo} alt="Kalpanaaa Logo" className="w-full h-full object-cover" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            <h1 className="text-base font-bold tracking-tight flex items-center gap-2">
               <span className="hidden sm:inline">Kalpanaaa Software Solutions</span>
               <span className="sm:hidden">KSS</span>
             </h1>
-            <p className="text-xs text-slate-400 font-medium hidden sm:block">Private Employee & Operations Digital Home</p>
+            <p className="text-xs text-[var(--text-tertiary)] font-medium hidden sm:block">Empowering Teams</p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           {onBackToLanding && (
             <button
-              onClick={onBackToLanding}
-              className="px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-colors cursor-pointer"
+              onClick={() => { triggerHaptic('light'); onBackToLanding(); }}
+              className={`px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:text-white bg-[var(--bg-elevated)] rounded-xl border border-[var(--border-subtle)] transition-colors cursor-pointer ${animations.tap}`}
             >
-              ← Back to Workspace Home
+              ← Back
             </button>
           )}
-          <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400 font-mono">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Authenticated Access Only</span>
+          <div className="hidden sm:flex items-center gap-2 text-xs text-[var(--text-tertiary)] font-mono">
+            <ShieldCheck className="w-4 h-4 text-[var(--accent-emerald)]" />
+            <span>Secure Access</span>
           </div>
         </div>
       </header>
 
-      {/* Main Form Center Box */}
-      <main className="flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8">
-        <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden backdrop-blur-xl">
+      {/* Main Form Center Box - Slides up from bottom */}
+      <main className="flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8 relative z-10 perspective-1000">
+        <div className={`w-full max-w-xl bg-[var(--bg-elevated)]/90 border border-[var(--border-medium)] rounded-3xl shadow-[var(--shadow-xl)] overflow-hidden backdrop-blur-xl ${animations.pageEntry}`}>
           
           {/* Form Tab Switcher */}
           <div className="grid grid-cols-2 border-b border-slate-800 bg-slate-950/50 p-1.5 gap-1 text-xs font-semibold">

@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptic } from '../../hooks/useHaptic';
+import { animations } from '../../lib/animations';
 import { 
   LayoutDashboard, 
   Users, 
@@ -21,6 +23,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onOpenMobileMenu
 }) => {
   const { role } = useAuth();
+  const { triggerHaptic } = useHaptic();
   const isAdmin = role === 'SUPER_ADMIN' || role === 'HR_ADMIN';
 
   const adminTabs = [
@@ -40,8 +43,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const tabs = isAdmin ? adminTabs : employeeTabs;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 border-t border-slate-800/90 backdrop-blur-xl px-2 py-1.5 md:hidden shadow-[0_-4px_20px_rgba(0,0,0,0.5)]">
-      <div className="flex items-center justify-around max-w-md mx-auto">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] backdrop-blur-xl pb-[env(safe-area-inset-bottom)] md:hidden shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
+      <div className="flex items-center justify-around max-w-md mx-auto h-16 px-2">
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -49,22 +52,39 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             <button
               key={tab.id}
               onClick={() => {
-                if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-                  try { navigator.vibrate(10); } catch (_) {}
-                }
+                triggerHaptic('light');
                 setActiveTab(tab.id);
               }}
-              className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all duration-200 cursor-pointer min-w-[60px] relative ${
-                isActive
-                  ? 'text-blue-400 font-bold scale-105'
-                  : 'text-slate-400 hover:text-slate-200 font-medium'
-              }`}
+              className={`flex flex-col items-center justify-center h-full rounded-2xl cursor-pointer min-w-[60px] relative outline-none ${animations.tap}`}
             >
+              {/* Background Highlight for Active Tab */}
               {isActive && (
-                <div className="absolute -top-1.5 w-8 h-1 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                <div className="absolute inset-0 bg-[var(--gradient-glow)] opacity-50 rounded-2xl pointer-events-none" />
               )}
-              <Icon className={`w-5 h-5 mb-0.5 transition-transform ${isActive ? 'scale-110' : ''}`} />
-              <span className="text-[10px] tracking-tight">{tab.label}</span>
+              
+              {/* Indicator Pill */}
+              {isActive && (
+                <div 
+                  className="absolute top-0 w-8 h-1 bg-[var(--accent-blue)] rounded-b-full transition-all duration-[var(--duration-spring)] ease-[var(--ease-spring)]"
+                  style={{ boxShadow: 'var(--shadow-glow-blue)' }}
+                />
+              )}
+              
+              {/* Icon Container with Pop Animation */}
+              <div className={`relative transition-transform duration-[var(--duration-normal)] ease-[var(--ease-spring)] mt-1 ${isActive ? 'scale-110 text-[var(--accent-blue)]' : 'scale-100 text-[var(--text-tertiary)]'}`}>
+                <Icon className="w-[22px] h-[22px]" strokeWidth={isActive ? 2.5 : 2} />
+              </div>
+              
+              {/* Label */}
+              <span 
+                className={`text-[10px] tracking-tight mt-1 transition-all duration-[var(--duration-normal)] ease-[var(--ease-spring)] ${
+                  isActive 
+                    ? 'text-[var(--accent-blue)] font-semibold opacity-100 translate-y-0' 
+                    : 'text-[var(--text-tertiary)] font-medium opacity-0 translate-y-1 absolute bottom-0'
+                }`}
+              >
+                {tab.label}
+              </span>
             </button>
           );
         })}
@@ -72,17 +92,20 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         {/* Menu Drawer Toggle */}
         <button
           onClick={() => {
-            if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-              try { navigator.vibrate(10); } catch (_) {}
-            }
+            triggerHaptic('light');
             onOpenMobileMenu();
           }}
-          className="flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl text-slate-400 hover:text-slate-200 font-medium transition-all cursor-pointer min-w-[60px]"
+          className={`flex flex-col items-center justify-center h-full rounded-2xl text-[var(--text-tertiary)] font-medium cursor-pointer min-w-[60px] outline-none ${animations.tap}`}
         >
-          <Menu className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px] tracking-tight">More</span>
+          <div className="relative mt-1">
+            <Menu className="w-[22px] h-[22px]" strokeWidth={2} />
+          </div>
+          <span className="text-[10px] tracking-tight mt-1 opacity-0 translate-y-1 absolute bottom-0 transition-all duration-[var(--duration-normal)]">
+            More
+          </span>
         </button>
       </div>
     </nav>
   );
 };
+
