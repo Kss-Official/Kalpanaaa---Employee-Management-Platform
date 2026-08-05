@@ -258,29 +258,33 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Profile Image URL <span className="text-rose-500">*</span></label>
+                <label className="block text-slate-300 font-semibold mb-1">Profile Photo <span className="text-rose-500">*</span></label>
                 <input
-                  type="url"
-                  name="profilePhotoUrl"
-                  value={formData.profilePhotoUrl}
-                  onChange={handleChange}
-                  required
-                  placeholder="https://..."
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleFileChange(e, 'profilePhotoUrl')}
+                  className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500 file:mr-3 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500"
                 />
+                {(formData.profilePhotoUrl && formData.profilePhotoUrl.startsWith('data:image')) ? (
+                  <span className="text-[10px] text-emerald-400 mt-1 block">✓ Image selected</span>
+                ) : (
+                  <span className="text-[10px] text-slate-500 mt-1 block">Select to override default</span>
+                )}
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Resume URL (PDF) <span className="text-rose-500">*</span></label>
+                <label className="block text-slate-300 font-semibold mb-1">Resume (PDF) <span className="text-rose-500">*</span></label>
                 <input
-                  type="url"
-                  name="resumeUrl"
-                  value={formData.resumeUrl}
-                  onChange={handleChange}
-                  required
-                  placeholder="https://drive.google.com/..."
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => handleFileChange(e, 'resumeUrl')}
+                  className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500 file:mr-3 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500"
                 />
+                {(formData.resumeUrl && formData.resumeUrl.startsWith('data:application/pdf')) ? (
+                  <span className="text-[10px] text-emerald-400 mt-1 block">✓ PDF selected</span>
+                ) : (
+                  <span className="text-[10px] text-slate-500 mt-1 block">Required for onboarding</span>
+                )}
               </div>
             </div>
           </div>
