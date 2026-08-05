@@ -168,98 +168,176 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           <p className="text-xs text-slate-400 mt-1">Try resetting search filters or add a new employee profile.</p>
         </div>
       ) : viewMode === 'table' ? (
-        /* TABLE VIEW */
-        <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-950/60 border-b border-slate-800/60 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                  <th className="py-4 px-6">Employee</th>
-                  <th className="py-4 px-6">ID Code</th>
-                  <th className="py-4 px-6">Department & Role</th>
-                  <th className="py-4 px-6">Employment</th>
-                  <th className="py-4 px-6">Status</th>
-                  <th className="py-4 px-6 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/40 text-[11px]">
-                {filteredEmployees.map(emp => (
-                  <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group">
-                    <td className="py-3 px-6">
-                      <div className="flex items-center gap-4">
-                        <img
-                          src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                          alt={emp.fullName}
-                          className="w-8 h-8 rounded-full object-cover border border-slate-700/50"
-                        />
-                        <div>
-                          <div
-                            onClick={() => onSelectEmployee(emp)}
-                            className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
-                          >
-                            {emp.fullName}
-                          </div>
-                          <div className="text-[10px] font-medium text-slate-500">{emp.email}</div>
-                        </div>
-                      </div>
-                    </td>
+        /* TABLE VIEW (Mobile Card List on mobile, Desktop Table on md+) */
+        <div>
+          {/* Mobile Enterprise Card List (md:hidden) */}
+          <div className="md:hidden space-y-3">
+            {filteredEmployees.map(emp => (
+              <div 
+                key={emp.id} 
+                className="bg-slate-900/95 rounded-2xl border border-slate-800 p-4 shadow-sm space-y-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img
+                      src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                      alt={emp.fullName}
+                      className="w-11 h-11 rounded-2xl object-cover border border-slate-700/60 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <h4 
+                        onClick={() => onSelectEmployee(emp)}
+                        className="font-bold text-white text-sm hover:text-blue-400 cursor-pointer transition-colors truncate"
+                      >
+                        {emp.fullName}
+                      </h4>
+                      <p className="text-[11px] text-blue-400 font-medium truncate">{emp.designation}</p>
+                    </div>
+                  </div>
 
-                    <td className="py-3 px-6">
-                      <span className="font-mono font-bold text-slate-400">
-                        {emp.employeeId}
-                      </span>
-                    </td>
+                  <div className="flex items-center gap-1.5 shrink-0 bg-slate-950/60 px-2.5 py-1 rounded-xl border border-slate-800/60">
+                    <span className={`w-2 h-2 rounded-full ${getStatusIndicator(emp.status)}`} />
+                    <span className="text-[10px] text-slate-300 font-extrabold uppercase">{emp.status}</span>
+                  </div>
+                </div>
 
-                    <td className="py-3 px-6">
-                      <div className="font-bold text-slate-300">{emp.department}</div>
-                      <div className="text-[10px] text-slate-500 font-medium">{emp.designation}</div>
-                    </td>
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/60 text-[11px]">
+                  <span className="font-mono font-bold bg-slate-950 text-slate-400 px-2 py-0.5 rounded-md border border-slate-800">
+                    {emp.employeeId}
+                  </span>
+                  <span className="bg-slate-800/60 text-slate-300 font-medium px-2 py-0.5 rounded-md border border-slate-700/50">
+                    {emp.department}
+                  </span>
+                  <span className="text-slate-400 truncate max-w-[180px]">
+                    {emp.email}
+                  </span>
+                </div>
 
-                    <td className="py-3 px-6">
-                      <div className="text-slate-400 font-bold">{emp.employmentType}</div>
-                      <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift?.split(' ')[0] || 'General'}</div>
-                    </td>
+                {/* Touch Action Buttons Bar */}
+                <div className="pt-2 border-t border-slate-800/60 flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => onSelectEmployee(emp)}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    Details
+                  </button>
+                  {isAdmin && (
+                    <>
+                      <button
+                        onClick={() => onOpenIdCardModal(emp)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold rounded-xl border border-emerald-500/30 transition-colors cursor-pointer"
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        ID Pass
+                      </button>
+                      <button
+                        onClick={() => onOpenEditModal(emp)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 text-xs font-semibold rounded-xl border border-amber-500/30 transition-colors cursor-pointer"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                        Edit
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
 
-                    <td className="py-3 px-6">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
-                        <span className="text-slate-300 font-bold">{emp.status}</span>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => onSelectEmployee(emp)}
-                          className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                          title="View Full Profile"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        {isAdmin && (
-                          <>
-                            <button
-                              onClick={() => onOpenIdCardModal(emp)}
-                              className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                              title="Print / Export ID Badge Card"
-                            >
-                              <CreditCard className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => onOpenEditModal(emp)}
-                              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                              title="Edit Employee Data"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
+          {/* Desktop Data Table (hidden md:block) */}
+          <div className="hidden md:block bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950/60 border-b border-slate-800/60 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    <th className="py-4 px-6">Employee</th>
+                    <th className="py-4 px-6">ID Code</th>
+                    <th className="py-4 px-6">Department & Role</th>
+                    <th className="py-4 px-6">Employment</th>
+                    <th className="py-4 px-6">Status</th>
+                    <th className="py-4 px-6 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40 text-[11px]">
+                  {filteredEmployees.map(emp => (
+                    <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group">
+                      <td className="py-3 px-6">
+                        <div className="flex items-center gap-4">
+                          <img
+                            src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                            alt={emp.fullName}
+                            className="w-8 h-8 rounded-full object-cover border border-slate-700/50"
+                          />
+                          <div>
+                            <div
+                              onClick={() => onSelectEmployee(emp)}
+                              className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
+                            >
+                              {emp.fullName}
+                            </div>
+                            <div className="text-[10px] font-medium text-slate-500">{emp.email}</div>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-6">
+                        <span className="font-mono font-bold text-slate-400">
+                          {emp.employeeId}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-6">
+                        <div className="font-bold text-slate-300">{emp.department}</div>
+                        <div className="text-[10px] text-slate-500 font-medium">{emp.designation}</div>
+                      </td>
+
+                      <td className="py-3 px-6">
+                        <div className="text-slate-400 font-bold">{emp.employmentType}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift?.split(' ')[0] || 'General'}</div>
+                      </td>
+
+                      <td className="py-3 px-6">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
+                          <span className="text-slate-300 font-bold">{emp.status}</span>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => onSelectEmployee(emp)}
+                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                            title="View Full Profile"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {isAdmin && (
+                            <>
+                              <button
+                                onClick={() => onOpenIdCardModal(emp)}
+                                className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                                title="Print / Export ID Badge Card"
+                              >
+                                <CreditCard className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => onOpenEditModal(emp)}
+                                className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                                title="Edit Employee Data"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ) : (

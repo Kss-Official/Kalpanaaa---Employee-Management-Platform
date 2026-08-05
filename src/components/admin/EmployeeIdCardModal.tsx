@@ -79,29 +79,31 @@ export const EmployeeIdCardModal: React.FC<EmployeeIdCardModalProps> = ({ employ
         </div>
 
         {/* Card Canvas Container */}
-        <div className="p-4 sm:p-8 bg-slate-950 flex flex-col items-center justify-center border-b border-slate-800 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-8 bg-slate-950 flex flex-col items-center justify-center border-b border-slate-800 overflow-y-auto flex-1 relative">
           
-          {/* Mobile Segmented Side Switcher */}
-          <div className="flex sm:hidden justify-center bg-slate-900 p-1 rounded-xl border border-slate-800 mb-4 w-full max-w-[280px]">
-            <button
-              onClick={() => setActiveCardSide('front')}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                activeCardSide === 'front' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Front (Barcode)
-            </button>
-            <button
-              onClick={() => setActiveCardSide('back')}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                activeCardSide === 'back' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Back (QR Code)
-            </button>
+          {/* Mobile Segmented Side Switcher - Sticky & Unblocked */}
+          <div className="sticky top-0 z-30 w-full flex justify-center pb-3 pt-1 bg-slate-950/90 backdrop-blur-md sm:hidden">
+            <div className="flex justify-center bg-slate-900 p-1 rounded-xl border border-slate-800 shadow-md w-full max-w-[290px]">
+              <button
+                onClick={() => setActiveCardSide('front')}
+                className={`flex-1 py-2 text-xs font-extrabold rounded-lg transition-all cursor-pointer ${
+                  activeCardSide === 'front' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Front (Barcode)
+              </button>
+              <button
+                onClick={() => setActiveCardSide('back')}
+                className={`flex-1 py-2 text-xs font-extrabold rounded-lg transition-all cursor-pointer ${
+                  activeCardSide === 'back' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Back (QR Code)
+              </button>
+            </div>
           </div>
 
-          <div id="printable-id-card-element" className="flex flex-col sm:flex-row gap-6 sm:gap-8 items-center justify-center w-full">
+          <div id="printable-id-card-element" className="flex flex-col sm:flex-row gap-6 sm:gap-8 items-center justify-center w-full my-auto">
             
             {/* FRONT OF CARD - BARCODE */}
             <div className={`w-[290px] sm:w-[340px] min-h-[460px] sm:h-[580px] bg-white rounded-3xl shadow-2xl overflow-hidden relative print:shadow-none print:border print:border-slate-300 flex-col mx-auto items-center justify-center p-6 sm:p-8 ${

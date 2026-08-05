@@ -91,26 +91,26 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl w-full max-w-4xl overflow-hidden my-8 text-white">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+      <div className="bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-800 shadow-2xl w-full max-w-4xl overflow-hidden text-white flex flex-col max-h-[92vh] sm:max-h-[85vh]">
 
         {/* Header Hero Banner */}
-        <div className="bg-slate-950 text-white p-6 relative border-b border-slate-800">
+        <div className="bg-slate-950 text-white p-4 sm:p-6 relative border-b border-slate-800 shrink-0">
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
+            className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer z-10"
           >
             <X className="w-5 h-5" />
           </button>
 
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-5 pr-6 sm:pr-0">
             <img
               src={employee.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'}
               alt={employee.fullName}
-              className="w-24 h-24 rounded-2xl object-cover border-2 border-slate-700 shadow-md"
+              className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-2xl object-cover border-2 border-slate-700 shadow-md"
             />
 
-            <div className="text-center sm:text-left flex-1">
+            <div className="text-center sm:text-left flex-1 min-w-0">
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1">
                 <span className="font-mono text-xs font-bold bg-blue-600/30 text-blue-300 px-2.5 py-0.5 rounded-md border border-blue-500/30">
                   {employee.employeeId}
@@ -124,26 +124,26 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                 </span>
               </div>
 
-              <h2 className="text-2xl font-bold tracking-tight text-white">{employee.fullName}</h2>
-              <p className="text-sm text-blue-400 font-medium">{employee.designation} • {employee.department}</p>
-              <p className="text-xs text-slate-400 mt-1 flex items-center justify-center sm:justify-start gap-1">
-                <MapPin className="w-3.5 h-3.5" />
-                {employee.workLocation}
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white truncate">{employee.fullName}</h2>
+              <p className="text-xs sm:text-sm text-blue-400 font-medium truncate">{employee.designation} • {employee.department}</p>
+              <p className="text-xs text-slate-400 mt-1 flex items-center justify-center sm:justify-start gap-1 truncate">
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{employee.workLocation}</span>
               </p>
             </div>
 
             {/* Quick Actions */}
-            <div className="flex sm:flex-col items-center gap-2">
+            <div className="flex sm:flex-col items-center justify-center gap-2 w-full sm:w-auto pt-2 sm:pt-0">
               <button
                 onClick={() => onOpenIdCard(employee)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-xs"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 sm:py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-xs"
               >
                 <CreditCard className="w-3.5 h-3.5" />
                 ID Card Badge
               </button>
               <button
                 onClick={() => onOpenEdit(employee)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all cursor-pointer border border-slate-700"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-all cursor-pointer border border-slate-700"
               >
                 Edit Profile
               </button>
@@ -151,31 +151,31 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
           </div>
 
           {/* Modal Navigation Tabs */}
-          <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-800 overflow-x-auto text-xs font-semibold">
+          <div className="flex items-center gap-2 mt-4 sm:mt-6 pt-3 sm:pt-4 border-t border-slate-800 overflow-x-auto text-xs font-semibold no-scrollbar">
             <button
               onClick={() => setActiveTab('details')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'details' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              className={`px-3.5 py-2 rounded-xl transition-colors cursor-pointer shrink-0 ${activeTab === 'details' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
                 }`}
             >
               Employee Details
             </button>
             <button
               onClick={() => setActiveTab('qr')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'qr' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              className={`px-3.5 py-2 rounded-xl transition-colors cursor-pointer shrink-0 ${activeTab === 'qr' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
                 }`}
             >
               QR Attendance Pass
             </button>
             <button
               onClick={() => setActiveTab('attendance')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              className={`px-3.5 py-2 rounded-xl transition-colors cursor-pointer shrink-0 ${activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
                 }`}
             >
               Attendance History ({empAttendance.length})
             </button>
             <button
               onClick={() => setActiveTab('activity')}
-              className={`px-4 py-2 rounded-xl transition-colors cursor-pointer ${activeTab === 'activity' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              className={`px-3.5 py-2 rounded-xl transition-colors cursor-pointer shrink-0 ${activeTab === 'activity' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
                 }`}
             >
               Audit Trail
@@ -184,7 +184,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 max-h-[60vh] overflow-y-auto bg-slate-900">
+        <div className="p-4 sm:p-6 overflow-y-auto bg-slate-900 flex-1">
           {activeTab === 'details' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
               {/* Employment Data */}
