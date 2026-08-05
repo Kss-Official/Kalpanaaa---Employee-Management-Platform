@@ -84,9 +84,21 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, fieldName: 'profilePhotoUrl' | 'resumeUrl') => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, fieldName: 'profilePhotoUrl' | 'resumeUrl') => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (fieldName === 'profilePhotoUrl') {
+      try {
+        const { compressImageBase64 } = await import('../../lib/imageUtils');
+        const compressedBase64 = await compressImageBase64(file, 400, 400, 0.7);
+        setFormData(prev => ({ ...prev, [fieldName]: compressedBase64 }));
+        return;
+      } catch (err) {
+        console.error('Image compression failed:', err);
+      }
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {

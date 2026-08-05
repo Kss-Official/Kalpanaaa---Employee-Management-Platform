@@ -28,6 +28,9 @@ const generateDeviceFingerprint = () => {
 
 const sanitizeInput = <T extends any>(data: T): T => {
   if (typeof data === 'string') {
+    // Skip sanitization for base64 images to prevent regex corruption of large strings
+    if (data.startsWith('data:image/')) return data as any;
+
     // Strip script tags and common XSS vectors
     return data.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
       .replace(/javascript:/gi, '')

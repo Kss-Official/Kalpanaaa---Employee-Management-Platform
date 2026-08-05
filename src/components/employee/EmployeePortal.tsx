@@ -318,16 +318,24 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   };
 
   // Handle Photo File Upload
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setProfilePhoto(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const { compressImageBase64 } = await import('../../lib/imageUtils');
+        const compressedBase64 = await compressImageBase64(file, 400, 400, 0.7);
+        setProfilePhoto(compressedBase64);
+      } catch (err) {
+        console.error('Image compression failed:', err);
+        // Fallback to FileReader if compression fails
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            setProfilePhoto(reader.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
     }
   };
 
