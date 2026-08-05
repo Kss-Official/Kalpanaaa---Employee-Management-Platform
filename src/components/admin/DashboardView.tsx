@@ -28,6 +28,7 @@ import {
   CartesianGrid, 
   Legend 
 } from 'recharts';
+import { motion } from 'framer-motion';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
@@ -96,31 +97,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
     .slice(0, 5);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
       {/* Top Banner & Quick Actions */}
-      <div className="relative bg-slate-900/90 border border-slate-800/80 p-8 rounded-2xl shadow-sm overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      <div className="relative bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] p-8 rounded-3xl shadow-[var(--shadow-md)] overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         {/* Subtle engineering background pattern */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-900/0 to-slate-900/0 pointer-events-none opacity-50"></div>
-        <div className="absolute -right-20 -top-20 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-[var(--accent-blue)]/10 via-transparent to-transparent pointer-events-none opacity-50"></div>
+        <div className="absolute -right-20 -top-20 w-64 h-64 bg-[var(--accent-blue)]/5 rounded-full blur-3xl pointer-events-none"></div>
         
         <div className="relative z-10">
-          <div className="flex items-center gap-2 text-[10px] font-black text-blue-500 uppercase tracking-widest mb-2">
+          <div className="flex items-center gap-2 text-[10px] font-black text-[var(--accent-blue)] uppercase tracking-widest mb-2">
             <span>Executive Command Center</span>
-            <span className="text-slate-600">•</span>
-            <span className="text-slate-400">{settings.companyName}</span>
+            <span className="text-[var(--text-tertiary)]">•</span>
+            <span className="text-[var(--text-secondary)]">{settings.companyName}</span>
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-white mb-1">
+          <h1 className="text-3xl font-extrabold tracking-tight text-[var(--text-primary)] mb-1">
             {getGreeting()}, {displayName}
           </h1>
-          <p className="text-xs text-slate-400 font-medium">
+          <p className="text-xs text-[var(--text-secondary)] font-medium">
             System overview and workforce analytics for {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
           </p>
         </div>
 
         <div className="relative z-10 flex flex-wrap items-center gap-3">
           <button
-            onClick={onOpenAddEmployee}
-            className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-100 text-slate-900 text-xs font-black tracking-wide uppercase rounded-xl transition-all cursor-pointer shadow-sm hover:scale-[1.02]"
+            onClick={() => {
+              triggerHaptic();
+              onOpenAddEmployee();
+            }}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[var(--text-primary)] hover:opacity-90 text-black text-xs font-black tracking-wide uppercase rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95"
           >
             <Plus className="w-4 h-4" strokeWidth={3} />
             New Employee
@@ -129,6 +133,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
 
           <button
             onClick={async () => {
+              triggerHaptic();
               const todayStr = new Date().toISOString().split('T')[0];
               const checkinLogs = auditLogs.filter(log => log.action === 'ATTENDANCE_CHECKIN' && log.timestamp.startsWith(todayStr));
               if (checkinLogs.length === 0) {
@@ -156,15 +161,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
               }
               alert(`Successfully restored ${restored} check-ins from Audit Logs!`);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-amber-950/50 hover:bg-amber-800 border border-amber-700/50 text-amber-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+            className="flex items-center gap-2 px-4 py-2.5 bg-[var(--accent-amber)]/10 hover:bg-[var(--accent-amber)]/20 border border-[var(--accent-amber)]/30 text-[var(--accent-amber)] text-xs font-bold rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95"
           >
             <AlertTriangle className="w-4 h-4" />
-            Restore Today's Check-ins
+            Restore Check-ins
           </button>
 
           <button
-            onClick={() => generateAttendanceReportPdf(todayRecords, settings, 'Daily Attendance Summary Report')}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-950/50 hover:bg-slate-800 border border-slate-700/50 text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+            onClick={() => {
+              triggerHaptic();
+              generateAttendanceReportPdf(todayRecords, settings, 'Daily Attendance Summary Report');
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-subtle)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs font-bold rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95"
           >
             <FileDown className="w-4 h-4" />
             Export PDF
@@ -221,22 +229,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       {/* Analytics Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Attendance Trend Chart */}
-        <div className="lg:col-span-2 bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-6">
+        <div className="lg:col-span-2 bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] p-6 shadow-[var(--shadow-sm)]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
             <div>
-              <h3 className="text-sm font-bold text-white">Attendance Trend (Past 7 Days)</h3>
-              <p className="text-xs text-slate-400">Daily breakdown of present, late, and absent employees</p>
+              <h3 className="text-sm font-bold text-[var(--text-primary)]">Attendance Trend (Past 7 Days)</h3>
+              <p className="text-xs text-[var(--text-secondary)]">Daily breakdown of present, late, and absent employees</p>
             </div>
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg text-xs font-medium border border-slate-800">
+            <div className="flex items-center gap-1.5 bg-[var(--bg-elevated)] p-1 rounded-xl border border-[var(--border-subtle)] overflow-x-auto hide-scrollbar">
               <button
-                onClick={() => setDateFilter('today')}
-                className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${dateFilter === 'today' ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+                onClick={() => { triggerHaptic(); setDateFilter('today'); }}
+                className={`px-4 py-1.5 rounded-lg transition-all cursor-pointer text-xs font-bold whitespace-nowrap ${dateFilter === 'today' ? 'bg-[var(--accent-blue)] text-white shadow-[var(--shadow-glow-blue)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
               >
                 Today
               </button>
               <button
-                onClick={() => setDateFilter('week')}
-                className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${dateFilter === 'week' ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+                onClick={() => { triggerHaptic(); setDateFilter('week'); }}
+                className={`px-4 py-1.5 rounded-lg transition-all cursor-pointer text-xs font-bold whitespace-nowrap ${dateFilter === 'week' ? 'bg-[var(--accent-blue)] text-white shadow-[var(--shadow-glow-blue)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
               >
                 7 Days
               </button>
@@ -248,101 +256,119 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
               <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="var(--accent-emerald)" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="var(--accent-emerald)" stopOpacity={0}/>
                   </linearGradient>
                   <linearGradient id="colorLate" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="var(--accent-amber)" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="var(--accent-amber)" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-medium)" />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#ffffff', fontSize: '12px' }}
+                  contentStyle={{ backgroundColor: 'var(--bg-elevated)', borderRadius: '12px', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontSize: '12px', boxShadow: 'var(--shadow-md)' }}
+                  itemStyle={{ color: 'var(--text-primary)' }}
                 />
-                <Area type="monotone" dataKey="Present" stroke="#10b981" fillOpacity={1} fill="url(#colorPresent)" strokeWidth={2} />
-                <Area type="monotone" dataKey="Late" stroke="#f59e0b" fillOpacity={1} fill="url(#colorLate)" strokeWidth={2} />
+                <Area type="monotone" dataKey="Present" stroke="var(--accent-emerald)" fillOpacity={1} fill="url(#colorPresent)" strokeWidth={3} />
+                <Area type="monotone" dataKey="Late" stroke="var(--accent-amber)" fillOpacity={1} fill="url(#colorLate)" strokeWidth={3} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Department Stats Bar Chart */}
-        <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm flex flex-col">
+        <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] p-6 shadow-[var(--shadow-sm)] flex flex-col">
           <div className="mb-6">
-            <h3 className="text-sm font-bold text-white">Department Turnout</h3>
-            <p className="text-xs text-slate-400">Present vs Total employees per department</p>
+            <h3 className="text-sm font-bold text-[var(--text-primary)]">Department Turnout</h3>
+            <p className="text-xs text-[var(--text-secondary)]">Present vs Total employees per department</p>
           </div>
 
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={deptData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="department" tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-medium)" vertical={false} />
+                <XAxis dataKey="department" tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#ffffff', fontSize: '12px' }}
+                  contentStyle={{ backgroundColor: 'var(--bg-elevated)', borderRadius: '12px', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontSize: '12px', boxShadow: 'var(--shadow-md)' }}
+                  cursor={{fill: 'var(--border-subtle)'}}
                 />
-                <Bar dataKey="Total" fill="#334155" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="Present" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="Total" fill="var(--text-muted)" radius={[6, 6, 0, 0]} barSize={12} />
+                <Bar dataKey="Present" fill="var(--accent-blue)" radius={[6, 6, 0, 0]} barSize={12} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-      {/* Recent Activity List */}
-      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-slate-800/60 flex items-center justify-between">
+      {/* Live Activity Feed */}
+      <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] overflow-hidden shadow-[var(--shadow-sm)]">
+        <div className="p-6 border-b border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h3 className="text-sm font-black text-white uppercase tracking-wider">Live Activity Feed</h3>
-            <p className="text-[10px] text-slate-500 font-bold mt-1">Real-time check-ins for {new Date().toLocaleDateString()}</p>
+            <h3 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-wider">Live Activity Feed</h3>
+            <p className="text-[10px] text-[var(--text-secondary)] font-bold mt-1">Real-time check-ins for {new Date().toLocaleDateString()}</p>
           </div>
           <button
-            onClick={() => onNavigateTab('attendance')}
-            className="text-[10px] font-bold text-blue-500 hover:text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+            onClick={() => { triggerHaptic(); onNavigateTab('attendance'); }}
+            className="text-[10px] font-bold text-[var(--accent-blue)] hover:text-[var(--text-primary)] bg-[var(--accent-blue)]/10 hover:bg-[var(--accent-blue)]/20 px-4 py-2 rounded-xl flex items-center gap-1 transition-colors cursor-pointer w-full sm:w-auto justify-center"
           >
             View All <ArrowUpRight className="w-3 h-3" />
           </button>
         </div>
 
-        <div className="divide-y divide-slate-800/60">
+        <div className="divide-y divide-[var(--border-subtle)]">
         {recentCheckIns.length === 0 ? (
-          <div className="text-center py-8 text-slate-500 text-xs font-medium">
+          <div className="text-center py-12 text-[var(--text-muted)] text-xs font-medium">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-[var(--bg-elevated)] flex items-center justify-center">
+              <Clock className="w-6 h-6 text-[var(--text-tertiary)] opacity-50" />
+            </div>
             No check-in activity recorded yet for today.
           </div>
         ) : (
-          <div className="divide-y divide-slate-800">
-            {recentCheckIns.map(rec => {
+          <div className="divide-y divide-[var(--border-subtle)]">
+            {recentCheckIns.map((rec, i) => {
               const emp = employees.find(e => e.employeeId === rec.employeeCode);
               return (
-                <div key={rec.id} className="grid grid-cols-4 items-center">
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05, ...{ type: 'spring', stiffness: 300, damping: 30 } }}
+                  key={rec.id} 
+                  className="grid grid-cols-4 items-center hover:bg-[var(--bg-elevated)] transition-colors"
+                >
                   <div className="col-span-2 px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={emp?.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(rec.employeeName || 'User')}&background=0D8ABC&color=fff`}
-                        alt={rec.employeeName}
-                        className="w-8 h-8 rounded-full border border-slate-700"
-                      />
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        <img
+                          src={emp?.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(rec.employeeName || 'User')}&background=111118&color=fff`}
+                          alt={rec.employeeName}
+                          className="w-10 h-10 rounded-full object-cover border border-[var(--border-subtle)]"
+                        />
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-[var(--accent-emerald)] rounded-full border-2 border-[var(--bg-tertiary)]"></div>
+                      </div>
                       <div>
-                        <div className="text-sm font-bold text-white leading-tight">{rec.employeeName || 'Unknown'}</div>
-                        <div className="text-[10px] text-slate-500 font-semibold">{rec.department || '--'}</div>
+                        <div className="text-sm font-bold text-[var(--text-primary)] leading-tight">{rec.employeeName || 'Unknown'}</div>
+                        <div className="text-[10px] text-[var(--text-secondary)] font-semibold mt-0.5">{rec.department || '--'}</div>
                       </div>
                     </div>
                   </div>
-                  <div className="px-6 py-4 text-xs text-slate-300 font-mono font-bold">
+                  <div className="px-6 py-4 text-xs text-[var(--text-secondary)] font-mono font-bold text-center">
                     {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
                   </div>
-                  <div className="px-6 py-4 text-right">
+                  <div className="px-6 py-4 text-right flex justify-end">
                     {rec.locationVerified ? (
-                      <span className="text-emerald-400 flex items-center gap-1 text-[10px] font-bold uppercase justify-end"><CheckCircle2 className="w-3 h-3"/> Office GPS</span>
+                      <span className="text-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] font-bold uppercase w-fit">
+                        <CheckCircle2 className="w-3 h-3"/> Office GPS
+                      </span>
                     ) : (
-                      <span className="text-amber-400 flex items-center gap-1 text-[10px] font-bold uppercase justify-end"><AlertTriangle className="w-3 h-3"/> Unverified</span>
+                      <span className="text-[var(--accent-amber)] bg-[var(--accent-amber)]/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] font-bold uppercase w-fit">
+                        <AlertTriangle className="w-3 h-3"/> Unverified
+                      </span>
                     )}
                   </div>
-                </div>
+                </motion.div>
               );
             })}
           </div>

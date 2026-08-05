@@ -65,7 +65,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center p-0 sm:p-6 sm:items-center">
+      <div className="fixed inset-0 z-[100] flex flex-col justify-end p-0 sm:p-6 sm:items-center pointer-events-auto">
         {/* Backdrop */}
         <motion.div 
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -75,20 +75,29 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
 
         {/* Bottom Sheet / Modal Shell */}
         <motion.div
-          initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }}
+          drag="y"
+          dragConstraints={{ top: 0, bottom: 500 }}
+          dragElastic={0.2}
+          onDragEnd={(e, info) => {
+            if (info.offset.y > 100 || info.velocity.y > 500) {
+              triggerHaptic('medium');
+              onClose();
+            }
+          }}
+          initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="relative w-full sm:max-w-4xl bg-[var(--bg-primary)] rounded-t-3xl sm:rounded-3xl border-t sm:border border-[var(--border-subtle)] shadow-2xl flex flex-col max-h-[95vh] sm:max-h-[85vh] overflow-hidden"
+          className="relative w-full sm:max-w-4xl bg-[var(--bg-primary)] rounded-t-3xl sm:rounded-3xl shadow-[var(--shadow-xl)] flex flex-col max-h-[95vh] sm:max-h-[85vh] overflow-hidden border-t sm:border border-[var(--border-subtle)]"
         >
           {/* Mobile Drag Indicator */}
-          <div className="w-full flex justify-center py-3 sm:hidden absolute top-0 z-20">
+          <div className="w-full flex justify-center py-3 sm:hidden absolute top-0 z-20 touch-none">
             <div className="w-12 h-1.5 bg-[var(--border-strong)] rounded-full"></div>
           </div>
 
           {/* Sticky Header Hero */}
-          <div className="bg-[var(--bg-elevated)] p-5 sm:p-6 pt-10 sm:pt-6 relative border-b border-[var(--border-subtle)] shrink-0 z-10">
+          <div className="bg-[var(--bg-tertiary)] p-5 sm:p-6 pt-10 sm:pt-6 relative border-b border-[var(--border-subtle)] shrink-0 z-10">
             <button
               onClick={() => { triggerHaptic('light'); onClose(); }}
-              className={`absolute top-4 right-4 p-2 text-[var(--text-tertiary)] hover:text-white hover:bg-[var(--bg-secondary)] rounded-full transition-colors cursor-pointer outline-none ${animations.tap}`}
+              className={`absolute top-4 right-4 p-2 text-[var(--text-tertiary)] hover:text-white hover:bg-[var(--bg-elevated)] rounded-full transition-colors cursor-pointer outline-none ${animations.tap}`}
             >
               <X className="w-5 h-5" />
             </button>
@@ -96,25 +105,26 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 pr-6 sm:pr-0">
               <div className="relative shrink-0">
                 <img
-                  src={employee.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'}
+                  src={employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(employee.fullName)}&background=111118&color=fff`}
                   alt={employee.fullName}
-                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-2 border-[var(--border-strong)] shadow-lg shadow-blue-500/10"
+                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-2 border-[var(--border-subtle)] shadow-[var(--shadow-md)]"
                 />
               </div>
 
               <div className="text-center sm:text-left flex-1 min-w-0">
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-2">
-                  <span className="font-mono text-[11px] font-bold bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] px-2.5 py-0.5 rounded-lg border border-[var(--accent-blue)]/20">
+                  <span className="font-mono text-[11px] font-bold bg-[var(--bg-elevated)] text-[var(--text-secondary)] px-2.5 py-0.5 rounded-lg border border-[var(--border-subtle)]">
                     {employee.employeeId}
                   </span>
-                  <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-lg border ${
+                  <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-lg border flex items-center gap-1 ${
                     employee.status === 'Active' 
                       ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] border-[var(--accent-emerald)]/20' 
-                      : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                      : 'bg-[var(--accent-amber)]/10 text-[var(--accent-amber)] border-[var(--accent-amber)]/20'
                   }`}>
+                    {employee.status === 'Active' && <Shield className="w-3 h-3" />}
                     {employee.status}
                   </span>
-                  <span className="bg-[var(--bg-secondary)] text-[var(--text-secondary)] text-[11px] font-semibold px-2.5 py-0.5 rounded-lg border border-[var(--border-subtle)]">
+                  <span className="bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] text-[11px] font-bold px-2.5 py-0.5 rounded-lg border border-[var(--accent-blue)]/20">
                     {employee.role}
                   </span>
                 </div>

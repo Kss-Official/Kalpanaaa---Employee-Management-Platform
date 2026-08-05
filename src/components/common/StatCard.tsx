@@ -22,39 +22,42 @@ export const StatCard: React.FC<StatCardProps> = ({
   color = 'blue'
 }) => {
   const colorMap = {
-    blue: 'text-blue-400',
-    emerald: 'text-emerald-400',
-    amber: 'text-amber-400',
-    rose: 'text-rose-400',
-    purple: 'text-purple-400',
+    blue: 'var(--accent-blue)',
+    emerald: 'var(--accent-emerald)',
+    amber: 'var(--accent-amber)',
+    rose: 'var(--accent-rose)',
+    purple: 'var(--accent-violet)',
   };
 
   const textColor = colorMap[color];
 
   return (
-    <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 shadow-sm transition-all hover:border-slate-700 hover:bg-slate-900 group">
+    <div className="bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-subtle)] p-5 shadow-[var(--shadow-sm)] transition-all hover:bg-[var(--bg-elevated)] group">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <span className="text-[10px] font-black tracking-widest text-slate-500 uppercase block mb-1">{title}</span>
+          <span className="text-[10px] font-black tracking-widest text-[var(--text-tertiary)] uppercase block mb-1">{title}</span>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-white tracking-tight">{value}</span>
+            <span className="text-3xl font-extrabold text-[var(--text-primary)] tracking-tight">{value}</span>
           </div>
         </div>
-        <div className={`p-2 rounded-xl bg-slate-950/50 border border-slate-800/50 ${textColor} group-hover:scale-105 transition-transform`}>
+        <div 
+          className="p-2 rounded-xl border group-hover:scale-105 transition-transform"
+          style={{ color: textColor, backgroundColor: `${textColor}15`, borderColor: `${textColor}30` }}
+        >
           <Icon className="w-4 h-4" strokeWidth={2.5} />
         </div>
       </div>
 
-      <div className="flex items-center justify-between pt-3 border-t border-slate-800/60 mt-2">
+      <div className="flex items-center justify-between pt-3 border-t border-[var(--border-subtle)] mt-2">
         {subtext ? (
-          <p className="text-[10px] text-slate-400 font-medium">{subtext}</p>
+          <p className="text-[10px] text-[var(--text-secondary)] font-medium">{subtext}</p>
         ) : <div />}
         
         {trend && (
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
-            trend.type === 'up' ? 'text-emerald-400 bg-emerald-500/10' :
-            trend.type === 'down' ? 'text-rose-400 bg-rose-500/10' :
-            'text-slate-400 bg-slate-800/50'
+            trend.type === 'up' ? 'text-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10' :
+            trend.type === 'down' ? 'text-[var(--accent-rose)] bg-[var(--accent-rose)]/10' :
+            'text-[var(--text-tertiary)] bg-[var(--bg-elevated)]'
           }`}>
             {trend.text}
           </span>
