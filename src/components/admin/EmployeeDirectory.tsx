@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { AllEmployeeBarcodesView } from './AllEmployeeBarcodesView';
 import { Employee, EmployeeStatus } from '../../types';
+import { motion } from 'framer-motion';
 import { 
   Search, 
   Filter, 
@@ -17,7 +18,8 @@ import {
   Eye, 
   LayoutGrid, 
   List,
-  Sparkles
+  Sparkles,
+  ChevronRight
 } from 'lucide-react';
 
 interface EmployeeDirectoryProps {
@@ -171,79 +173,122 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         /* TABLE VIEW (Mobile Card List on mobile, Desktop Table on md+) */
         <div>
           {/* Mobile Enterprise Card List (md:hidden) */}
-          <div className="md:hidden space-y-3">
-            {filteredEmployees.map(emp => (
-              <div 
-                key={emp.id} 
-                className="bg-slate-900/95 rounded-2xl border border-slate-800 p-4 shadow-sm space-y-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                      alt={emp.fullName}
-                      className="w-11 h-11 rounded-2xl object-cover border border-slate-700/60 shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <h4 
-                        onClick={() => onSelectEmployee(emp)}
-                        className="font-bold text-white text-sm hover:text-blue-400 cursor-pointer transition-colors truncate"
-                      >
-                        {emp.fullName}
-                      </h4>
-                      <p className="text-[11px] text-blue-400 font-medium truncate">{emp.designation}</p>
+          <motion.div 
+            className="md:hidden space-y-3"
+            initial="hidden"
+            animate="show"
+            variants={{
+              hidden: { opacity: 0 },
+              show: { opacity: 1, transition: { staggerChildren: 0.04 } }
+            }}
+          >
+            {filteredEmployees.map(emp => {
+              const statusColorMap = {
+                'Present': 'var(--accent-emerald)',
+                'Late': 'var(--accent-amber)',
+                'Absent': 'var(--accent-rose)',
+                'On Leave': 'var(--accent-violet)',
+              };
+              const statusColor = (statusColorMap as any)[emp.status] || 'var(--text-muted)';
+              const statusGlow = statusColor.replace('accent', 'glow');
+
+              return (
+                <motion.div 
+                  key={emp.id} 
+                  variants={{
+                    hidden: { opacity: 0, x: -10 },
+                    show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+                  }}
+                  className="relative overflow-hidden bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-subtle)] p-4 shadow-[var(--shadow-sm)]"
+                >
+                  <div className="absolute top-0 left-0 right-0 h-[40px] opacity-20 pointer-events-none" style={{ background: 'var(--gradient-card)' }} />
+                  
+                  {/* Top Section: Avatar & Identity */}
+                  <div className="flex items-start justify-between gap-3 relative z-10">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="relative">
+                        <img
+                          src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                          alt={emp.fullName}
+                          className="w-12 h-12 rounded-full object-cover shrink-0"
+                          style={{ border: `2px solid ${statusColor}` }}
+                        />
+                        <span 
+                          className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-[var(--bg-tertiary)]"
+                          style={{ backgroundColor: statusColor, boxShadow: `0 0 10px ${statusColor}40` }}
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 
+                          onClick={() => onSelectEmployee(emp)}
+                          className="font-bold text-[var(--text-primary)] text-[15px] cursor-pointer truncate"
+                        >
+                          {emp.fullName}
+                        </h4>
+                        <p className="text-xs text-[var(--text-secondary)] font-medium truncate mt-0.5">
+                          {emp.designation} <span className="opacity-50 mx-1">•</span> {emp.department}
+                        </p>
+                      </div>
                     </div>
+                    <button onClick={() => onSelectEmployee(emp)} className="w-8 h-8 flex items-center justify-center bg-[var(--bg-elevated)] rounded-full border border-[var(--border-subtle)] text-[var(--text-tertiary)] active:scale-95 transition-transform shrink-0">
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0 bg-slate-950/60 px-2.5 py-1 rounded-xl border border-slate-800/60">
-                    <span className={`w-2 h-2 rounded-full ${getStatusIndicator(emp.status)}`} />
-                    <span className="text-[10px] text-slate-300 font-extrabold uppercase">{emp.status}</span>
+                  {/* Middle Section: Meta Info */}
+                  <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[var(--border-subtle)] text-xs relative z-10">
+                    <span 
+                      className="px-2 py-0.5 rounded-md font-bold flex items-center gap-1.5"
+                      style={{ color: statusColor, backgroundColor: `${statusColor}15`, border: `1px solid ${statusColor}30` }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
+                      {emp.status}
+                    </span>
+                    <span className="font-mono font-bold text-[var(--text-secondary)]">
+                      {emp.employeeId}
+                    </span>
+                    <span className="text-[var(--text-tertiary)] truncate ml-auto">
+                      {emp.email}
+                    </span>
                   </div>
-                </div>
 
-                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/60 text-[11px]">
-                  <span className="font-mono font-bold bg-slate-950 text-slate-400 px-2 py-0.5 rounded-md border border-slate-800">
-                    {emp.employeeId}
-                  </span>
-                  <span className="bg-slate-800/60 text-slate-300 font-medium px-2 py-0.5 rounded-md border border-slate-700/50">
-                    {emp.department}
-                  </span>
-                  <span className="text-slate-400 truncate max-w-[180px]">
-                    {emp.email}
-                  </span>
-                </div>
-
-                {/* Touch Action Buttons Bar */}
-                <div className="pt-2 border-t border-slate-800/60 flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => onSelectEmployee(emp)}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    Details
-                  </button>
-                  {isAdmin && (
-                    <>
-                      <button
-                        onClick={() => onOpenIdCardModal(emp)}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold rounded-xl border border-emerald-500/30 transition-colors cursor-pointer"
-                      >
-                        <CreditCard className="w-3.5 h-3.5" />
-                        ID Pass
-                      </button>
-                      <button
-                        onClick={() => onOpenEditModal(emp)}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 text-xs font-semibold rounded-xl border border-amber-500/30 transition-colors cursor-pointer"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                        Edit
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+                  {/* Bottom Section: Actions */}
+                  <div className="grid grid-cols-3 gap-2 mt-4 relative z-10">
+                    <button
+                      onClick={() => onSelectEmployee(emp)}
+                      className="h-10 flex items-center justify-center gap-1.5 bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-xs font-semibold rounded-[10px] active:scale-95 transition-transform"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Details
+                    </button>
+                    {isAdmin ? (
+                      <>
+                        <button
+                          onClick={() => onOpenIdCardModal(emp)}
+                          className="h-10 flex items-center justify-center gap-1.5 bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] text-xs font-semibold rounded-[10px] active:scale-95 transition-transform"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          ID Pass
+                        </button>
+                        <button
+                          onClick={() => onOpenEditModal(emp)}
+                          className="h-10 flex items-center justify-center gap-1.5 bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-xs font-semibold rounded-[10px] active:scale-95 transition-transform"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          Edit
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="h-10"></div>
+                        <div className="h-10"></div>
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </motion.div>
 
           {/* Desktop Data Table (hidden md:block) */}
           <div className="hidden md:block bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">

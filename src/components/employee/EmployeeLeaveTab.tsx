@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Check, X, Clock, CalendarDays, Plus, Send } from 'lucide-react';
-
+import { Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { useHaptic } from '../../hooks/useHaptic';
 export const EmployeeLeaveTab: React.FC = () => {
   const { activeEmployee, leaveRequests, submitLeaveRequest } = useAuth();
+  const { triggerHaptic } = useHaptic();
   
   const [type, setType] = useState<'Leave' | 'WFH'>('WFH');
   const [startDate, setStartDate] = useState('');
@@ -139,69 +141,105 @@ export const EmployeeLeaveTab: React.FC = () => {
         </form>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm whitespace-nowrap">
-          <thead>
-            <tr className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800">
-              <th className="px-6 py-4">Request ID</th>
-              <th className="px-6 py-4">Type</th>
-              <th className="px-6 py-4">Dates</th>
-              <th className="px-6 py-4">Status</th>
-              <th className="px-6 py-4 text-right">Review Notes</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/60">
-            {myRequests.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-slate-500 font-medium">
-                  You haven't submitted any leave or WFH requests.
-                </td>
-              </tr>
-            ) : (
-              myRequests.map((req) => (
-                <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
-                  <td className="px-6 py-4 font-mono text-slate-400 text-xs">{req.id}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                      req.type === 'WFH' ? 'bg-purple-500/10 text-purple-400' : 'bg-orange-500/10 text-orange-400'
-                    }`}>
-                      {req.type}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 text-slate-300">
-                      <span>{req.startDate} {req.startDate !== req.endDate && `to ${req.endDate}`}</span>
+      <div className="mt-8">
+        <h3 className="text-sm font-bold text-[var(--text-primary)] mb-4 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-[var(--accent-blue)]" />
+          Request History
+        </h3>
+        
+        <div className="space-y-4">
+          {myRequests.length === 0 ? (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="py-12 flex flex-col items-center justify-center text-center bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-3xl"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-[var(--bg-elevated)] flex items-center justify-center mb-4">
+                <Calendar className="w-8 h-8 text-[var(--text-muted)]" />
+              </div>
+              <h3 className="text-[var(--text-primary)] font-bold text-sm">No requests yet</h3>
+              <p className="text-[var(--text-tertiary)] text-xs mt-1 max-w-[200px]">When you apply for leave or WFH, it will appear here.</p>
+            </motion.div>
+          ) : (
+            <motion.div 
+              initial="hidden"
+              animate="show"
+              variants={{
+                hidden: { opacity: 0 },
+                show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+              }}
+              className="space-y-3"
+            >
+              {myRequests.map((req) => {
+                const statusColor = 
+                  req.status === 'Approved' ? 'var(--accent-emerald)' : 
+                  req.status === 'Rejected' ? 'var(--accent-rose)' : 
+                  'var(--accent-amber)';
+
+                const Icon = req.status === 'Approved' ? Check : req.status === 'Rejected' ? X : Clock;
+
+                return (
+                  <motion.div 
+                    key={req.id} 
+                    variants={{
+                      hidden: { opacity: 0, y: 10 },
+                      show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+                    }}
+                    className="bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-subtle)] p-4 shadow-[var(--shadow-sm)] flex flex-col relative overflow-hidden"
+                    style={{ borderLeft: `4px solid ${statusColor}` }}
+                  >
+                    <div className="absolute top-0 right-0 h-[60px] w-[150px] opacity-10 pointer-events-none" style={{ background: `radial-gradient(ellipse at top right, ${statusColor}, transparent)` }} />
+                    
+                    <div className="flex items-start justify-between mb-3 relative z-10">
+                      <div>
+                        <span className="font-mono text-[10px] text-[var(--text-tertiary)] font-black uppercase tracking-wider mb-1 block">
+                          {req.id}
+                        </span>
+                        <div className="text-[var(--text-primary)] font-bold text-base flex items-center gap-2 tabular-nums">
+                          {req.startDate}
+                          {req.startDate !== req.endDate && (
+                            <>
+                              <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                              {req.endDate}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <span 
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                        style={{ color: statusColor, backgroundColor: `${statusColor}15`, border: `1px solid ${statusColor}30` }}
+                      >
+                        <Icon className="w-3 h-3" />
+                        {req.status}
+                      </span>
                     </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    {req.status === 'Pending' && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-500/10 text-yellow-400 text-[10px] font-bold uppercase tracking-wider">
-                        <Clock className="w-3 h-3" /> Pending
+
+                    <div className="flex items-center justify-between border-t border-[var(--border-subtle)] pt-3 relative z-10">
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                        req.type === 'WFH' ? 'bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]' : 'bg-[var(--accent-violet)]/10 text-[var(--accent-violet)]'
+                      }`}>
+                        {req.type}
                       </span>
-                    )}
-                    {req.status === 'Approved' && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
-                        <Check className="w-3 h-3" /> Approved
-                      </span>
-                    )}
-                    {req.status === 'Rejected' && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-500/10 text-rose-400 text-[10px] font-bold uppercase tracking-wider">
-                        <X className="w-3 h-3" /> Rejected
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    {req.status !== 'Pending' ? (
-                      <span className="text-slate-400 text-xs">{req.reviewNotes || `Reviewed by ${req.reviewedBy}`}</span>
-                    ) : (
-                      <span className="text-slate-600">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                      
+                      {req.status !== 'Pending' ? (
+                        <span className="text-[var(--text-tertiary)] text-[10px] max-w-[200px] truncate" title={req.reviewNotes || `Reviewed by ${req.reviewedBy}`}>
+                          {req.reviewNotes || `Reviewed by ${req.reviewedBy}`}
+                        </span>
+                      ) : (
+                        <button 
+                          onClick={() => triggerHaptic()} 
+                          className="text-[10px] font-bold text-[var(--accent-rose)] bg-[var(--accent-rose)]/10 px-3 py-1 rounded-lg active:scale-95 transition-transform"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+          )}
+        </div>
       </div>
     </div>
   );

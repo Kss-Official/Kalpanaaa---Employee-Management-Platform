@@ -10,10 +10,54 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Kalpanaaa Software Solutions-Employees MGMNT</title>
+  <style>
+    body { margin: 0; background-color: #000000; color: #ffffff; }
+    #splash-screen {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: #000000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .splash-logo {
+      width: 120px; height: 120px; border-radius: 24px;
+      margin-bottom: 24px;
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    .splash-title {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 24px; font-weight: 800; letter-spacing: 1px;
+      background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .splash-tagline {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px; font-weight: 500; color: #71717a;
+      margin-top: 8px; letter-spacing: 2px; text-transform: uppercase;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(0.95); } }
+  </style>
 </head>
 
 <body>
+  <div id="splash-screen">
+    <img src="/src/assets/images/kalpana_logo.jpeg" class="splash-logo" alt="Kalpanaaa Logo" onerror="this.style.display='none'">
+    <div class="splash-title">Kalpanaaa</div>
+    <div class="splash-tagline">Software Solutions</div>
+  </div>
   <div id="root"></div>
+  <script>
+    // Remove splash screen once React mounts
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        const splash = document.getElementById('splash-screen');
+        if (splash) {
+          splash.style.opacity = '0';
+          setTimeout(() => splash.remove(), 600);
+        }
+      }, 500); // Minimum display time for premium feel
+    });
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

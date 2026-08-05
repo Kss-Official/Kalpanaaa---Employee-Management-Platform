@@ -40,7 +40,8 @@ import {
   PlayCircle,
   StopCircle,
   Fingerprint,
-  Loader2
+  Loader2,
+  ChevronRight
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
@@ -107,9 +108,16 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [isCapturingCamera, setIsCapturingCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Late' | 'Absent' | 'Leave'>('All');
+  
   const todayStr = new Date().toISOString().split('T')[0];
   const todayRecord = attendance.find(a => (a.employeeId === activeEmployee?.id || a.employeeCode === activeEmployee?.employeeId) && a.date === todayStr);
-  const empHistory = attendance.filter(a => a.employeeId === activeEmployee?.id || a.employeeCode === activeEmployee?.employeeId);
+  const rawHistory = attendance.filter(a => a.employeeId === activeEmployee?.id || a.employeeCode === activeEmployee?.employeeId);
+  const empHistory = rawHistory.filter(rec => {
+    if (attendanceFilter === 'All') return true;
+    if (attendanceFilter === 'Leave') return rec.status === 'On Leave' || rec.status === 'Leave';
+    return rec.status === attendanceFilter;
+  });
 
   // Break & WFH state
   const [activeBreak, setActiveBreak] = useState<{ type: 'Tea Break' | 'Lunch Break'; startAt: string } | null>(null);
@@ -791,78 +799,140 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
       {/* 2. ATTENDANCE HISTORY TAB */}
       {activeTab === 'emp_attendance' && (
-        <div className="bg-slate-900/90 rounded-3xl border border-slate-800 overflow-hidden shadow-xl p-6 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-blue-400" />
-              My Attendance Records ({empHistory.length})
+        <div className="bg-[var(--bg-secondary)] min-h-[500px] flex flex-col space-y-4">
+          <div className="flex items-center justify-between pb-2">
+            <h2 className="text-lg font-bold text-[var(--text-primary)] flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-[var(--accent-blue)]" />
+              History
             </h2>
-            <span className="text-xs text-slate-400 font-mono">Filtered by account ID</span>
+            <span className="text-xs text-[var(--text-tertiary)] font-mono">{empHistory.length} Records</span>
+          </div>
+
+          {/* Filter Chips */}
+          <div className="flex overflow-x-auto no-scrollbar gap-2 pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+            {['All', 'Present', 'Late', 'Absent', 'Leave'].map(filter => (
+              <button
+                key={filter}
+                onClick={() => {
+                  triggerHaptic();
+                  setAttendanceFilter(filter as any);
+                }}
+                className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 border ${
+                  attendanceFilter === filter 
+                    ? 'bg-[var(--accent-blue)] text-white border-[var(--accent-blue)] shadow-[var(--shadow-glow-blue)]' 
+                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)]'
+                }`}
+              >
+                {filter}
+              </button>
+            ))}
           </div>
           
-          <div className="overflow-x-auto text-xs">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4">Check In</th>
-                  <th className="py-3 px-4">Check Out</th>
-                  <th className="py-3 px-4">Working Time</th>
-                  <th className="py-3 px-4">Breaks</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Verification</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {empHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-500">
-                      No attendance records found yet. Perform a check in today!
-                    </td>
-                  </tr>
-                ) : (
-                  empHistory.map(rec => (
-                    <tr key={rec.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-4 font-semibold text-white">{rec.date}</td>
-                      <td className="py-3 px-4 font-mono text-slate-300">
-                        {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-slate-300">
-                        {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-blue-400 font-semibold">
-                        {rec.workingMinutes ? `${Math.floor(rec.workingMinutes/60)}h ${rec.workingMinutes%60}m` : '--'}
-                      </td>
-                      <td className="py-3 px-4">
-                        {(rec.totalBreakMinutes ?? 0) > 0 ? (
-                          <span className="flex items-center gap-1 text-amber-400 font-semibold">
-                            <Coffee className="w-3 h-3" />
-                            {rec.totalBreakMinutes}m
-                          </span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`inline-flex items-center gap-1 font-bold text-[11px] ${
-                          rec.isWfh ? 'text-sky-400' :
-                          rec.status === 'Present' ? 'text-emerald-400' :
-                          rec.status === 'Late' ? 'text-amber-400' :
-                          rec.status === 'Absent' ? 'text-rose-400' : 'text-slate-400'
-                        }`}>
-                          {rec.isWfh && <Home className="w-3 h-3" />}
-                          {rec.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-400 text-[11px]">
-                        {rec.isWfh ? '🏠 WFH' : rec.locationVerified ? '✓ Geofenced GPS' : 'Standard'}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          {/* Animated List View */}
+          <motion.div 
+            className="flex flex-col space-y-3"
+            initial="hidden"
+            animate="show"
+            variants={{
+              hidden: { opacity: 0 },
+              show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+            }}
+          >
+            {empHistory.length === 0 ? (
+              <div className="py-12 flex flex-col items-center justify-center text-center">
+                <Calendar className="w-12 h-12 text-[var(--text-muted)] mb-3" />
+                <h3 className="text-[var(--text-primary)] font-semibold text-sm">No records found</h3>
+                <p className="text-[var(--text-tertiary)] text-xs mt-1">Check back after you've checked in, or try a different filter.</p>
+              </div>
+            ) : (
+              empHistory.map((rec) => {
+                const statusColorMap = {
+                  'Present': 'var(--accent-emerald)',
+                  'Late': 'var(--accent-amber)',
+                  'Absent': 'var(--accent-rose)',
+                  'On Leave': 'var(--accent-violet)',
+                  'Leave': 'var(--accent-violet)',
+                };
+                const statusColor = (statusColorMap as any)[rec.status] || 'var(--text-muted)';
+
+                return (
+                  <motion.div
+                    key={rec.id}
+                    variants={{
+                      hidden: { opacity: 0, y: 10 },
+                      show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+                    }}
+                    className="relative overflow-hidden group"
+                  >
+                    {/* Background swipe action hints */}
+                    <div className="absolute inset-0 rounded-2xl flex items-center justify-between px-4 text-white text-xs font-bold -z-10">
+                      <div className="flex items-center gap-2 text-[var(--accent-amber)]"><Edit className="w-4 h-4" /> Correction</div>
+                      <div className="flex items-center gap-2 text-[var(--accent-blue)]">Details <ChevronRight className="w-4 h-4" /></div>
+                    </div>
+
+                    <motion.div
+                      drag="x"
+                      dragConstraints={{ left: -80, right: 80 }}
+                      dragElastic={0.1}
+                      onDragEnd={(e, info) => {
+                        if (info.offset.x > 50) {
+                          triggerHaptic();
+                          // Swipe right -> Request Correction (mock)
+                          setActionFeedback({ success: true, message: "Correction request opened" });
+                          setTimeout(() => setActionFeedback(null), 2000);
+                        } else if (info.offset.x < -50) {
+                          triggerHaptic();
+                          // Swipe left -> View Details (mock)
+                          setActionFeedback({ success: true, message: "Viewing detailed log" });
+                          setTimeout(() => setActionFeedback(null), 2000);
+                        }
+                      }}
+                      className="bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-2xl p-4 shadow-[var(--shadow-sm)] flex items-center justify-between z-10 bg-[var(--bg-tertiary)]"
+                      style={{ background: 'var(--bg-tertiary)' }}
+                    >
+                      <div className="flex items-center gap-4">
+                        {/* Date Cube */}
+                        <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] shrink-0">
+                          <span className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">{new Date(rec.date).toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                          <span className="text-lg font-black text-[var(--text-primary)] leading-none mt-0.5">{new Date(rec.date).getDate()}</span>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span 
+                              className="w-2 h-2 rounded-full" 
+                              style={{ backgroundColor: statusColor, boxShadow: `0 0 10px ${statusColor}80` }}
+                            />
+                            <span className="text-sm font-bold text-[var(--text-primary)]">{rec.status}</span>
+                            {rec.isWfh && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[var(--accent-blue)]/20 text-[var(--accent-blue)]">WFH</span>}
+                          </div>
+                          
+                          <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)] font-mono mt-1">
+                            <div className="flex items-center gap-1">
+                              <Timer className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+                              {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                              {' - '}
+                              {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-black text-[var(--text-primary)] tabular-nums">
+                          {rec.workingMinutes ? `${Math.floor(rec.workingMinutes/60)}h ${rec.workingMinutes%60}m` : '--'}
+                        </div>
+                        <div className="text-[10px] text-[var(--text-tertiary)] mt-1 flex items-center justify-end gap-1">
+                          {rec.locationVerified ? <MapPin className="w-3 h-3 text-[var(--accent-emerald)]" /> : null}
+                          {rec.locationVerified ? 'Verified' : 'Unverified'}
+                        </div>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                );
+              })
+            )}
+          </motion.div>
         </div>
       )}
 

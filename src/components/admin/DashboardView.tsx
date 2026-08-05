@@ -31,6 +31,8 @@ import {
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
+import { useHaptic } from '../../hooks/useHaptic';
+
 interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
   onOpenAddEmployee: () => void;
@@ -38,6 +40,7 @@ interface DashboardViewProps {
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onOpenAddEmployee }) => {
   const { employees, attendance, settings, activeEmployee, auditLogs } = useAuth();
+  const { triggerHaptic } = useHaptic();
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month'>('today');
 
   // Time-aware greeting

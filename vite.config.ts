@@ -27,8 +27,8 @@ export default defineConfig(({ command }) => {
           name: 'Kalpanaaa Software Solutions',
           short_name: 'KSS HRMS',
           description: 'Kalpanaaa Software Solutions Employee Management System',
-          theme_color: '#020617',
-          background_color: '#020617',
+          theme_color: '#000000',
+          background_color: '#000000',
           display: 'standalone',
           start_url: '/',
           icons: [
