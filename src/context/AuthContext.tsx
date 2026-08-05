@@ -68,6 +68,13 @@ export const getAssignedEmployeeDetails = (fullName: string, employees: Employee
       designation: 'CEO'
     };
   }
+  if (name.includes('koushik')) {
+    return {
+      employeeId: 'KS2407003',
+      role: 'HR_ADMIN' as UserRole, // Project Manager
+      designation: 'Project Manager'
+    };
+  }
 
   // General employees start from KS2407004
   let maxSeq = 3; 
@@ -311,13 +318,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             snapshot.forEach(docSnap => {
               const data = { id: docSnap.id, ...docSnap.data() } as Employee;
 
-              // LIVE PURGE DUMMY KOUSHIK RECORD
+              // PURGE ONLY OLD DUMMY EMP-003 RECORD (with old typo domain)
               if (
-                data.id === 'emp-003' || 
-                data.employeeId === '003' || 
-                data.employeeId === 'KS2407003' || 
-                data.employeeId === 'KSS2707003' || 
-                data.email?.toLowerCase().includes('koushik')
+                (data.id === 'emp-003' || data.employeeId === '003') && 
+                data.email?.toLowerCase() === 'd.koushik@kalpanaaa.in'
               ) {
                 deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
                 return;
@@ -363,6 +367,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
               fetched.push(data);
             });
+
+            // Ensure Official D. Koushik (Project Manager) exists in Team Directory
+            const koushikExists = fetched.some(e => 
+              e.employeeId === 'KS2407003' || 
+              e.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')
+            );
+
+            if (!koushikExists) {
+              const officialKoushik: Employee = {
+                id: 'emp-KS2407003',
+                employeeId: 'KS2407003',
+                fullName: 'D. Koushik',
+                email: 'd.koushik@kalpanaaasoftwaresolutions.in',
+                role: 'HR_ADMIN',
+                department: 'Software Engineering',
+                designation: 'Project Manager',
+                status: 'Active',
+                phone: '+91 98765 00003',
+                gender: 'Male',
+                dateOfBirth: '1995-01-01',
+                joiningDate: '2024-07-01',
+                employmentType: 'Full-Time',
+                permanentAddress: 'Bengaluru HQ Campus',
+                currentAddress: 'Bengaluru HQ Campus',
+                city: 'Bengaluru',
+                state: 'Karnataka',
+                postalCode: '560001',
+                emergencyContact: '+91 98765 00000',
+                emergencyRelationship: 'Management',
+                shift: 'General Shift (09:00 - 18:00)',
+                workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
+                reportingManager: 'Board of Directors',
+                qrToken: 'QR-TOKEN-KS2407003-PM',
+                createdAt: '2024-07-01T09:00:00Z',
+                updatedAt: new Date().toISOString(),
+                profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+                resumeUrl: ''
+              };
+
+              fetched.push(officialKoushik);
+              setDoc(doc(db, 'employees', officialKoushik.id), officialKoushik, { merge: true }).catch(() => { });
+            }
+
             if (fetched.length > 0) {
               setEmployees(fetched);
             }
@@ -503,9 +550,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const matched = employees.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
       if (matched) {
         setActiveEmployee(matched);
-        // Restore correct role: Executive override for CEO, CTO
+        // Restore correct role: Executive override for CEO, CTO, and PM (KS2407003)
         let assignedRole = matched.role;
         if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
+        if (matched.employeeId === 'KS2407003' || matched.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')) assignedRole = 'HR_ADMIN';
         
         setRole(assignedRole);
         setIsAuthenticated(true);
