@@ -68,13 +68,6 @@ export const getAssignedEmployeeDetails = (fullName: string, employees: Employee
       designation: 'CEO'
     };
   }
-  if (name.includes('koushik')) {
-    return {
-      employeeId: 'KS2407003',
-      role: 'HR_ADMIN' as UserRole, // Project Manager
-      designation: 'Project Manager'
-    };
-  }
 
   // General employees start from KS2407004
   let maxSeq = 3; 
@@ -149,18 +142,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = localStorage.getItem('kss_v1_employees');
     if (saved) {
       const parsed = JSON.parse(saved) as Employee[];
-      // Autocorrect CEO data from cache
-      return parsed.map(emp => {
-        if (emp.employeeId === 'CEO001') {
-          return {
-            ...emp,
-            fullName: 'Akshit',
-            email: 'akshit@kalpanaaa.in',
-            department: 'Executive Management'
-          };
-        }
-        return emp;
-      });
+      // Autocorrect CEO data & purge dummy koushik from cache
+      return parsed
+        .filter(emp => emp.id !== 'emp-003' && emp.employeeId !== '003' && emp.employeeId !== 'KS2407003' && !emp.email?.toLowerCase().includes('koushik'))
+        .map(emp => {
+          if (emp.employeeId === 'CEO001') {
+            return {
+              ...emp,
+              fullName: 'Akshit',
+              email: 'akshit@kalpanaaa.in',
+              department: 'Executive Management'
+            };
+          }
+          return emp;
+        });
     }
     return INITIAL_EMPLOYEES;
   });
@@ -316,6 +311,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             snapshot.forEach(docSnap => {
               const data = { id: docSnap.id, ...docSnap.data() } as Employee;
 
+              // LIVE PURGE DUMMY KOUSHIK RECORD
+              if (
+                data.id === 'emp-003' || 
+                data.employeeId === '003' || 
+                data.employeeId === 'KS2407003' || 
+                data.employeeId === 'KSS2707003' || 
+                data.email?.toLowerCase().includes('koushik')
+              ) {
+                deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                return;
+              }
+
               // LIVE AUTOCORRECT CEO SPELLING AND EMAIL IN FIREBASE
               if (data.employeeId === 'CEO001') {
                 let needsUpdate = false;
@@ -333,10 +340,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
-              // LIVE MIGRATION FOR ID PREFIX KSS2707 -> KS2407
-              if (data.employeeId && data.employeeId.includes('KSS2707')) {
-                data.employeeId = data.employeeId.replace('KSS2707', 'KS2407');
-                setDoc(doc(db, 'employees', data.id), { employeeId: data.employeeId }, { merge: true }).catch(() => { });
+              // LIVE AUTOCORRECT MALFORMED OR DOUBLE-PREFIXED EMPLOYEE IDs
+              if (data.employeeId) {
+                let cleanId = data.employeeId;
+                if (cleanId.includes('24072407') || cleanId.includes('27072407') || cleanId.length > 9) {
+                  const numMatch = cleanId.match(/\d+$/);
+                  if (numMatch) {
+                    const seqNum = numMatch[0].slice(-3);
+                    cleanId = `KS2407${seqNum}`;
+                  }
+                } else if (!cleanId.startsWith('KS2407') && cleanId.match(/^\d+$/)) {
+                  cleanId = `KS2407${cleanId.padStart(3, '0')}`;
+                } else if (cleanId.startsWith('KSS2707')) {
+                  cleanId = cleanId.replace('KSS2707', 'KS2407');
+                }
+
+                if (cleanId !== data.employeeId) {
+                  data.employeeId = cleanId;
+                  setDoc(doc(db, 'employees', data.id), { employeeId: cleanId }, { merge: true }).catch(() => { });
+                }
               }
 
               fetched.push(data);
@@ -481,10 +503,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const matched = employees.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
       if (matched) {
         setActiveEmployee(matched);
-        // Restore correct role: Executive override for CEO, CTO, and PM(003)
+        // Restore correct role: Executive override for CEO, CTO
         let assignedRole = matched.role;
         if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
-        if (matched.employeeId === '003' || matched.email?.toLowerCase() === 'd.koushik@kalpanaaa.in') assignedRole = 'HR_ADMIN';
         
         setRole(assignedRole);
         setIsAuthenticated(true);

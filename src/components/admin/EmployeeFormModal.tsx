@@ -19,21 +19,20 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   // Form State
   const [formData, setFormData] = useState({
     employeeId: employeeToEdit?.employeeId || (() => {
-      let maxSeq = 0; 
+      let maxSeq = 2; 
       employees.forEach(emp => {
         if (emp.employeeId) {
-          // Extract the numeric part at the end of the ID string (e.g., '003' -> 3, 'KSS004' -> 4)
-          const numMatch = emp.employeeId.match(/\d+$/);
+          // Strip prefix (e.g. KS2407, KSS2707) to extract sequence number correctly
+          const cleanId = emp.employeeId.replace(/^(KS2407|KSS2707|KS24|KSS)/i, '');
+          const numMatch = cleanId.match(/\d+/);
           if (numMatch) {
             const num = parseInt(numMatch[0], 10);
-            if (!isNaN(num) && num > maxSeq) {
+            if (!isNaN(num) && num < 10000 && num > maxSeq) {
               maxSeq = num;
             }
           }
         }
       });
-      // Fallback base to 3 if database is totally empty, else +1
-      maxSeq = Math.max(maxSeq, 3);
       return `KS2407${String(maxSeq + 1).padStart(3, '0')}`;
     })(),
     fullName: employeeToEdit?.fullName || '',
