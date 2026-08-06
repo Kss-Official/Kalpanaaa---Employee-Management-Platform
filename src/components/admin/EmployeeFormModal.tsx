@@ -22,8 +22,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       let maxSeq = 2; 
       employees.forEach(emp => {
         if (emp.employeeId) {
-          // Strip prefix (e.g. KS2407, KSS2707) to extract sequence number correctly
-          const cleanId = emp.employeeId.replace(/^(KS2407|KSS2707|KS24|KSS)/i, '');
+          // Strip prefix (e.g. KSS2407, KSS2707) to extract sequence number correctly
+          const cleanId = emp.employeeId.replace(/^(KSS2407|KSS2707|KSS24|KSS)/i, '');
           const numMatch = cleanId.match(/\d+/);
           if (numMatch) {
             const num = parseInt(numMatch[0], 10);
@@ -33,7 +33,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           }
         }
       });
-      return `KS2407${String(maxSeq + 1).padStart(3, '0')}`;
+      return `KSS2407${String(maxSeq + 1).padStart(3, '0')}`;
     })(),
     fullName: employeeToEdit?.fullName || '',
     email: employeeToEdit?.email || '',
@@ -59,6 +59,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     role: employeeToEdit?.role || ('EMPLOYEE' as UserRole),
     resumeUrl: employeeToEdit?.resumeUrl || '',
     approvedWfhDates: employeeToEdit?.approvedWfhDates || [],
+    password: '',
   });
 
   const [errorMsg, setErrorMsg] = useState('');
@@ -108,12 +109,17 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
     if (!formData.fullName.trim() || !formData.email.trim() || !formData.employeeId.trim() || !formData.phone.trim() || !formData.profilePhotoUrl || !formData.resumeUrl) {
       setErrorMsg('Please fill in all mandatory fields, including Profile Photo and Resume.');
+      return;
+    }
+
+    if (!isEdit && (!formData.password || formData.password.length < 6)) {
+      setErrorMsg('Password must be at least 6 characters for new employees.');
       return;
     }
 
@@ -133,9 +139,13 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     }
 
     if (isEdit && employeeToEdit) {
-      updateEmployee(employeeToEdit.id, formData);
+      await updateEmployee(employeeToEdit.id, formData);
     } else {
-      addEmployee(formData as any);
+      const res = await addEmployee(formData as any);
+      if (res && res.success === false) {
+        setErrorMsg(res.message);
+        return;
+      }
     }
 
     onClose();
@@ -216,6 +226,21 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
+
+              {!isEdit && (
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Account Password <span className="text-rose-500">*</span></label>
+                  <input
+                    type="text"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    required={!isEdit}
+                    placeholder="Min 6 characters"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Phone Number <span className="text-rose-500">*</span></label>

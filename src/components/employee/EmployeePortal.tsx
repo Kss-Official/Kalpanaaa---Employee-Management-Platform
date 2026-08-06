@@ -67,7 +67,7 @@ const AVATAR_PRESETS = [
 ];
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
-  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog } = useAuth();
+  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   // Time-aware greeting
@@ -120,14 +120,26 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   });
 
   // Break & WFH state
-  const [activeBreak, setActiveBreak] = useState<{ type: 'Tea Break' | 'Lunch Break'; startAt: string } | null>(null);
+  const [activeBreak, setActiveBreak] = useState<{ type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break'; startAt: string } | null>(null);
   const [breakElapsedSec, setBreakElapsedSec] = useState(0);
   const [isWfh, setIsWfh] = useState(false);
+
+  // Sync activeBreak from today's record
+  useEffect(() => {
+    if (todayRecord?.breaks) {
+      const ongoing = todayRecord.breaks.find(b => !b.endAt);
+      if (ongoing) {
+        setActiveBreak({ type: ongoing.type as any, startAt: ongoing.startAt });
+        return;
+      }
+    }
+    setActiveBreak(null);
+  }, [todayRecord?.breaks]);
 
   // Sync WFH flag from today's record
   useEffect(() => {
     setIsWfh(todayRecord?.isWfh ?? false);
-  }, [todayRecord?.id]);
+  }, [todayRecord?.id, todayRecord?.isWfh]);
 
   // Break live timer ticker
   useEffect(() => {
@@ -197,6 +209,30 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     ? liveDistanceMeters <= companyWorkZone.radiusMeters
     : false;
 
+  // Auto Geo-Fence Logic
+  useEffect(() => {
+    // Only apply if GPS is required, they are checked in, not checked out, and not WFH
+    if (!settings.gpsRequired || !todayRecord?.checkInAt || todayRecord?.checkOutAt || isWfh) return;
+
+    // We have a verified live distance
+    if (liveDistanceMeters !== null) {
+      if (!isVerifiedLocation && !activeBreak) {
+        // They walked out of radius, start Geo break & logout
+        handleStartBreak('Geo-Fence Auto Break');
+        setActionFeedback({ success: false, message: 'You left the office zone. Shift paused and auto-logging out.' });
+        triggerHaptic('error');
+        
+        // Wait a tiny bit for the state/firebase to save, then logout
+        setTimeout(() => {
+          logout();
+        }, 1500);
+      } else if (isVerifiedLocation && activeBreak?.type === 'Geo-Fence Auto Break') {
+        // They walked back into radius, end Geo break
+        handleEndBreak();
+      }
+    }
+  }, [liveDistanceMeters, isVerifiedLocation, todayRecord?.checkInAt, todayRecord?.checkOutAt, isWfh, activeBreak?.type, settings.gpsRequired]);
+
   // Generate Static QR Code for ID Card (Company Website)
   useEffect(() => {
     if (activeEmployee) {
@@ -260,10 +296,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     // Auto-end any open break before checkout
     if (activeBreak && todayRecord) {
       const durationMinutes = Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 60000);
-      const completedBreak: BreakEntry = { type: activeBreak.type, startAt: activeBreak.startAt, endAt: new Date().toISOString(), durationMinutes };
       const existingBreaks = todayRecord.breaks || [];
-      updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, completedBreak], totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
-      setActiveBreak(null);
+      const updatedBreaks = existingBreaks.map(b => 
+        (b.startAt === activeBreak.startAt && !b.endAt) 
+          ? { ...b, endAt: new Date().toISOString(), durationMinutes } 
+          : b
+      );
+      updateAttendanceRecord(todayRecord.id, { breaks: updatedBreaks, totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
     }
     const res = await recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     
@@ -273,35 +312,50 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     setActionFeedback({ success: res.success, message: res.message });
   };
 
-  const handleStartBreak = (type: 'Tea Break' | 'Lunch Break') => {
+  const handleStartBreak = (type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break') => {
     triggerHaptic('medium');
     if (!todayRecord || activeBreak) return;
 
     const startAt = new Date().toISOString();
-    setActiveBreak({ type, startAt });
-    setBreakElapsedSec(0);
+    const newBreak: BreakEntry = { type, startAt, endAt: null, durationMinutes: 0 };
+    const existingBreaks = todayRecord.breaks || [];
+    updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, newBreak] });
     
     if (activeEmployee) {
       addAuditLog('ATTENDANCE_BREAK_START', todayRecord.id, `${activeEmployee.fullName} started a ${type}.`);
     }
     
-    setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ☕` });
+    if (type !== 'Geo-Fence Auto Break') {
+      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ☕` });
+    }
   };
 
   const handleEndBreak = () => {
     if (!activeBreak || !todayRecord) return;
     const endAt = new Date().toISOString();
     const durationMinutes = Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 60000);
-    const completedBreak: BreakEntry = { type: activeBreak.type, startAt: activeBreak.startAt, endAt, durationMinutes };
+    
     const existingBreaks = todayRecord.breaks || [];
-    updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, completedBreak], totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
-    setActiveBreak(null);
+    const updatedBreaks = existingBreaks.map(b => 
+      (b.startAt === activeBreak.startAt && !b.endAt) 
+        ? { ...b, endAt, durationMinutes } 
+        : b
+    );
+
+    updateAttendanceRecord(todayRecord.id, { 
+      breaks: updatedBreaks, 
+      totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes 
+    });
     
     if (activeEmployee) {
       addAuditLog('ATTENDANCE_BREAK_END', todayRecord.id, `${activeEmployee.fullName} ended their ${activeBreak.type} after ${durationMinutes} minutes.`);
     }
 
-    setActionFeedback({ success: true, message: `${completedBreak.type} ended — ${durationMinutes}m recorded. Welcome back! 👋` });
+    if (activeBreak.type !== 'Geo-Fence Auto Break') {
+      setActionFeedback({ success: true, message: `${activeBreak.type} ended — ${durationMinutes}m recorded. Welcome back! 👋` });
+    } else {
+      setActionFeedback({ success: true, message: `Welcome back to the office! Shift resumed. Auto-paused for ${durationMinutes}m.` });
+    }
   };
 
   const handleToggleWfh = () => {

@@ -89,6 +89,30 @@ export const AttendanceManagement: React.FC = () => {
     setEditingRecord(null);
   };
 
+  const handleForceCheckout = () => {
+    if (!editingRecord) return;
+    
+    // Set to standard 7:30 PM checkout time for that date
+    const autoCheckOutDate = new Date(`${editingRecord.date}T19:30:00`);
+    const forceCheckOutTime = autoCheckOutDate.toISOString();
+    
+    let totalMins = 0;
+    if (editingRecord.checkInAt) {
+      totalMins = Math.floor((autoCheckOutDate.getTime() - new Date(editingRecord.checkInAt).getTime()) / 60000);
+      if (editingRecord.totalBreakMinutes) {
+        totalMins = Math.max(0, totalMins - editingRecord.totalBreakMinutes);
+      }
+    }
+    totalMins = Math.max(0, totalMins);
+
+    updateAttendanceRecord(editingRecord.id, {
+      checkOutAt: forceCheckOutTime,
+      workingMinutes: totalMins,
+      notes: editNotes ? `HR Force Checkout: ${editNotes}` : (editingRecord.notes ? `${editingRecord.notes} | HR Force Checkout at 19:30` : 'HR Force Checkout at 19:30')
+    });
+    setEditingRecord(null);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -314,13 +338,23 @@ export const AttendanceManagement: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-2">
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
               <button
                 onClick={() => setEditingRecord(null)}
                 className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer transition-colors mr-auto"
               >
                 Cancel
               </button>
+              
+              {!editingRecord.checkOutAt && (
+                <button
+                  onClick={handleForceCheckout}
+                  className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/50 text-xs font-semibold rounded-xl cursor-pointer shadow-md transition-colors"
+                >
+                  Force 7:30 PM Checkout
+                </button>
+              )}
+
               {editingRecord.checkOutAt && (
                 <button
                   onClick={handleUndoCheckout}
@@ -329,6 +363,7 @@ export const AttendanceManagement: React.FC = () => {
                   Undo Check-Out
                 </button>
               )}
+              
               <button
                 onClick={handleSaveCorrection}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl cursor-pointer shadow-md transition-colors"

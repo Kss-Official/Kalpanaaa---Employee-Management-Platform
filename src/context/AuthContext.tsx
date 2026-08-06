@@ -10,7 +10,7 @@ import {
   deleteDoc,
   onSnapshot
 } from 'firebase/firestore';
-import { auth, db, testConnection, handleFirestoreError, OperationType } from '../lib/firebase';
+import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig } from '../lib/firebase';
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest } from '../types';
 import {
   INITIAL_EMPLOYEES,
@@ -18,6 +18,7 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_COMPANY_SETTINGS
 } from '../lib/demoData';
+import { initializeApp } from 'firebase/app';
 import { evaluateAttendanceScan, calculateGpsDistanceMeters } from '../lib/attendanceEngine';
 import { fetchAbsoluteTime } from '../lib/absoluteTime';
 import { sendDiscordAlert } from '../lib/discord';
@@ -59,31 +60,31 @@ export const getAssignedEmployeeDetails = (fullName: string, employees: Employee
   
   if (name.includes('gaurav')) {
     return {
-      employeeId: 'KS2407001',
+      employeeId: 'KSS2407001',
       role: 'SUPER_ADMIN' as UserRole,
       designation: 'CTO And Founder And MD'
     };
   }
   if (name.includes('akshit')) {
     return {
-      employeeId: 'KS2407002',
+      employeeId: 'KSS2407002',
       role: 'SUPER_ADMIN' as UserRole,
       designation: 'CEO'
     };
   }
   if (name.includes('koushik')) {
     return {
-      employeeId: 'KS2407003',
+      employeeId: 'KSS2407003',
       role: 'HR_ADMIN' as UserRole, // Project Manager
       designation: 'Project Manager'
     };
   }
 
-  // General employees start from KS2407004
+  // General employees start from KSS2407004
   let maxSeq = 3; 
   employees.forEach(emp => {
-    if (emp.employeeId?.startsWith('KS2407') || emp.employeeId?.startsWith('KSS2707')) {
-      const numStr = emp.employeeId.replace('KS2407', '').replace('KSS2707', '');
+    if (emp.employeeId?.startsWith('KSS2407') || emp.employeeId?.startsWith('KSS2707')) {
+      const numStr = emp.employeeId.replace('KSS2407', '').replace('KSS2707', '');
       const num = parseInt(numStr, 10);
       if (!isNaN(num) && num > maxSeq) {
         maxSeq = num;
@@ -93,7 +94,7 @@ export const getAssignedEmployeeDetails = (fullName: string, employees: Employee
 
   const nextSeq = String(maxSeq + 1).padStart(3, '0');
   return {
-    employeeId: `KS2407${nextSeq}`,
+    employeeId: `KSS2407${nextSeq}`,
     role: null,
     designation: null
   };
@@ -118,10 +119,9 @@ interface AuthContextType {
   submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => void;
   updateLeaveRequestStatus: (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => void;
   loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
-  signUpUser: (data: { fullName: string; email: string; role: UserRole; department: string; designation: string; password: string }) => Promise<{ success: boolean; message: string }>;
   quickDemoLogin: (role: UserRole | 'CEO' | 'CTO') => void;
   logout: () => void;
-  addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'>) => Employee;
+  addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => Promise<{ success: boolean; message?: string } | Employee>;
   updateEmployee: (id: string, updates: Partial<Employee>) => void;
   deleteEmployee: (id: string) => void;
   recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
@@ -154,7 +154,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const parsed = JSON.parse(saved) as Employee[];
       // Autocorrect CEO data & purge dummy koushik from cache
       return parsed
-        .filter(emp => emp.id !== 'emp-003' && emp.employeeId !== '003' && emp.employeeId !== 'KS2407003' && !emp.email?.toLowerCase().includes('koushik'))
+        .filter(emp => emp.id !== 'emp-003' && emp.employeeId !== '003' && emp.employeeId !== 'KSS2407003' && !emp.email?.toLowerCase().includes('koushik'))
         .map(emp => {
           if (emp.employeeId === 'CEO001') {
             return {
@@ -360,12 +360,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   const numMatch = cleanId.match(/\d+$/);
                   if (numMatch) {
                     const seqNum = numMatch[0].slice(-3);
-                    cleanId = `KS2407${seqNum}`;
+                    cleanId = `KSS2407${seqNum}`;
                   }
-                } else if (!cleanId.startsWith('KS2407') && cleanId.match(/^\d+$/)) {
-                  cleanId = `KS2407${cleanId.padStart(3, '0')}`;
+                } else if (!cleanId.startsWith('KSS2407') && cleanId.match(/^\d+$/)) {
+                  cleanId = `KSS2407${cleanId.padStart(3, '0')}`;
                 } else if (cleanId.startsWith('KSS2707')) {
-                  cleanId = cleanId.replace('KSS2707', 'KS2407');
+                  cleanId = cleanId.replace('KSS2707', 'KSS2407');
                 }
 
                 if (cleanId !== data.employeeId) {
@@ -379,14 +379,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             // Ensure Official D. Koushik (Project Manager) exists in Team Directory
             const koushikExists = fetched.some(e => 
-              e.employeeId === 'KS2407003' || 
+              e.employeeId === 'KSS2407003' || 
               e.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')
             );
 
             if (!koushikExists) {
               const officialKoushik: Employee = {
-                id: 'emp-KS2407003',
-                employeeId: 'KS2407003',
+                id: 'emp-KSS2407003',
+                employeeId: 'KSS2407003',
                 fullName: 'D. Koushik',
                 email: 'd.koushik@kalpanaaasoftwaresolutions.in',
                 role: 'HR_ADMIN',
@@ -408,7 +408,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 shift: 'General Shift (09:00 - 18:00)',
                 workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
                 reportingManager: 'Board of Directors',
-                qrToken: 'QR-TOKEN-KS2407003-PM',
+                qrToken: 'QR-TOKEN-KSS2407003-PM',
                 createdAt: '2024-07-01T09:00:00Z',
                 updatedAt: new Date().toISOString(),
                 profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
@@ -446,9 +446,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return;
               }
 
-              // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KS2407
+              // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KSS2407
               if (data.employeeCode && data.employeeCode.includes('KSS2707')) {
-                data.employeeCode = data.employeeCode.replace('KSS2707', 'KS2407');
+                data.employeeCode = data.employeeCode.replace('KSS2707', 'KSS2407');
                 setDoc(doc(db, 'attendance', data.id), { employeeCode: data.employeeCode }, { merge: true }).catch(() => { });
               }
 
@@ -570,10 +570,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const matched = employees.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
       if (matched) {
         setActiveEmployee(matched);
-        // Restore correct role: Executive override for CEO, CTO, and PM (KS2407003)
+        // Restore correct role: Executive override for CEO, CTO, and PM (KSS2407003)
         let assignedRole = matched.role;
         if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
-        if (matched.employeeId === 'KS2407003' || matched.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')) assignedRole = 'HR_ADMIN';
+        if (matched.employeeId === 'KSS2407003' || matched.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')) assignedRole = 'HR_ADMIN';
         
         setRole(assignedRole);
         setIsAuthenticated(true);
@@ -767,115 +767,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signUpUser = async (data: {
-    fullName: string;
-    email: string;
-    role: UserRole;
-    department: string;
-    designation: string;
-    password: string
-  }): Promise<{ success: boolean; message: string }> => {
-    setIsLoading(true);
-    try {
-      const cleanEmail = data.email.trim().toLowerCase();
 
-      // Apply Role Logic
-      const autoDetails = getAssignedEmployeeDetails(data.fullName, employees);
-      const forcedRole = autoDetails.role || data.role;
-      const forcedDesignation = autoDetails.designation || data.designation;
-      const assignedEmployeeId = autoDetails.employeeId || `KSS${Math.floor(Math.random() * 1000)}`;
-
-      const isExecutive = forcedRole === 'SUPER_ADMIN' || forcedRole === 'HR_ADMIN';
-
-      // Strict Format Validation
-      if (isExecutive) {
-        if (!cleanEmail.endsWith('@kalpanaaa.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresolutions.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresoutions.in')) {
-          setIsLoading(false);
-          return { success: false, message: `Executive email must end with @kalpanaaa.in or @kalpanaaasoftwaresolutions.in` };
-        }
-      } else {
-        if (!cleanEmail.endsWith('@kalpanaaa.in')) {
-          setIsLoading(false);
-          return { success: false, message: `Email strictly must end with @kalpanaaa.in` };
-        }
-      }
-
-      // HR Whitelist Validation
-      let existingEmp = employees.find(e => e.email?.toLowerCase() === cleanEmail);
-      
-      // If employee doesn't exist, block the registration
-      if (!existingEmp) {
-        setIsLoading(false);
-        return { success: false, message: 'Unauthorized Registration: Your email must be pre-approved and added to the directory by HR before you can register.' };
-      } else {
-        existingEmp.role = forcedRole;
-        existingEmp.designation = forcedDesignation;
-      }
-
-      // Check if they are already registered
-      if (existingEmp.uid) {
-        setIsLoading(false);
-        return { success: false, message: 'You have already registered. Please sign in instead.' };
-      }
-
-      let newUid = `emp-${Date.now()}`;
-      
-      // Attempt Firebase Auth sign up
-      try {
-        const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, data.password);
-        if (userCred.user) {
-          newUid = userCred.user.uid;
-          setUser(userCred.user);
-
-          // Write user mapping record to Firestore
-          await setDoc(doc(db, 'users', newUid), {
-            uid: newUid,
-            email: cleanEmail,
-            role: existingEmp.role,
-            fullName: existingEmp.fullName,
-            createdAt: new Date().toISOString()
-          }).catch(() => { });
-        }
-      } catch (fbErr: any) {
-        console.warn('Firebase signup attempt:', fbErr.code, fbErr.message);
-        if (fbErr.code === 'auth/email-already-in-use') {
-          setIsLoading(false);
-          return { success: false, message: 'This email address is already registered. Try signing in or reset your password.' };
-        } else if (fbErr.code === 'auth/weak-password') {
-          setIsLoading(false);
-          return { success: false, message: 'Password is too weak. Please use at least 6 characters.' };
-        } else if (fbErr.code === 'auth/invalid-email') {
-          setIsLoading(false);
-          return { success: false, message: 'Please enter a valid email address.' };
-        }
-      }
-
-      // Update the EXISTING employee record with the new Firebase UID
-      const updatedEmp = {
-        ...existingEmp,
-        uid: newUid,
-        updatedAt: new Date().toISOString()
-      };
-
-      // Persist to Firestore
-      await setDoc(doc(db, 'employees', updatedEmp.id), updatedEmp, { merge: true }).catch(err => {
-        handleFirestoreError(err, OperationType.WRITE, `employees/${updatedEmp.id}`);
-      });
-
-      setEmployees(prev => [updatedEmp, ...prev.filter(e => e.id !== updatedEmp.id)]);
-      setActiveEmployee(updatedEmp);
-      setRole(updatedEmp.role);
-      setIsAuthenticated(true);
-      localStorage.setItem('kss_v1_session', updatedEmp.id);
-
-      addAuditLog('USER_SIGNUP', updatedEmp.fullName, `Activated pre-authorized account (${updatedEmp.role})`);
-      setIsLoading(false);
-      return { success: true, message: `Account activated! Welcome to Kalpanaaa Software Solutions, ${updatedEmp.fullName}.` };
-    } catch (err: any) {
-      setIsLoading(false);
-      return { success: false, message: err.message || 'Registration failed.' };
-    }
-  };
 
   const quickDemoLogin = (targetRole: UserRole | 'CEO' | 'CTO') => {
     setIsLoading(true);
@@ -915,16 +807,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('kss_v1_session');
   };
 
-  const addEmployee = (empData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'>) => {
-    const id = `emp-${Date.now()}`;
+  const addEmployee = async (empData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => {
+    let uid = `emp-${Date.now()}`;
+    const cleanEmail = empData.email?.trim().toLowerCase();
+
+    if (empData.password) {
+      // Create a secondary Firebase App to create user without signing out the current admin
+      const secondaryApp = initializeApp(firebaseConfig, `SecondaryApp-${Date.now()}`);
+      const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      try {
+        const userCred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, empData.password);
+        uid = userCred.user.uid;
+        
+        // Write user mapping record to Firestore using primary DB
+        await setDoc(doc(db, 'users', uid), {
+          uid: uid,
+          email: cleanEmail,
+          role: empData.role,
+          fullName: empData.fullName,
+          createdAt: new Date().toISOString()
+        }).catch(() => { });
+
+        // Sign out secondary auth so we don't hold the session
+        await signOut(secondaryAuth);
+      } catch (err: any) {
+        console.error("Error creating Firebase user:", err);
+        return { success: false, message: err.message || "Failed to create Firebase authentication user." };
+      }
+    }
+
     const qrToken = empData.employeeId;
 
+    // Remove password before saving to employee record
+    const { password, ...dataToSave } = empData;
+
     // TOP 1% SECURITY: XSS Sanitization
-    const sanitizedData = sanitizeInput(empData);
+    const sanitizedData = sanitizeInput(dataToSave);
 
     const newEmp: Employee = {
       ...sanitizedData,
-      id,
+      id: uid,
+      uid: uid,
       qrToken,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -1269,7 +1194,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       companyWorkZone,
       leaveRequests,
       loginWithEmail,
-      signUpUser,
       quickDemoLogin,
       logout,
       addEmployee,

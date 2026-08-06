@@ -46,10 +46,10 @@ const TypewriterText = ({ text }: { text: string }) => {
 };
 
 export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
-  const { loginWithEmail, signUpUser, isLoading, settings } = useAuth();
+  const { loginWithEmail, isLoading, settings } = useAuth();
   const { triggerHaptic } = useHaptic();
 
-  const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
+
   const [showPassword, setShowPassword] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -57,19 +57,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
-  // Sign Up state
-  const [signUpName, setSignUpName] = useState('');
-  const [signUpEmail, setSignUpEmail] = useState('');
-  const [signUpRole, setSignUpRole] = useState<UserRole>('EMPLOYEE');
-  const [signUpDept, setSignUpDept] = useState('Engineering');
-  const [signUpDesignation, setSignUpDesignation] = useState('Software Engineer');
-  const [signUpPass, setSignUpPass] = useState('');
-  const [signUpConfirmPass, setSignUpConfirmPass] = useState('');
 
-  const handleSignUpRoleChange = (newRole: UserRole) => {
-    triggerHaptic('light');
-    setSignUpRole(newRole);
-  };
 
   // Forgot password modal
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
@@ -95,42 +83,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
     }
   };
 
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    triggerHaptic('medium');
-    setFeedback(null);
-    if (!signUpName || !signUpEmail || !signUpPass) {
-      triggerHaptic('error');
-      setFeedback({ type: 'error', message: 'Please fill in all required fields.' });
-      return;
-    }
-    if (signUpPass.length < 6) {
-      triggerHaptic('error');
-      setFeedback({ type: 'error', message: 'Password must be at least 6 characters long for security.' });
-      return;
-    }
-    if (signUpPass !== signUpConfirmPass) {
-      triggerHaptic('error');
-      setFeedback({ type: 'error', message: 'Passwords do not match. Please re-enter your password.' });
-      return;
-    }
 
-    const res = await signUpUser({
-      fullName: signUpName,
-      email: signUpEmail,
-      role: signUpRole,
-      department: signUpDept,
-      designation: signUpDesignation || (signUpRole === 'SUPER_ADMIN' ? 'System Administrator' : signUpRole === 'HR_ADMIN' ? 'HR Manager' : 'Software Engineer'),
-      password: signUpPass
-    });
-
-    if (!res.success) {
-      triggerHaptic('error');
-      setFeedback({ type: 'error', message: res.message });
-    } else {
-      triggerHaptic('success');
-    }
-  };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -206,32 +159,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
           transition={{ type: "spring", damping: 25, stiffness: 200 }}
           className="w-full max-w-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded-3xl shadow-[var(--shadow-xl)] overflow-hidden backdrop-blur-xl"
         >
-          {/* Form Tab Switcher */}
-          <div className="grid grid-cols-2 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]/50 p-1.5 gap-1 text-xs font-semibold">
-            <button
-              onClick={() => { triggerHaptic('light'); setActiveTab('signin'); setFeedback(null); }}
-              className={`py-3 rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeTab === 'signin'
-                  ? 'bg-[var(--accent-blue)] text-white shadow-[var(--shadow-glow-blue)]'
-                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
-              }`}
-            >
-              <KeyRound className="w-4 h-4" />
-              <span>Employee Login</span>
-            </button>
 
-            <button
-              onClick={() => { triggerHaptic('light'); setActiveTab('signup'); setFeedback(null); }}
-              className={`py-3 rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeTab === 'signup'
-                  ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] shadow-[var(--shadow-md)] border border-[var(--border-subtle)]'
-                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
-              }`}
-            >
-              <User className="w-4 h-4" />
-              <span>Register</span>
-            </button>
-          </div>
 
           <div className="p-6 sm:p-8 space-y-6">
             
@@ -250,8 +178,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
               </motion.div>
             )}
 
-            {/* TAB 1: EMPLOYEE SIGN IN */}
-            {activeTab === 'signin' && (
+            {/* EMPLOYEE SIGN IN */}
               <form onSubmit={handleSignIn} className="space-y-5">
                 <div>
                   <h2 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">Employee Portal Sign In</h2>
@@ -322,147 +249,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                   </div>
                 </div>
               </form>
-            )}
 
-            {/* TAB 2: REGISTER */}
-            {activeTab === 'signup' && (
-              <form onSubmit={handleSignUp} className="space-y-4">
-                <div>
-                  <h2 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">Create your Kalpanaaa account</h2>
-                  <p className="text-xs text-[var(--text-secondary)] mt-1">Requires official Kalpanaaa Software Solutions team membership verification.</p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-secondary)] mb-1 uppercase tracking-wider">Full Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={signUpName}
-                      onChange={e => setSignUpName(e.target.value)}
-                      placeholder="e.g. Sarah Jenkins"
-                      className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl px-4 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-secondary)] mb-1 uppercase tracking-wider">Company Email *</label>
-                    <input
-                      type="email"
-                      required
-                      value={signUpEmail}
-                      onChange={e => setSignUpEmail(e.target.value)}
-                      placeholder="name@kalpanaaa.in"
-                      className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl px-4 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-semibold text-[var(--text-secondary)] mb-2 uppercase tracking-wider">Requested Role</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSignUpRoleChange('EMPLOYEE')}
-                      className={`py-2 px-2 text-[10px] font-bold rounded-lg border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                        signUpRole === 'EMPLOYEE' 
-                          ? 'bg-[var(--accent-blue)]/10 border-[var(--accent-blue)] text-[var(--accent-blue)] shadow-[var(--shadow-sm)]' 
-                          : 'bg-[var(--bg-tertiary)] border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:border-[var(--text-muted)]'
-                      }`}
-                    >
-                      <User className="w-4 h-4" /> Employee
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSignUpRoleChange('HR_ADMIN')}
-                      className={`py-2 px-2 text-[10px] font-bold rounded-lg border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                        signUpRole === 'HR_ADMIN' 
-                          ? 'bg-[var(--accent-violet)]/10 border-[var(--accent-violet)] text-[var(--accent-violet)] shadow-[var(--shadow-sm)]' 
-                          : 'bg-[var(--bg-tertiary)] border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:border-[var(--text-muted)]'
-                      }`}
-                    >
-                      <Briefcase className="w-4 h-4" /> HR Admin
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSignUpRoleChange('SUPER_ADMIN')}
-                      className={`py-2 px-2 text-[10px] font-bold rounded-lg border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                        signUpRole === 'SUPER_ADMIN' 
-                          ? 'bg-[var(--accent-emerald)]/10 border-[var(--accent-emerald)] text-[var(--accent-emerald)] shadow-[var(--shadow-sm)]' 
-                          : 'bg-[var(--bg-tertiary)] border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:border-[var(--text-muted)]'
-                      }`}
-                    >
-                      <ShieldCheck className="w-4 h-4" /> Admin
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-secondary)] mb-1 uppercase tracking-wider">Department</label>
-                    <input
-                      type="text"
-                      value={signUpDept}
-                      onChange={e => setSignUpDept(e.target.value)}
-                      placeholder="e.g. Engineering"
-                      className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl px-4 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-secondary)] mb-1 uppercase tracking-wider">Designation</label>
-                    <input
-                      type="text"
-                      value={signUpDesignation}
-                      onChange={e => setSignUpDesignation(e.target.value)}
-                      placeholder="e.g. Developer"
-                      className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl px-4 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-secondary)] mb-1 uppercase tracking-wider">Password *</label>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        required
-                        value={signUpPass}
-                        onChange={e => setSignUpPass(e.target.value)}
-                        placeholder="Min 6 chars"
-                        className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl pl-4 pr-10 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-3.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-secondary)] mb-1 uppercase tracking-wider">Confirm Password *</label>
-                    <input
-                      type="password"
-                      required
-                      value={signUpConfirmPass}
-                      onChange={e => setSignUpConfirmPass(e.target.value)}
-                      placeholder="Match password"
-                      className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl px-4 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full mt-4 h-[52px] bg-[var(--text-primary)] hover:bg-white text-black font-bold text-sm rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-[var(--shadow-md)] disabled:opacity-50 active:scale-[0.98]"
-                >
-                  {isLoading ? 'Creating Account...' : 'Register Account'}
-                  <CheckCircle2 className="w-4 h-4" />
-                </button>
-              </form>
-            )}
           </div>
         </motion.div>
       </main>
