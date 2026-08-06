@@ -320,6 +320,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let unsubLogs = () => { };
     let unsubSettings = () => { };
     let unsubWorkZone = () => { };
+    let unsubLeaveReqs = () => { };
 
     const initFirestore = async () => {
       try {
@@ -485,6 +486,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'attendance');
         });
 
+        // Subscribe to leave requests
+        unsubLeaveReqs = onSnapshot(collection(db, 'leaveRequests'), (snapshot) => {
+          if (!snapshot.empty) {
+            const fetched: LeaveRequest[] = [];
+            snapshot.forEach(docSnap => {
+              fetched.push({ id: docSnap.id, ...docSnap.data() } as LeaveRequest);
+            });
+            if (fetched.length > 0) {
+              fetched.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
+              setLeaveRequests(fetched);
+            }
+          } else {
+            setLeaveRequests([]);
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'leaveRequests');
+        });
+
         // Audit logs are now subscribed conditionally in a separate effect
 
         // Subscribe to company settings
@@ -553,6 +572,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubLogs();
       unsubSettings();
       unsubWorkZone();
+      unsubLeaveReqs();
     };
   }, []);
 
@@ -1135,11 +1155,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       requestDate: new Date().toISOString(),
     };
     setLeaveRequests(prev => [newRequest, ...prev]);
+    
+    // Write to Firestore
+    setDoc(doc(db, 'leaveRequests', newRequest.id), newRequest).catch(err => {
+      handleFirestoreError(err, OperationType.WRITE, `leaveRequests/${newRequest.id}`);
+    });
+    
     addAuditLog('LEAVE_REQUEST', data.employeeName, `Submitted ${data.type} request from ${data.startDate} to ${data.endDate}`);
   };
 
   const updateLeaveRequestStatus = (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => {
     setLeaveRequests(prev => prev.map(req => req.id === id ? { ...req, status, reviewedBy, reviewNotes } : req));
+
+    // Update in Firestore
+    setDoc(doc(db, 'leaveRequests', id), { status, reviewedBy, reviewNotes: reviewNotes || '' }, { merge: true }).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `leaveRequests/${id}`);
+    });
 
     // If Approved and type is WFH, push dates to employee's approvedWfhDates
     const req = leaveRequests.find(r => r.id === id);
