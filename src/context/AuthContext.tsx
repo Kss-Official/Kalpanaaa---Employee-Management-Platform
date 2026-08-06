@@ -164,6 +164,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               department: 'Executive Management'
             };
           }
+          if (emp.employeeId && (emp.employeeId.startsWith('KS2407') || emp.employeeId.startsWith('KS2707'))) {
+            return {
+              ...emp,
+              employeeId: emp.employeeId.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407')
+            };
+          }
           return emp;
         });
     }
@@ -366,6 +372,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   cleanId = `KSS2407${cleanId.padStart(3, '0')}`;
                 } else if (cleanId.startsWith('KSS2707')) {
                   cleanId = cleanId.replace('KSS2707', 'KSS2407');
+                } else if (cleanId.startsWith('KS2407') || cleanId.startsWith('KS2707')) {
+                  cleanId = cleanId.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407');
                 }
 
                 if (cleanId !== data.employeeId) {
@@ -446,10 +454,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return;
               }
 
-              // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KSS2407
-              if (data.employeeCode && data.employeeCode.includes('KSS2707')) {
-                data.employeeCode = data.employeeCode.replace('KSS2707', 'KSS2407');
-                setDoc(doc(db, 'attendance', data.id), { employeeCode: data.employeeCode }, { merge: true }).catch(() => { });
+              // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KSS2407 and KS -> KSS
+              if (data.employeeCode) {
+                let newCode = data.employeeCode;
+                if (newCode.includes('KSS2707')) {
+                  newCode = newCode.replace('KSS2707', 'KSS2407');
+                } else if (newCode.startsWith('KS2407') || newCode.startsWith('KS2707')) {
+                  newCode = newCode.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407');
+                }
+                
+                if (newCode !== data.employeeCode) {
+                  data.employeeCode = newCode;
+                  setDoc(doc(db, 'attendance', data.id), { employeeCode: newCode }, { merge: true }).catch(() => { });
+                }
               }
 
               fetched.push(data);
