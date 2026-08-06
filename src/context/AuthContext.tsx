@@ -386,8 +386,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               fetched.push(data);
             });
 
+            // Deduplicate employees by employeeId or email (keep newest, delete older duplicates)
+            const deduplicated: Employee[] = [];
+            const seen = new Set<string>();
+            
+            // Sort by createdAt descending so we keep the newest one
+            fetched.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            
+            for (const emp of fetched) {
+              const emailKey = emp.email?.toLowerCase().trim();
+              const idKey = emp.employeeId?.trim();
+              
+              if ((emailKey && seen.has(emailKey)) || (idKey && seen.has(idKey))) {
+                // Delete the duplicate from Firestore to solve it at the root level
+                deleteDoc(doc(db, 'employees', emp.id)).catch(() => { });
+                continue;
+              }
+              
+              if (emailKey) seen.add(emailKey);
+              if (idKey) seen.add(idKey);
+              deduplicated.push(emp);
+            }
+
+            // Restore original order or sort appropriately (e.g., by ID)
+            deduplicated.reverse();
+
             // Ensure Official D. Koushik (Project Manager) exists in Team Directory
-            const koushikExists = fetched.some(e => 
+            const koushikExists = deduplicated.some(e => 
               e.employeeId === 'KSS2407003' || 
               e.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')
             );
@@ -424,12 +449,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 resumeUrl: ''
               };
 
-              fetched.push(officialKoushik);
+              deduplicated.push(officialKoushik);
               setDoc(doc(db, 'employees', officialKoushik.id), officialKoushik, { merge: true }).catch(() => { });
             }
 
-            if (fetched.length > 0) {
-              setEmployees(fetched);
+            if (deduplicated.length > 0) {
+              setEmployees(deduplicated);
             }
           } else {
             // Seed initial employees if empty
@@ -1067,7 +1092,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const nowISO = new Date().toISOString();
     const startTime = new Date(existingRec.checkInAt).getTime();
-    const durationMins = Math.max(1, Math.floor((new Date(nowISO).getTime() - startTime) / 60000));
+    let durationMins = Math.floor((new Date(nowISO).getTime() - startTime) / 60000);
+    if (existingRec.totalBreakMinutes) {
+      durationMins = Math.max(0, durationMins - existingRec.totalBreakMinutes);
+    }
+    durationMins = Math.max(1, durationMins);
 
     const updatedRecord: AttendanceRecord = {
       ...existingRec,
