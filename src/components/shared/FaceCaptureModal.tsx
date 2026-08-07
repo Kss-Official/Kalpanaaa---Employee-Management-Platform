@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Camera, CheckCircle2, AlertTriangle, X, ScanFace, RefreshCw, Loader2, UserCheck, ShieldAlert } from 'lucide-react';
+import { Camera, CheckCircle2, AlertTriangle, X, ScanFace, RefreshCw, Loader2, UserCheck, ShieldAlert, Sparkles } from 'lucide-react';
 import { useHaptic } from '../../hooks/useHaptic';
 import {
   loadFaceModels,
   detectSingleFaceDescriptor,
   verifyFaceAgainstEnrolled,
+  saveEmployeeDescriptor,
   extractDescriptorFromImageUrl,
-  getEmployeeDescriptor
+  getEmployeeDescriptor,
+  drawFaceMeshOverVideo
 } from '../../lib/faceRecognitionEngine';
 
 interface FaceCaptureModalProps {
@@ -18,6 +20,7 @@ interface FaceCaptureModalProps {
   employeeId?: string;
   profilePhotoUrl?: string;
   isTestMode?: boolean;
+  isEnrollmentMode?: boolean;
 }
 
 export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
@@ -27,26 +30,40 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
   employeeName = 'Employee',
   employeeId = 'emp-001',
   profilePhotoUrl,
-  isTestMode = false
+  isTestMode = false,
+  isEnrollmentMode = false
 }) => {
   const { triggerHaptic } = useHaptic();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [statusStep, setStatusStep] = useState<'LOADING_MODELS' | 'INITIALIZING' | 'CENTER_FACE' | 'SCANNING' | 'VERIFIED' | 'FAILED' | 'ERROR'>('LOADING_MODELS');
+  const [statusStep, setStatusStep] = useState<'LOADING_MODELS' | 'INITIALIZING' | 'CENTER_FACE' | 'SCANNING' | 'VERIFIED' | 'FAILED' | 'NOT_ENROLLED' | 'ERROR'>('LOADING_MODELS');
   const [feedbackText, setFeedbackText] = useState('Loading face recognition neural network models...');
   const [confidencePercent, setConfidencePercent] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isEnrolled, setIsEnrolled] = useState<boolean>(false);
   const [profileDescriptor, setProfileDescriptor] = useState<Float32Array | null>(null);
+  const [currentModeIsEnroll, setCurrentModeIsEnroll] = useState<boolean>(isEnrollmentMode);
+
+  // Sync mode state when prop changes
+  useEffect(() => {
+    setCurrentModeIsEnroll(isEnrollmentMode);
+  }, [isEnrollmentMode, isOpen]);
 
   // Check if employee already has face enrolled or extract from profile photo
   useEffect(() => {
-    if (employeeId) {
-      const hasDescriptor = getEmployeeDescriptor(employeeId) !== null;
-      setIsEnrolled(hasDescriptor);
+    if (employeeId && isOpen) {
+      const storedDesc = getEmployeeDescriptor(employeeId);
+      setIsEnrolled(storedDesc !== null);
+
+      if (!storedDesc && profilePhotoUrl) {
+        extractDescriptorFromImageUrl(profilePhotoUrl).then(desc => {
+          if (desc) setProfileDescriptor(desc);
+        });
+      }
     }
-  }, [employeeId, isOpen]);
+  }, [employeeId, profilePhotoUrl, isOpen]);
 
   // Load Models & Start Camera Stream
   useEffect(() => {
@@ -83,7 +100,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
             videoRef.current.srcObject = mediaStream;
           }
           setStatusStep('CENTER_FACE');
-          setFeedbackText('Position your face inside the green oval...');
+          setFeedbackText('Position your face inside the frame...');
         }
       } catch (err: any) {
         if (isMounted) {
@@ -104,6 +121,22 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
     };
   }, [isOpen]);
 
+  // Handle Enrollment Action
+  const handlePerformEnrollment = (scannedDescriptor: Float32Array) => {
+    saveEmployeeDescriptor(employeeId, scannedDescriptor);
+    setIsEnrolled(true);
+    setCurrentModeIsEnroll(false);
+    setConfidencePercent(99);
+    setStatusStep('VERIFIED');
+    setFeedbackText('✓ Face Biometric Descriptor Successfully Registered!');
+    triggerHaptic('success');
+
+    setTimeout(() => {
+      onSuccess();
+      onClose();
+    }, 1500);
+  };
+
   // Live Detection Loop using real @vladmandic/face-api
   useEffect(() => {
     if (!isOpen || !videoRef.current || (statusStep !== 'CENTER_FACE' && statusStep !== 'SCANNING')) return;
@@ -119,14 +152,37 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
 
         if (!active) return;
 
+        // Render live 68-point facial landmarks mesh on canvas overlay
+        if (canvasRef.current && videoRef.current) {
+          drawFaceMeshOverVideo(videoRef.current, canvasRef.current, scan, 'emerald');
+        }
+
         if (scan.detected && scan.descriptor) {
           scanCount++;
           setStatusStep('SCANNING');
-          setFeedbackText(`Face detected! Validating facial landmarks... (${scanCount}/3)`);
+          setFeedbackText(`Face detected! Processing facial landmarks... (${scanCount}/3)`);
 
           if (scanCount >= 2) {
-            // Real Euclidean distance verification against enrolled descriptor or profile photo
+            // Mode A: Enrollment Mode -> Save this face descriptor as reference
+            if (currentModeIsEnroll) {
+              active = false;
+              clearInterval(interval);
+              handlePerformEnrollment(scan.descriptor);
+              return;
+            }
+
+            // Mode B: Verification Mode -> Match against registered face descriptor or profile photo
             const match = verifyFaceAgainstEnrolled(scan.descriptor, employeeId, profileDescriptor);
+
+            if (!match.enrolled) {
+              // Not enrolled yet!
+              setStatusStep('NOT_ENROLLED');
+              setConfidencePercent(null);
+              setFeedbackText('⚠️ No face template enrolled for this account yet. Click "Register Face" to enroll.');
+              active = false;
+              clearInterval(interval);
+              return;
+            }
 
             if (match.isMatch) {
               setConfidencePercent(match.confidencePercent);
@@ -134,9 +190,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
               setFeedbackText(
                 match.matchedAgainstProfilePhoto
                   ? `✓ Matched Against Profile Picture (${match.confidencePercent}% Confidence)`
-                  : match.enrolled
-                    ? `✓ Biometric Match Verified (${match.confidencePercent}% Confidence)`
-                    : `✓ Face Biometric Enrolled & Verified (99% Accuracy)`
+                  : `✓ Biometric Match Verified (${match.confidencePercent}% Confidence)`
               );
               triggerHaptic('success');
               active = false;
@@ -149,7 +203,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
             } else {
               setStatusStep('FAILED');
               setConfidencePercent(match.confidencePercent);
-              setFeedbackText(`❌ Biometric Mismatch (${match.confidencePercent}% Match). Face does not match registered profile.`);
+              setFeedbackText(`❌ Biometric Mismatch (${match.confidencePercent}% Confidence). Face does not match registered profile!`);
               triggerHaptic('error');
               active = false;
               clearInterval(interval);
@@ -158,7 +212,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
         } else {
           if (statusStep === 'SCANNING') {
             setStatusStep('CENTER_FACE');
-            setFeedbackText('Face lost. Position your face clearly inside the frame...');
+            setFeedbackText('Position your face clearly inside the frame...');
             setConfidencePercent(null);
           }
         }
@@ -171,7 +225,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
       active = false;
       clearInterval(interval);
     };
-  }, [isOpen, statusStep, employeeId]);
+  }, [isOpen, statusStep, employeeId, currentModeIsEnroll, profileDescriptor]);
 
   if (!isOpen) return null;
 
@@ -189,10 +243,10 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
             <ScanFace className="w-5 h-5 text-emerald-400 animate-pulse" />
             <div>
               <h3 className="text-sm font-bold text-white">
-                {isTestMode ? '🔍 Diagnostic Face Accuracy Test' : 'AI Biometric Facial Verification'}
+                {currentModeIsEnroll ? '📸 Register Facial Biometrics' : isTestMode ? '🔍 Diagnostic Face Accuracy Test' : 'AI Biometric Facial Verification'}
               </h3>
               <p className="text-[10px] text-slate-400 font-mono">
-                {isTestMode ? 'Testing live facial matching against profile descriptor' : '100% Client-Side TensorFlow Neural Net'}
+                {currentModeIsEnroll ? 'Capturing 128-point face descriptor' : isTestMode ? 'Testing live facial matching against profile descriptor' : '100% Client-Side TensorFlow Neural Net'}
               </p>
             </div>
           </div>
@@ -226,12 +280,19 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
                 muted
                 className="w-full h-full object-cover transform -scale-x-100"
               />
+
+              {/* Real Neural 68-Point Facial Landmark Overlay Canvas */}
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full pointer-events-none transform -scale-x-100 z-10"
+              />
               
               {/* MediaPipe / Face-API Mesh Overlay Visual */}
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                 <div className={`w-56 h-72 rounded-[40%] border-2 transition-all duration-500 relative flex flex-col items-center justify-center ${
                   statusStep === 'VERIFIED' ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_40px_rgba(16,185,129,0.3)]' :
                   statusStep === 'FAILED' ? 'border-rose-500 bg-rose-500/10 shadow-[0_0_40px_rgba(244,63,94,0.3)]' :
+                  statusStep === 'NOT_ENROLLED' ? 'border-amber-500 bg-amber-500/10 shadow-[0_0_40px_rgba(245,158,11,0.3)]' :
                   statusStep === 'SCANNING' ? 'border-blue-400 bg-blue-500/5 shadow-[0_0_30px_rgba(59,130,246,0.2)] animate-pulse' :
                   'border-emerald-400/80 border-dashed'
                 }`}>
@@ -241,6 +302,9 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
                   )}
                   {statusStep === 'FAILED' && (
                     <ShieldAlert className="w-16 h-16 text-rose-500 animate-in zoom-in-50 duration-300" />
+                  )}
+                  {statusStep === 'NOT_ENROLLED' && (
+                    <AlertTriangle className="w-16 h-16 text-amber-400 animate-in zoom-in-50 duration-300" />
                   )}
                 </div>
               </div>
@@ -270,12 +334,15 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
           <div className="text-center space-y-1">
             <p className={`text-xs font-bold ${
               statusStep === 'VERIFIED' ? 'text-emerald-400' :
-              statusStep === 'FAILED' ? 'text-rose-400' : 'text-white'
+              statusStep === 'FAILED' ? 'text-rose-400' :
+              statusStep === 'NOT_ENROLLED' ? 'text-amber-400' : 'text-white'
             }`}>{feedbackText}</p>
             <p className="text-[10px] text-slate-500">
-              {isEnrolled 
-                ? 'Biometric descriptor registered. Matching live face against 128-float embedding.' 
-                : 'First-time registration: your face descriptor will be securely saved on this device.'}
+              {currentModeIsEnroll
+                ? 'Hold still inside the frame to register your official biometric face template.'
+                : isEnrolled
+                  ? 'Biometric descriptor registered. Matching live face against 128-float embedding.' 
+                  : 'No facial template enrolled yet. Click "Register My Face" below to enroll.'}
             </p>
           </div>
 
@@ -287,12 +354,23 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
               Cancel
             </button>
 
-            {statusStep === 'FAILED' ? (
+            {statusStep === 'NOT_ENROLLED' || !isEnrolled ? (
+              <button
+                onClick={() => {
+                  setCurrentModeIsEnroll(true);
+                  setStatusStep('CENTER_FACE');
+                  setFeedbackText('Hold still to register your face...');
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-900/40"
+              >
+                <Sparkles className="w-3.5 h-3.5" /> Register My Face Now
+              </button>
+            ) : statusStep === 'FAILED' ? (
               <button
                 onClick={() => setStatusStep('CENTER_FACE')}
                 className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Retry Facial Scan
+                <RefreshCw className="w-3.5 h-3.5" /> Retry Scan
               </button>
             ) : (
               <button

@@ -39,6 +39,8 @@ export interface FaceScanResult {
   descriptor?: Float32Array;
   detectionBox?: { x: number; y: number; width: number; height: number };
   score?: number;
+  landmarks?: faceapi.FaceLandmarks68;
+  fullResult?: any;
 }
 
 // Extract real 128-point face descriptor vector from a live HTMLVideoElement
@@ -64,8 +66,44 @@ export const detectSingleFaceDescriptor = async (
     detected: true,
     descriptor: result.descriptor,
     detectionBox: { x: box.x, y: box.y, width: box.width, height: box.height },
-    score
+    score,
+    landmarks: result.landmarks,
+    fullResult: result
   };
+};
+
+// Render real-time 68-point facial landmark mesh & bounding box on a target HTMLCanvasElement
+export const drawFaceMeshOverVideo = (
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  scanResult: FaceScanResult,
+  color: 'emerald' | 'rose' | 'blue' = 'emerald'
+): void => {
+  if (!scanResult.detected || !scanResult.fullResult) {
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  const displaySize = { width: video.clientWidth || video.videoWidth || 640, height: video.clientHeight || video.videoHeight || 480 };
+  faceapi.matchDimensions(canvas, displaySize);
+
+  const resizedResult = faceapi.resizeResults(scanResult.fullResult, displaySize);
+
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Draw face landmarks (eye dots, nose bridge, lip contour)
+  const drawOptions = {
+    drawLines: true,
+    lineWidth: 1.5,
+    color: color === 'rose' ? '#f43f5e' : color === 'blue' ? '#3b82f6' : '#10b981'
+  };
+  
+  const landmarkDrawBox = new faceapi.draw.DrawFaceLandmarks(resizedResult.landmarks, drawOptions);
+  landmarkDrawBox.draw(canvas);
 };
 
 // Extract face descriptor from an image URL (e.g. Employee's official profile photo)
@@ -107,16 +145,21 @@ export const getEmployeeDescriptor = (employeeId: string): Float32Array | null =
   }
 };
 
+export const clearEmployeeDescriptor = (employeeId: string): void => {
+  localStorage.removeItem(`${STORAGE_PREFIX}${employeeId}`);
+};
+
 export interface MatchVerificationResult {
   isMatch: boolean;
   confidencePercent: number;
   distance: number;
   enrolled: boolean;
   matchedAgainstProfilePhoto?: boolean;
+  message?: string;
 }
 
-// Compare scanned face descriptor against employee's enrolled descriptor or profile photo
-// Euclidean distance threshold: < 0.55 = High Match (90%+), < 0.6 = Valid Match
+// Compare scanned face descriptor strictly against employee's enrolled descriptor or profile photo
+// Standard face-api Euclidean distance threshold: < 0.48 = SAME PERSON (Match), > 0.48 = DIFFERENT PERSON
 export const verifyFaceAgainstEnrolled = (
   scannedDescriptor: Float32Array,
   employeeId: string,
@@ -131,27 +174,32 @@ export const verifyFaceAgainstEnrolled = (
     isProfilePhoto = true;
   }
 
-  // If no reference stored yet, auto-enroll this first valid scan for the employee!
+  // If NO reference is enrolled or available for this employee:
   if (!referenceDescriptor) {
-    saveEmployeeDescriptor(employeeId, scannedDescriptor);
     return {
-      isMatch: true,
-      confidencePercent: 99,
-      distance: 0.1,
-      enrolled: false
+      isMatch: false,
+      confidencePercent: 0,
+      distance: 1.0,
+      enrolled: false,
+      message: 'No face template enrolled for this account yet.'
     };
   }
 
   // Calculate Euclidean Distance between 128-float descriptors
   const distance = faceapi.euclideanDistance(scannedDescriptor, referenceDescriptor);
   
-  // Convert distance to confidence percentage: distance 0 => 100%, distance 0.6 => 70%
-  const confidencePercent = Math.max(0, Math.min(100, Math.round((1 - distance / 0.6) * 100)));
-  const isMatch = distance < 0.55;
+  const isMatch = distance < 0.48;
+  
+  let confidencePercent = 0;
+  if (isMatch) {
+    confidencePercent = Math.max(75, Math.min(99, Math.round((1 - distance / 0.55) * 100)));
+  } else {
+    confidencePercent = Math.max(5, Math.min(45, Math.round((1 - distance) * 100)));
+  }
 
   return {
     isMatch,
-    confidencePercent: isMatch ? Math.max(88, confidencePercent) : confidencePercent,
+    confidencePercent,
     distance,
     enrolled: true,
     matchedAgainstProfilePhoto: isProfilePhoto
