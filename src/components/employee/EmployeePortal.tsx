@@ -94,6 +94,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
   const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
   const [isTestFaceModalOpen, setIsTestFaceModalOpen] = useState(false);
+  const [isEnrollFaceModalOpen, setIsEnrollFaceModalOpen] = useState(false);
 
   // Profile Edit State
   const [profilePhoto, setProfilePhoto] = useState(activeEmployee?.profilePhotoUrl || AVATAR_PRESETS[0]);
@@ -1040,6 +1041,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       <span>{isCapturingCamera ? 'Capturing Snapshot...' : 'Take Camera Photo'}</span>
                     </button>
 
+                    {/* Explicit Face Biometric Registration Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsEnrollFaceModalOpen(true)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-blue-900/40"
+                      title="Register your official biometric face template using your webcam"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-blue-200 animate-pulse" />
+                      <span>📸 Register Biometric Face Template</span>
+                    </button>
+
                     {/* Test Facial Recognition Accuracy Button (Zero Attendance Risk) */}
                     <button
                       type="button"
@@ -1339,8 +1351,23 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         }}
         employeeName={activeEmployee.fullName}
         employeeId={activeEmployee.id}
-        profilePhotoUrl={activeEmployee.profilePhotoUrl}
         isTestMode={true}
+      />
+
+      {/* Explicit Biometric Face Registration Modal */}
+      <FaceCaptureModal
+        isOpen={isEnrollFaceModalOpen}
+        onClose={() => setIsEnrollFaceModalOpen(false)}
+        onSuccess={() => {
+          triggerHaptic('success');
+          updateEmployee(activeEmployee.id, { isFaceEnrolled: true, faceEnrolledAt: new Date().toISOString() });
+          setActionFeedback({ success: true, message: '✓ Face Biometric Template Successfully Enrolled & Saved!' });
+          setTimeout(() => setActionFeedback(null), 3500);
+        }}
+        employeeName={activeEmployee.fullName}
+        employeeId={activeEmployee.id}
+        profilePhotoUrl={activeEmployee.profilePhotoUrl}
+        isEnrollmentMode={true}
       />
 
     </div>
