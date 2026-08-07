@@ -201,27 +201,30 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     }
   }, [activeEmployee]);
 
-  // Acquire Geolocation
+  // Acquire Continuous Real-Time Geolocation (watchPosition)
   useEffect(() => {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          setGpsLocation({ 
-            lat: pos.coords.latitude, 
-            lon: pos.coords.longitude,
-            accuracy: Math.round(pos.coords.accuracy) || 8
-          });
-          setGpsError(null);
-        },
-        err => {
-          console.warn('Employee location prompt:', err.message);
-          setGpsError(err.message || 'Location access denied or unavailable.');
-        },
-        { enableHighAccuracy: true }
-      );
-    } else {
+    if (!('geolocation' in navigator)) {
       setGpsError('Geolocation is not supported by your browser.');
+      return;
     }
+
+    const watchId = navigator.geolocation.watchPosition(
+      pos => {
+        setGpsLocation({ 
+          lat: pos.coords.latitude, 
+          lon: pos.coords.longitude,
+          accuracy: Math.round(pos.coords.accuracy) || 8
+        });
+        setGpsError(null);
+      },
+      err => {
+        console.warn('Employee location watch prompt:', err.message);
+        setGpsError(err.message || 'Location access denied or unavailable.');
+      },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
   const liveDistanceMeters = (gpsLocation && companyWorkZone)
@@ -232,29 +235,102 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     ? liveDistanceMeters <= companyWorkZone.radiusMeters
     : false;
 
-  // Auto Geo-Fence Logic
+  // Time-of-Day Break Classifier
+  const getAutoBreakTypeByTime = (): 'Lunch Break' | 'Tea Break' | 'Geo-Fence Auto Break' => {
+    const now = new Date();
+    const timeInMins = now.getHours() * 60 + now.getMinutes();
+
+    // Afternoon: 12:00 PM (720 mins) to 3:30 PM (930 mins) -> Lunch Break
+    if (timeInMins >= 720 && timeInMins < 930) {
+      return 'Lunch Break';
+    }
+    // Evening: 3:30 PM (930 mins) to 6:30 PM (1110 mins) -> Tea Break
+    if (timeInMins >= 930 && timeInMins < 1110) {
+      return 'Tea Break';
+    }
+    return 'Geo-Fence Auto Break';
+  };
+
+  // Autonomous Geo-Fence Departure & Return Handler
   useEffect(() => {
-    // Only apply if GPS is required, they are checked in, not checked out, and not WFH
     if (!settings.gpsRequired || !todayRecord?.checkInAt || todayRecord?.checkOutAt || isWfh) return;
 
-    // We have a verified live distance
     if (liveDistanceMeters !== null) {
       if (!isVerifiedLocation && !activeBreak) {
-        // They walked out of radius, start Geo break & logout
-        handleStartBreak('Geo-Fence Auto Break');
-        setActionFeedback({ success: false, message: 'You left the office zone. Shift paused and auto-logging out.' });
-        triggerHaptic('error');
-        
-        // Wait a tiny bit for the state/firebase to save, then logout
-        setTimeout(() => {
-          logout();
-        }, 1500);
-      } else if (isVerifiedLocation && activeBreak?.type === 'Geo-Fence Auto Break') {
-        // They walked back into radius, end Geo break
+        // Employee left office radius -> Auto start break based on time of day (Lunch/Tea/Geo)
+        const autoType = getAutoBreakTypeByTime();
+        handleStartBreak(autoType);
+        setActionFeedback({ 
+          success: true, 
+          message: `📍 Out of office radius (${Math.round(liveDistanceMeters)}m). Auto-started ${autoType}. Shift paused.` 
+        });
+        triggerHaptic('warning');
+      } else if (isVerifiedLocation && activeBreak) {
+        // Employee returned inside office radius -> Auto end break & resume shift!
         handleEndBreak();
+        setActionFeedback({ 
+          success: true, 
+          message: `📍 Returned inside office radius! ${activeBreak.type} ended. Shift resumed. 🏢` 
+        });
+        triggerHaptic('success');
       }
     }
-  }, [liveDistanceMeters, isVerifiedLocation, todayRecord?.checkInAt, todayRecord?.checkOutAt, isWfh, activeBreak?.type, settings.gpsRequired]);
+  }, [liveDistanceMeters, isVerifiedLocation, todayRecord?.checkInAt, todayRecord?.checkOutAt, isWfh, activeBreak, settings.gpsRequired]);
+
+  // Ref flags to prevent repeating break escalation notifications
+  const breakEscalationFlagsRef = useRef<{ m25: boolean; m30: boolean; m50: boolean }>({ m25: false, m30: false, m50: false });
+
+  // Reset escalation flags when activeBreak changes
+  useEffect(() => {
+    breakEscalationFlagsRef.current = { m25: false, m30: false, m50: false };
+  }, [activeBreak?.startAt]);
+
+  // Break Extension Escalation Timers (25m Warning, 30m Alert, 50m Auto-Off Rule)
+  useEffect(() => {
+    if (!activeBreak) return;
+
+    const checkEscalations = () => {
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 1000));
+      const elapsedMins = Math.floor(elapsedSec / 60);
+
+      // Escalation Rule 1: 25 Minutes Warning (5 minutes before 30m limit)
+      if (elapsedMins >= 25 && elapsedMins < 30 && !breakEscalationFlagsRef.current.m25) {
+        breakEscalationFlagsRef.current.m25 = true;
+        triggerHaptic('warning');
+        setActionFeedback({
+          success: false,
+          message: `⚠️ BREAK WARNING: You have been on ${activeBreak.type} for 25 minutes (5 mins left before 30-min limit).`
+        });
+      }
+
+      // Escalation Rule 2: 30 Minutes Alert (Overtime Break Limit)
+      if (elapsedMins >= 30 && elapsedMins < 50 && !breakEscalationFlagsRef.current.m30) {
+        breakEscalationFlagsRef.current.m30 = true;
+        triggerHaptic('error');
+        setActionFeedback({
+          success: false,
+          message: `🚨 BREAK LIMIT REACHED: You have exceeded 30 minutes on ${activeBreak.type}. Please return to work.`
+        });
+        addAuditLog('ATTENDANCE_BREAK_EXTENDED', activeEmployee.id, `${activeEmployee.fullName} extended ${activeBreak.type} past 30 minutes.`);
+      }
+
+      // Escalation Rule 3: 50 Minutes AUTO-OFF RULE (Hard Cutoff & Auto-End Break)
+      if (elapsedMins >= 50 && !breakEscalationFlagsRef.current.m50) {
+        breakEscalationFlagsRef.current.m50 = true;
+        triggerHaptic('error');
+        handleEndBreak();
+        setActionFeedback({
+          success: false,
+          message: `🛑 BREAK AUTO-STOPPED: Maximum 50-minute break limit reached for ${activeBreak.type}. Shift resumed.`
+        });
+        addAuditLog('ATTENDANCE_BREAK_AUTO_STOP', activeEmployee.id, `Break auto-stopped at 50-minute maximum limit for ${activeEmployee.fullName}.`);
+      }
+    };
+
+    const interval = setInterval(checkEscalations, 5000);
+    checkEscalations();
+    return () => clearInterval(interval);
+  }, [activeBreak, activeEmployee]);
 
   // Generate Static QR Code for ID Card (Company Website)
   useEffect(() => {
