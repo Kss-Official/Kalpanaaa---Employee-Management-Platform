@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { User, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   collection,
@@ -108,6 +108,7 @@ interface AuthContextType {
   isLoading: boolean;
   isDemoMode: boolean;
   isFirestoreConnected: boolean;
+  isSessionReady: boolean;
   employees: Employee[];
   attendance: AttendanceRecord[];
   auditLogs: AuditLog[];
@@ -132,6 +133,8 @@ interface AuthContextType {
   addAuditLog: (action: string, target: string, details: string) => void;
   resetToDemoData: () => void;
   regenerateQrToken: (employeeId: string) => string;
+  sendPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
+  setEmployeeInitialPassword: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -146,6 +149,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(false);
   const [isDemoMode, setIsDemoMode] = useState(true);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState(false);
+  // isSessionReady becomes true once the one-time session restore has finished
+  const [isSessionReady, setIsSessionReady] = useState(false);
+
+  // employeesRef always mirrors the current employees state for use in one-time effects
+  const employeesRef = useRef<Employee[]>([]);
 
   // Core state collections
   const [employees, setEmployees] = useState<Employee[]>(() => {
@@ -216,30 +224,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Save to localStorage as defensive fallbacks
+  // Always keep the ref in sync with state
   useEffect(() => {
-    localStorage.setItem('kss_v1_employees', JSON.stringify(employees));
+    employeesRef.current = employees;
   }, [employees]);
 
+  // Debounced localStorage persistence — batches all state saves into one write per 500ms
   useEffect(() => {
-    localStorage.setItem('kss_v1_attendance', JSON.stringify(attendance));
-  }, [attendance]);
-
-  useEffect(() => {
-    localStorage.setItem('kss_v1_audit_logs', JSON.stringify(auditLogs));
-  }, [auditLogs]);
-
-  useEffect(() => {
-    localStorage.setItem('kss_v1_settings', JSON.stringify(settings));
-  }, [settings]);
-
-  useEffect(() => {
-    localStorage.setItem('kss_v1_work_zone', JSON.stringify(companyWorkZone));
-  }, [companyWorkZone]);
-
-  useEffect(() => {
-    localStorage.setItem('kss_v1_leave_requests', JSON.stringify(leaveRequests));
-  }, [leaveRequests]);
+    const handler = setTimeout(() => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      localStorage.setItem('kss_v1_employees', JSON.stringify(employees));
+      localStorage.setItem('kss_v1_attendance', JSON.stringify(attendance.filter(a => a.date >= todayStr)));
+      localStorage.setItem('kss_v1_audit_logs', JSON.stringify(auditLogs));
+      localStorage.setItem('kss_v1_settings', JSON.stringify(settings));
+      localStorage.setItem('kss_v1_work_zone', JSON.stringify(companyWorkZone));
+      localStorage.setItem('kss_v1_leave_requests', JSON.stringify(leaveRequests));
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [employees, attendance, auditLogs, settings, companyWorkZone, leaveRequests]);
 
   // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
   useEffect(() => {
@@ -625,48 +627,72 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubLogs();
   }, [isAuthenticated, role]);
 
-  // Restore saved session on boot
+  // ── Session Restore: runs ONCE on mount, then waits for Firestore to populate via onSnapshot ──
+  // The Firestore employees snapshot effect keeps employeesRef current.
+  // We retry here until we find the employee (Firestore may stream in after first mount).
   useEffect(() => {
     const savedSessionId = localStorage.getItem('kss_v1_session');
-    if (savedSessionId) {
-      const matched = employees.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
-      if (matched) {
-        setActiveEmployee(matched);
-        // Restore correct role: Executive override for CEO, CTO, and PM (KSS2407003)
-        let assignedRole = matched.role;
-        if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
-        if (matched.employeeId === 'KSS2407003' || matched.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')) assignedRole = 'HR_ADMIN';
-        
-        setRole(assignedRole);
-        setIsAuthenticated(true);
-      } else {
-        // Invalid / stale session - clear it and force re-login
+    if (!savedSessionId) {
+      setActiveEmployee(null);
+      setIsAuthenticated(false);
+      setIsSessionReady(true);
+      return;
+    }
+
+    // Helper to apply a matched employee to state
+    const applySession = (matched: Employee) => {
+      setActiveEmployee(matched);
+      let assignedRole = matched.role;
+      if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
+      if (matched.employeeId === 'KSS2407003' || matched.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')) assignedRole = 'HR_ADMIN';
+      setRole(assignedRole);
+      setIsAuthenticated(true);
+      setIsSessionReady(true);
+    };
+
+    // Check immediately with whatever employees are in state (usually from localStorage cache)
+    const immediate = employeesRef.current.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
+    if (immediate) {
+      applySession(immediate);
+      return;
+    }
+
+    // If not found yet (Firestore hasn't streamed in), poll the ref every 200ms for up to 5s
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts++;
+      const found = employeesRef.current.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
+      if (found) {
+        clearInterval(interval);
+        applySession(found);
+      } else if (attempts >= 25) {
+        // After 5s with no match, treat session as stale
+        clearInterval(interval);
         localStorage.removeItem('kss_v1_session');
         setActiveEmployee(null);
         setIsAuthenticated(false);
+        setIsSessionReady(true);
       }
-    } else {
-      setActiveEmployee(null);
-      setIsAuthenticated(false);
-    }
-  }, [employees]);
+    }, 200);
 
-  // Listen to Firebase Auth state
+    return () => clearInterval(interval);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Firebase Auth State: subscribes ONCE, uses ref for employee lookup ──
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
         setIsDemoMode(false);
         const cleanEmail = firebaseUser.email?.toLowerCase();
-        let matched = employees.find(e => e.email?.toLowerCase() === cleanEmail);
+        let matched = employeesRef.current.find(e => e.email?.toLowerCase() === cleanEmail);
 
         if (!matched && cleanEmail) {
-          // Check Firestore directly for user document
           try {
             const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
             if (userDoc.exists()) {
               const userData = userDoc.data();
-              matched = employees.find(e => e.email?.toLowerCase() === userData.email?.toLowerCase());
+              matched = employeesRef.current.find(e => e.email?.toLowerCase() === userData.email?.toLowerCase());
             }
           } catch (e) {
             console.warn('User doc fetch exception:', e);
@@ -677,12 +703,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setActiveEmployee(matched);
           setRole(matched.role);
           setIsAuthenticated(true);
+          setIsSessionReady(true);
           localStorage.setItem('kss_v1_session', matched.id);
         }
       }
     });
     return () => unsubscribe();
-  }, [employees]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addAuditLog = (action: string, target: string, details: string) => {
     const newLog: AuditLog = {
@@ -829,7 +856,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const sendPasswordReset = async (email: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const { getAuth, sendPasswordResetEmail } = await import('firebase/auth');
+      const auth = getAuth();
+      await sendPasswordResetEmail(auth, email);
+      return { success: true, message: `Password reset email sent to ${email}` };
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      return { success: false, message: err.message || 'Failed to send password reset email.' };
+    }
+  };
 
+  const setEmployeeInitialPassword = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const secondaryApp = initializeApp(firebaseConfig, `SecondaryApp-${Date.now()}`);
+      const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      const userCred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
+      
+      await setDoc(doc(db, 'users', userCred.user.uid), {
+        uid: userCred.user.uid,
+        email: email,
+        createdAt: new Date().toISOString()
+      }, { merge: true }).catch(() => { });
+
+      await signOut(secondaryAuth);
+      return { success: true, message: 'Password successfully set.' };
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        return { success: false, message: 'This employee already has a secure login. Please use the Reset Email button instead.' };
+      }
+      return { success: false, message: err.message || 'Failed to set password.' };
+    }
+  };
 
   const quickDemoLogin = (targetRole: UserRole | 'CEO' | 'CTO') => {
     setIsLoading(true);
@@ -1091,10 +1152,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       : (existingRec.distanceFromOffice || 0);
 
     const nowISO = new Date().toISOString();
+    
+    // Auto-close open break if any
+    let additionalBreakMins = 0;
+    const existingBreaks = existingRec.breaks || [];
+    let updatedBreaks = existingBreaks;
+    const openBreak = existingBreaks.find(b => !b.endAt);
+    
+    if (openBreak) {
+      additionalBreakMins = Math.floor((new Date(nowISO).getTime() - new Date(openBreak.startAt).getTime()) / 60000);
+      updatedBreaks = existingBreaks.map(b => 
+        (b.startAt === openBreak.startAt && !b.endAt) 
+          ? { ...b, endAt: nowISO, durationMinutes: additionalBreakMins } 
+          : b
+      );
+    }
+
+    const finalTotalBreakMinutes = (existingRec.totalBreakMinutes || 0) + additionalBreakMins;
+
     const startTime = new Date(existingRec.checkInAt).getTime();
     let durationMins = Math.floor((new Date(nowISO).getTime() - startTime) / 60000);
-    if (existingRec.totalBreakMinutes) {
-      durationMins = Math.max(0, durationMins - existingRec.totalBreakMinutes);
+    
+    if (finalTotalBreakMinutes > 0) {
+      durationMins = Math.max(0, durationMins - finalTotalBreakMinutes);
     }
     durationMins = Math.max(1, durationMins);
 
@@ -1102,6 +1182,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...existingRec,
       checkOutAt: nowISO,
       workingMinutes: durationMins,
+      breaks: updatedBreaks,
+      totalBreakMinutes: finalTotalBreakMinutes,
       officeLatitude: existingRec.officeLatitude || companyWorkZone.latitude,
       officeLongitude: existingRec.officeLongitude || companyWorkZone.longitude,
       officeRadiusMeters: existingRec.officeRadiusMeters || companyWorkZone.radiusMeters,
@@ -1264,6 +1346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isLoading,
       isDemoMode,
       isFirestoreConnected,
+      isSessionReady,
       employees,
       attendance,
       auditLogs,
@@ -1285,7 +1368,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateLeaveRequestStatus,
       addAuditLog,
       resetToDemoData,
-      regenerateQrToken
+      regenerateQrToken,
+      sendPasswordReset,
+      setEmployeeInitialPassword
     }}>
       {children}
     </AuthContext.Provider>

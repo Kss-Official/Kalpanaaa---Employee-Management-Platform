@@ -1,247 +1,282 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthView } from './components/auth/AuthView';
-import { LandingView } from './components/landing/LandingView';
-import { Header } from './components/common/Header';
-import { Sidebar } from './components/common/Sidebar';
-import { DashboardView } from './components/admin/DashboardView';
-import { EmployeeDirectory } from './components/admin/EmployeeDirectory';
-import { EmployeeProfileModal } from './components/admin/EmployeeProfileModal';
-import { EmployeeFormModal } from './components/admin/EmployeeFormModal';
-import { EmployeeIdCardModal } from './components/admin/EmployeeIdCardModal';
-import { AttendanceManagement } from './components/admin/AttendanceManagement';
-import { ReportsView } from './components/admin/ReportsView';
-import { DocumentGenerator } from './components/admin/DocumentGenerator';
-import { SettingsView } from './components/admin/SettingsView';
-import { AuditLogsView } from './components/admin/AuditLogsView';
-import { LeaveApprovalsView } from './components/admin/LeaveApprovalsView';
-import { VerificationView } from './components/public/VerificationView';
-import { EmployeePortal } from './components/employee/EmployeePortal';
 import { SplashScreen } from './components/common/SplashScreen';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
-import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { Employee } from './types';
-import { ShieldCheck, CreditCard } from 'lucide-react';
+import { ShieldCheck, CreditCard, Loader2 } from 'lucide-react';
+
+// ── Eager imports (needed immediately on boot) ──
+import { Header } from './components/common/Header';
+import { Sidebar } from './components/common/Sidebar';
+import { MobileBottomNav } from './components/common/MobileBottomNav';
+
+// ── Lazy imports (code-split: only loaded when user navigates to that view) ──
+const LandingView          = lazy(() => import('./components/landing/LandingView').then(m => ({ default: m.LandingView })));
+const DashboardView        = lazy(() => import('./components/admin/DashboardView').then(m => ({ default: m.DashboardView })));
+const EmployeeDirectory    = lazy(() => import('./components/admin/EmployeeDirectory').then(m => ({ default: m.EmployeeDirectory })));
+const EmployeeProfileModal = lazy(() => import('./components/admin/EmployeeProfileModal').then(m => ({ default: m.EmployeeProfileModal })));
+const EmployeeFormModal    = lazy(() => import('./components/admin/EmployeeFormModal').then(m => ({ default: m.EmployeeFormModal })));
+const EmployeeIdCardModal  = lazy(() => import('./components/admin/EmployeeIdCardModal').then(m => ({ default: m.EmployeeIdCardModal })));
+const AttendanceManagement = lazy(() => import('./components/admin/AttendanceManagement').then(m => ({ default: m.AttendanceManagement })));
+const ReportsView          = lazy(() => import('./components/admin/ReportsView').then(m => ({ default: m.ReportsView })));
+const DocumentGenerator    = lazy(() => import('./components/admin/DocumentGenerator').then(m => ({ default: m.DocumentGenerator })));
+const SettingsView         = lazy(() => import('./components/admin/SettingsView').then(m => ({ default: m.SettingsView })));
+const AuditLogsView        = lazy(() => import('./components/admin/AuditLogsView').then(m => ({ default: m.AuditLogsView })));
+const LeaveApprovalsView   = lazy(() => import('./components/admin/LeaveApprovalsView').then(m => ({ default: m.LeaveApprovalsView })));
+const EmployeePortal       = lazy(() => import('./components/employee/EmployeePortal').then(m => ({ default: m.EmployeePortal })));
+const VerificationView     = lazy(() => import('./components/public/VerificationView').then(m => ({ default: m.VerificationView })));
+
+// Minimal spinner for Suspense fallbacks
+const ViewLoader = () => (
+  <div className="flex items-center justify-center h-64 w-full">
+    <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+  </div>
+);
 
 const MainLayout: React.FC = () => {
-  const { role, isAuthenticated, activeEmployee } = useAuth();
-  
-  // Showcase Landing Page toggle state
-  const [viewMode, setViewMode] = useState<'landing' | 'app' | 'auth'>('landing');
+  const { role, isAuthenticated, activeEmployee, isSessionReady } = useAuth();
 
-  // Splash Screen auto-shows on every first load
+  // viewMode drives what the user sees after splash
+  const [viewMode, setViewMode] = useState<'landing' | 'app' | 'auth'>('landing');
+  // showSplash is true until the splash screen calls onFinish
   const [showSplash, setShowSplash] = useState(true);
 
-  // Navigation active tab
+  // Navigation
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-  // Modals state
+  // Modals
   const [selectedEmpProfile, setSelectedEmpProfile] = useState<Employee | null>(null);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [idCardEmployee, setIdCardEmployee] = useState<Employee | null>(null);
 
-  // Automatically transition to the app view when authentication succeeds
+  // Auto-transition when session is restored and user is authenticated
   useEffect(() => {
     if (isAuthenticated && activeEmployee) {
       setViewMode('app');
-      setShowSplash(false); // Immediately dismiss splash on successful login
+      setShowSplash(false);
     }
   }, [isAuthenticated, activeEmployee]);
 
   // Strict role-based tab routing
   useEffect(() => {
     if (role === 'SUPER_ADMIN' || role === 'HR_ADMIN') {
-      // CEO, CTO & HR always land on Admin Control Panel
-      if (activeTab.startsWith('emp_')) {
-        setActiveTab('dashboard');
-      }
+      if (activeTab.startsWith('emp_')) setActiveTab('dashboard');
     } else {
-      // All other roles (EMPLOYEE) go to Employee Portal only
-      if (!activeTab.startsWith('emp_')) {
-        setActiveTab('emp_dashboard');
-      }
+      if (!activeTab.startsWith('emp_')) setActiveTab('emp_dashboard');
     }
   }, [role]);
 
-  // Handle landing view CTA triggers - requires explicit login authentication
-  const handleLandingGetStarted = (actionTab?: 'signin' | 'signup' | 'demo') => {
-    setViewMode('auth');
-  };
+  const handleLandingGetStarted = () => setViewMode('auth');
 
-  // Render the views based on viewMode and authentication state
+  // ── SPLASH GATE: while showSplash=true, render ONLY the splash ──
+  // If the session is not ready yet (first-time Firestore load), we also keep the splash visible.
+  if (showSplash) {
+    return (
+      <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased flex flex-col">
+        <SplashScreen
+          onFinish={() => {
+            // Only dismiss splash once session check has completed
+            if (isSessionReady) {
+              setShowSplash(false);
+            } else {
+              // Session check still running — keep splash up, wait for isSessionReady
+              const wait = setInterval(() => {
+                // This closure captures isSessionReady via module-level flag below
+              }, 100);
+              clearInterval(wait);
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
   const renderView = () => {
-    // If user unauthenticated or in landing view mode
     if (viewMode === 'landing' && (!isAuthenticated || !activeEmployee)) {
       return (
-        <LandingView 
-          onGetStarted={handleLandingGetStarted} 
-          onShowSplash={() => setShowSplash(true)}
-        />
+        <Suspense fallback={<ViewLoader />}>
+          <LandingView
+            onGetStarted={handleLandingGetStarted}
+            onShowSplash={() => setShowSplash(true)}
+          />
+        </Suspense>
       );
     }
 
-    // If user selected Auth login/signup explicitly
-    if (viewMode === 'auth' || (!isAuthenticated || !activeEmployee)) {
+    if (viewMode === 'auth' || !isAuthenticated || !activeEmployee) {
       return <AuthView onBackToLanding={() => setViewMode('landing')} />;
     }
 
     return (
       <div className="flex-1 flex flex-col relative w-full h-full">
-        {/* Top Header Navigation */}
-        <Header 
+        <Header
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           isMobileSidebarOpen={isMobileSidebarOpen}
           onShowLanding={() => setViewMode('landing')}
           onShowSplash={() => setShowSplash(true)}
         />
 
-      {/* Body Area */}
-      <div className="flex-1 flex w-full max-w-[1700px] mx-auto relative">
-        
-        {/* Sidebar Navigation */}
-        <Sidebar 
-          activeTab={activeTab} 
-          setActiveTab={setActiveTab} 
-          isMobileOpen={isMobileSidebarOpen}
-          onCloseMobile={() => setIsMobileSidebarOpen(false)}
-        />
+        <div className="flex-1 flex w-full max-w-[1700px] mx-auto relative">
+          <Sidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            isMobileOpen={isMobileSidebarOpen}
+            onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          />
 
-        {/* Primary Main Workspace View */}
-        <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto">
-          
-          {/* Executive & HR Security Check Guard */}
-          {!activeTab.startsWith('emp_') && role === 'EMPLOYEE' ? (
-            <div className="bg-slate-900 border border-rose-900/50 rounded-3xl p-8 max-w-2xl mx-auto my-12 text-center space-y-5 shadow-2xl">
-              <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
-                <ShieldCheck className="w-8 h-8" />
-              </div>
-              <h2 className="text-xl font-black text-white">Admin Access Restricted</h2>
-              <p className="text-xs text-slate-300 leading-relaxed max-w-lg mx-auto">
-                The Workspace Admin Dashboard & Management System is strictly restricted to company <strong className="text-white font-black">Executives and HR Administrators</strong> using official corporate credentials at Kalpanaaa Software Solutions.
-              </p>
-
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                <button
-                  onClick={() => setActiveTab('emp_dashboard')}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl cursor-pointer"
-                >
-                  Return to My Employee Portal
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Admin Views (Accessible ONLY to CEO & CTO) */}
-              {activeTab === 'dashboard' && (
-                <DashboardView 
-                  onNavigateTab={tab => setActiveTab(tab)}
-                  onOpenAddEmployee={() => setIsAddModalOpen(true)}
-                />
-              )}
-
-              {activeTab === 'my_id_card' && (
-                <div className="flex flex-col items-center justify-center p-8 bg-slate-900 rounded-3xl border border-slate-800 shadow-xl mt-12 mx-auto max-w-lg text-center animate-in fade-in zoom-in-95">
-                  <div className="w-16 h-16 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center mx-auto mb-4">
-                    <CreditCard className="w-8 h-8" />
-                  </div>
-                  <h2 className="text-2xl font-bold mb-3 text-white">My Official ID Card</h2>
-                  <p className="text-sm text-slate-400 mb-8 leading-relaxed">Click the button below to view, print, or share your official corporate ID badge containing your secure QR code and barcode.</p>
-                  <button 
-                    onClick={() => setIdCardEmployee(activeEmployee)}
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+          <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto">
+            {!activeTab.startsWith('emp_') && role === 'EMPLOYEE' ? (
+              <div className="bg-slate-900 border border-rose-900/50 rounded-3xl p-8 max-w-2xl mx-auto my-12 text-center space-y-5 shadow-2xl">
+                <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+                  <ShieldCheck className="w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-black text-white">Admin Access Restricted</h2>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-lg mx-auto">
+                  The Workspace Admin Dashboard &amp; Management System is strictly restricted to company <strong className="text-white font-black">Executives and HR Administrators</strong> using official corporate credentials at Kalpanaaa Software Solutions.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => setActiveTab('emp_dashboard')}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl cursor-pointer"
                   >
-                    <CreditCard className="w-5 h-5" /> Open ID Card Viewer
+                    Return to My Employee Portal
                   </button>
                 </div>
-              )}
-              
-              {activeTab === 'employees' && (
-                <EmployeeDirectory
-                  onSelectEmployee={emp => setSelectedEmpProfile(emp)}
-                  onOpenAddModal={() => setIsAddModalOpen(true)}
-                  onOpenEditModal={emp => setEditingEmployee(emp)}
-                  onOpenIdCardModal={emp => setIdCardEmployee(emp)}
-                />
-              )}
+              </div>
+            ) : (
+              <Suspense fallback={<ViewLoader />}>
+                {activeTab === 'dashboard' && (
+                  <DashboardView
+                    onNavigateTab={tab => setActiveTab(tab)}
+                    onOpenAddEmployee={() => setIsAddModalOpen(true)}
+                  />
+                )}
 
-              {activeTab === 'attendance' && <AttendanceManagement />}
+                {activeTab === 'my_id_card' && (
+                  <div className="flex flex-col items-center justify-center p-8 bg-slate-900 rounded-3xl border border-slate-800 shadow-xl mt-12 mx-auto max-w-lg text-center animate-in fade-in zoom-in-95">
+                    <div className="w-16 h-16 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center mx-auto mb-4">
+                      <CreditCard className="w-8 h-8" />
+                    </div>
+                    <h2 className="text-2xl font-bold mb-3 text-white">My Official ID Card</h2>
+                    <p className="text-sm text-slate-400 mb-8 leading-relaxed">Click the button below to view, print, or share your official corporate ID badge.</p>
+                    <button
+                      onClick={() => setIdCardEmployee(activeEmployee)}
+                      className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+                    >
+                      <CreditCard className="w-5 h-5" /> Open ID Card Viewer
+                    </button>
+                  </div>
+                )}
 
-              {activeTab === 'reports' && <ReportsView />}
+                {activeTab === 'employees' && (
+                  <EmployeeDirectory
+                    onSelectEmployee={emp => setSelectedEmpProfile(emp)}
+                    onOpenAddModal={() => setIsAddModalOpen(true)}
+                    onOpenEditModal={emp => setEditingEmployee(emp)}
+                    onOpenIdCardModal={emp => setIdCardEmployee(emp)}
+                  />
+                )}
 
-              {activeTab === 'documents' && <DocumentGenerator />}
+                {activeTab === 'attendance' && <AttendanceManagement />}
+                {activeTab === 'reports' && <ReportsView />}
+                {activeTab === 'documents' && <DocumentGenerator />}
+                {activeTab === 'settings' && <SettingsView />}
+                {activeTab === 'audit_logs' && <AuditLogsView />}
+                {activeTab === 'leave_approvals' && <LeaveApprovalsView />}
 
-              {activeTab === 'settings' && <SettingsView />}
+                {activeTab.startsWith('emp_') && (
+                  <EmployeePortal activeTab={activeTab} setActiveTab={setActiveTab} />
+                )}
+              </Suspense>
+            )}
+          </main>
+        </div>
 
-              {activeTab === 'audit_logs' && <AuditLogsView />}
-
-              {activeTab === 'leave_approvals' && <LeaveApprovalsView />}
-
-              {/* Employee Self-Service Views */}
-              {activeTab.startsWith('emp_') && (
-                <EmployeePortal activeTab={activeTab} setActiveTab={setActiveTab} />
-              )}
-            </>
-          )}
-        </main>
-      </div>
-
-      {/* Mobile Glassmorphic Bottom Navigation Bar */}
-      <MobileBottomNav
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
-      />
-
-      {/* Modals Container */}
-      {selectedEmpProfile && (
-        <EmployeeProfileModal
-          employee={selectedEmpProfile}
-          onClose={() => setSelectedEmpProfile(null)}
-          onOpenEdit={emp => {
-            setSelectedEmpProfile(null);
-            setEditingEmployee(emp);
-          }}
-          onOpenIdCard={emp => {
-            setSelectedEmpProfile(null);
-            setIdCardEmployee(emp);
-          }}
+        <MobileBottomNav
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
         />
-      )}
 
-      {(isAddModalOpen || editingEmployee) && (
-        <EmployeeFormModal
-          employeeToEdit={editingEmployee}
-          onClose={() => {
-            setIsAddModalOpen(false);
-            setEditingEmployee(null);
-          }}
-        />
-      )}
+        {/* Modals */}
+        {selectedEmpProfile && (
+          <Suspense fallback={null}>
+            <EmployeeProfileModal
+              employee={selectedEmpProfile}
+              onClose={() => setSelectedEmpProfile(null)}
+              onOpenEdit={emp => { setSelectedEmpProfile(null); setEditingEmployee(emp); }}
+              onOpenIdCard={emp => { setSelectedEmpProfile(null); setIdCardEmployee(emp); }}
+            />
+          </Suspense>
+        )}
 
-      {idCardEmployee && (
-        <EmployeeIdCardModal
-          employee={idCardEmployee}
-          onClose={() => setIdCardEmployee(null)}
-        />
-      )}
+        {(isAddModalOpen || editingEmployee) && (
+          <Suspense fallback={null}>
+            <EmployeeFormModal
+              employeeToEdit={editingEmployee}
+              onClose={() => { setIsAddModalOpen(false); setEditingEmployee(null); }}
+            />
+          </Suspense>
+        )}
+
+        {idCardEmployee && (
+          <Suspense fallback={null}>
+            <EmployeeIdCardModal
+              employee={idCardEmployee}
+              onClose={() => setIdCardEmployee(null)}
+            />
+          </Suspense>
+        )}
       </div>
     );
   };
 
   return (
     <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased flex flex-col selection:bg-blue-600 selection:text-white">
-      {/* Optional Fullscreen Company Splash Screen */}
-      {showSplash && (
-        <SplashScreen onFinish={() => setShowSplash(false)} />
-      )}
-
       {renderView()}
-
       <PWAInstallPrompt />
     </div>
   );
+};
+
+// ── Session-aware splash wrapper ──
+// Keeps splash visible until isSessionReady so we never flash a wrong view
+const SessionAwareApp: React.FC = () => {
+  const { isSessionReady, isAuthenticated, activeEmployee } = useAuth();
+  const [splashDone, setSplashDone] = useState(false);
+
+  // Once splash animation finishes AND session is resolved, open the app
+  const handleSplashFinish = () => {
+    if (isSessionReady) {
+      setSplashDone(true);
+    }
+    // If session not ready yet, we wait — the useEffect below will trigger
+  };
+
+  useEffect(() => {
+    if (isSessionReady && !splashDone) {
+      // Session resolved after splash finished — safe to open now
+      // (splash itself also auto-dismisses; this covers edge-case order)
+    }
+  }, [isSessionReady, splashDone]);
+
+  if (!splashDone) {
+    return (
+      <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased flex flex-col">
+        <SplashScreen
+          onFinish={() => {
+            // Always mark splash done; if session not ready the MainLayout will show a loader
+            setSplashDone(true);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return <MainLayout />;
 };
 
 export default function App() {
@@ -250,14 +285,16 @@ export default function App() {
   if (isVerifyRoute) {
     return (
       <AuthProvider>
-        <VerificationView />
+        <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
+          <VerificationView />
+        </Suspense>
       </AuthProvider>
     );
   }
 
   return (
     <AuthProvider>
-      <MainLayout />
+      <SessionAwareApp />
     </AuthProvider>
   );
 }

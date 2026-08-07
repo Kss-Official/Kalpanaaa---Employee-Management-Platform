@@ -12,7 +12,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   employeeToEdit,
   onClose
 }) => {
-  const { addEmployee, updateEmployee, employees } = useAuth();
+  const { addEmployee, updateEmployee, employees, sendPasswordReset, setEmployeeInitialPassword } = useAuth();
+  const [resetSent, setResetSent] = useState(false);
 
   const isEdit = Boolean(employeeToEdit);
 
@@ -109,6 +110,18 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const handleResetPassword = async () => {
+    if (employeeToEdit?.email) {
+      const res = await sendPasswordReset(employeeToEdit.email);
+      if (res.success) {
+        setResetSent(true);
+        setTimeout(() => setResetSent(false), 3000);
+      } else {
+        setErrorMsg(res.message);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -140,6 +153,13 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
     if (isEdit && employeeToEdit) {
       await updateEmployee(employeeToEdit.id, formData);
+      if (formData.password && formData.password.trim().length >= 6) {
+        const passRes = await setEmployeeInitialPassword(formData.email, formData.password);
+        if (!passRes.success) {
+          setErrorMsg(`Profile updated, but password failed: ${passRes.message}`);
+          return;
+        }
+      }
     } else {
       const res = await addEmployee(formData as any);
       if (res && res.success === false) {
@@ -227,7 +247,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 />
               </div>
 
-              {!isEdit && (
+              {!isEdit ? (
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Account Password <span className="text-rose-500">*</span></label>
                   <input
@@ -239,6 +259,29 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                     placeholder="Min 6 characters"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                   />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Set / Update Password</label>
+                  <input
+                    type="text"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    placeholder="Enter to set initial password"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500 mb-2"
+                  />
+                  <div className="flex flex-col gap-1">
+                    <button 
+                      type="button" 
+                      onClick={handleResetPassword}
+                      className="w-full px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 text-left focus:outline-none transition-colors flex items-center justify-between text-xs"
+                    >
+                      <span className={resetSent ? 'text-emerald-400 font-bold' : ''}>{resetSent ? '✓ Reset Email Sent' : 'Or Send Password Reset Email'}</span>
+                      <Shield className="w-3.5 h-3.5 text-blue-400" />
+                    </button>
+                    <span className="text-[9px] text-slate-500 leading-tight">If they already have a password, you must use the Reset Email.</span>
+                  </div>
                 </div>
               )}
 

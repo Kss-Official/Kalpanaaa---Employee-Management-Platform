@@ -1,162 +1,121 @@
 import React, { useEffect, useState } from 'react';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
-import { useHaptic } from '../../hooks/useHaptic';
-import { animations } from '../../lib/animations';
 
 interface SplashScreenProps {
   onFinish?: () => void;
   autoCloseDelay?: number;
 }
 
-export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, autoCloseDelay = 4200 }) => {
-  const [phase, setPhase] = useState<'enter' | 'hold' | 'exit'>('enter');
-  const [pulse, setPulse] = useState(false);
-  const { triggerHaptic } = useHaptic();
+export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, autoCloseDelay = 2500 }) => {
+  const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    // Initial enter haptic
-    if (typeof window !== 'undefined') {
-      setTimeout(() => triggerHaptic('light'), 200);
-      setTimeout(() => triggerHaptic('success'), 800); // when pulse starts
-    }
-    
-    const enterTimer = setTimeout(() => { setPhase('hold'); setPulse(true); }, 800);
-    const exitTimer = setTimeout(() => setPhase('exit'), autoCloseDelay - 700);
+    const exitTimer = setTimeout(() => setVisible(false), autoCloseDelay - 500);
     const doneTimer = setTimeout(() => { if (onFinish) onFinish(); }, autoCloseDelay);
-    return () => { clearTimeout(enterTimer); clearTimeout(exitTimer); clearTimeout(doneTimer); };
-  }, [autoCloseDelay, onFinish, triggerHaptic]);
+    return () => { clearTimeout(exitTimer); clearTimeout(doneTimer); };
+  }, [autoCloseDelay, onFinish]);
 
   const handleDismiss = () => {
-    triggerHaptic('medium');
-    setPhase('exit');
-    setTimeout(() => { if (onFinish) onFinish(); }, 600);
+    setVisible(false);
+    setTimeout(() => { if (onFinish) onFinish(); }, 500);
   };
 
   return (
     <div
       onClick={handleDismiss}
       style={{
-        opacity: phase === 'exit' ? 0 : 1,
-        transition: phase === 'enter' ? 'opacity 0.8s ease-out' : phase === 'exit' ? 'opacity 0.65s ease-in' : undefined,
+        opacity: visible ? 1 : 0,
+        transition: 'opacity 0.5s ease-in-out',
       }}
-      className={`fixed inset-0 z-[9999] bg-[var(--bg-primary)] flex flex-col items-center justify-center cursor-pointer select-none overflow-hidden ${animations.tap}`}
+      className="fixed inset-0 z-[9999] bg-[var(--bg-primary)] flex flex-col items-center justify-center cursor-pointer select-none overflow-hidden"
     >
-      {/* ── Background: full-bleed dark logo tint ── */}
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `url(${kalpanaLogo})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          filter: 'brightness(0.06) blur(24px) saturate(1.8)',
-          transform: 'scale(1.08)',
-        }}
-      />
-
-      {/* ── Edge sweep glow corners ── */}
+      {/* Ambient background glow */}
       <div className="absolute inset-0 pointer-events-none">
-        {/* top-left */}
-        <div className="absolute top-0 left-0 w-64 h-64 bg-[var(--accent-blue)]/20 rounded-br-full blur-3xl" />
-        {/* bottom-right */}
-        <div className="absolute bottom-0 right-0 w-64 h-64 bg-[var(--accent-violet)]/20 rounded-tl-full blur-3xl" />
-        {/* centre ambient */}
-        <div className="absolute inset-0 bg-[var(--gradient-glow)] opacity-70" />
+        <div className="absolute top-0 left-0 w-72 h-72 bg-blue-600/15 rounded-br-full blur-3xl" />
+        <div className="absolute bottom-0 right-0 w-72 h-72 bg-violet-600/15 rounded-tl-full blur-3xl" />
       </div>
 
-      {/* ── Corner border accent lines ── */}
-      {['top-0 left-0','top-0 right-0','bottom-0 left-0','bottom-0 right-0'].map((pos, i) => (
+      {/* Corner accent lines */}
+      {(['top-0 left-0', 'top-0 right-0', 'bottom-0 left-0', 'bottom-0 right-0'] as const).map((pos, i) => (
         <div
           key={i}
           className={`absolute ${pos} w-14 h-14 pointer-events-none`}
           style={{
-            borderTop: ['top-0 left-0','top-0 right-0'].includes(pos) ? '1.5px solid rgba(59,130,246,0.45)' : 'none',
-            borderBottom: ['bottom-0 left-0','bottom-0 right-0'].includes(pos) ? '1.5px solid rgba(59,130,246,0.45)' : 'none',
-            borderLeft: ['top-0 left-0','bottom-0 left-0'].includes(pos) ? '1.5px solid rgba(59,130,246,0.45)' : 'none',
-            borderRight: ['top-0 right-0','bottom-0 right-0'].includes(pos) ? '1.5px solid rgba(59,130,246,0.45)' : 'none',
-            opacity: phase === 'hold' ? 1 : 0,
-            transition: 'opacity 0.8s ease-out',
+            borderTop: pos.includes('top') ? '1.5px solid rgba(59,130,246,0.4)' : 'none',
+            borderBottom: pos.includes('bottom') ? '1.5px solid rgba(59,130,246,0.4)' : 'none',
+            borderLeft: pos.includes('left') ? '1.5px solid rgba(59,130,246,0.4)' : 'none',
+            borderRight: pos.includes('right') ? '1.5px solid rgba(59,130,246,0.4)' : 'none',
           }}
         />
       ))}
 
-      {/* ── Pulsing ring behind logo ── */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div
-          className="w-[340px] h-[340px] rounded-full border border-[var(--accent-blue)]/20"
-          style={{
-            animation: pulse ? 'pingRing 2.4s cubic-bezier(0,0,0.2,1) infinite' : 'none',
-          }}
-        />
-        <div
-          className="absolute w-[440px] h-[440px] rounded-full border border-[var(--accent-blue)]/10"
-          style={{
-            animation: pulse ? 'pingRing 2.4s cubic-bezier(0,0,0.2,1) infinite 0.4s' : 'none',
-          }}
-        />
-      </div>
-
-      {/* ── Main logo ── */}
+      {/* Main content */}
       <div
         className="relative z-10 flex flex-col items-center gap-8"
         style={{
-          transform: phase === 'enter' ? 'scale(0.88) translateY(12px)' : 'scale(1) translateY(0)',
-          opacity: phase === 'enter' ? 0 : 1,
-          transition: 'transform 0.85s var(--ease-spring), opacity 0.85s var(--ease-smooth)',
+          animation: 'splashFadeUp 0.7s ease-out forwards',
         }}
       >
-        {/* Glowing frame around logo */}
+        {/* Logo with glow */}
         <div className="relative">
-          {/* Outer glow ring */}
           <div
-            className="absolute -inset-3 rounded-3xl"
-            style={{
-              background: 'radial-gradient(ellipse at center, rgba(59,130,246,0.22) 0%, transparent 70%)',
-              animation: pulse ? 'breathe 2.8s ease-in-out infinite' : 'none',
-            }}
+            className="absolute -inset-4 rounded-3xl"
+            style={{ background: 'radial-gradient(ellipse at center, rgba(59,130,246,0.2) 0%, transparent 70%)' }}
           />
-          {/* Subtle shimmering border */}
           <div
             className="absolute -inset-px rounded-3xl"
-            style={{
-              background: 'linear-gradient(135deg, rgba(59,130,246,0.3), transparent 40%, rgba(139,92,246,0.25))',
-            }}
+            style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.25), transparent 45%, rgba(139,92,246,0.2))' }}
           />
           <img
             src={kalpanaLogo}
-            alt="Kalpanaaa Software Solutions Pvt Ltd"
-            className="relative w-[260px] sm:w-[320px] md:w-[380px] max-w-[78vw] max-h-[55vh] object-contain rounded-3xl"
-            style={{
-              filter: 'drop-shadow(0 0 36px rgba(59,130,246,0.5)) drop-shadow(0 0 70px rgba(59,130,246,0.2))',
-            }}
+            alt="Kalpanaaa Software Solutions"
+            className="relative w-[240px] sm:w-[300px] md:w-[360px] max-w-[75vw] max-h-[50vh] object-contain rounded-3xl"
+            style={{ filter: 'drop-shadow(0 0 32px rgba(59,130,246,0.45)) drop-shadow(0 0 60px rgba(59,130,246,0.15))' }}
           />
         </div>
 
-        {/* Progress bar */}
-        <div className="w-52 sm:w-72 h-[2px] bg-[var(--border-strong)] rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full"
-            style={{
-              background: 'var(--gradient-premium)',
-              animation: `loadbar ${autoCloseDelay - 500}ms linear forwards`,
-            }}
-          />
-        </div>
+        {/* Spinner + loading bar */}
+        <div className="flex flex-col items-center gap-4">
+          {/* SVG spinner */}
+          <svg
+            className="w-8 h-8 text-blue-500"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ animation: 'spin 1s linear infinite' }}
+          >
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeOpacity="0.2" />
+            <path
+              d="M12 2a10 10 0 0 1 10 10"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
 
-        <p className="text-[10px] font-semibold tracking-[0.22em] uppercase text-[var(--text-tertiary)] animate-pulse mt-4">
-          Tap anywhere to continue
-        </p>
+          {/* Progress bar */}
+          <div className="w-48 sm:w-64 h-[2px] bg-[var(--border-strong)] rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full"
+              style={{
+                background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)',
+                animation: `loadbar ${autoCloseDelay - 400}ms linear forwards`,
+              }}
+            />
+          </div>
+
+          <p className="text-[10px] font-semibold tracking-[0.2em] uppercase text-[var(--text-tertiary)]">
+            Tap anywhere to continue
+          </p>
+        </div>
       </div>
 
       <style>{`
         @keyframes loadbar { from { width: 0% } to { width: 100% } }
-        @keyframes pingRing {
-          0% { transform: scale(0.92); opacity: 0.6; }
-          70%, 100% { transform: scale(1.18); opacity: 0; }
+        @keyframes splashFadeUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        @keyframes breathe {
-          0%, 100% { opacity: 0.6; transform: scale(0.98); }
-          50% { opacity: 1; transform: scale(1.04); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );

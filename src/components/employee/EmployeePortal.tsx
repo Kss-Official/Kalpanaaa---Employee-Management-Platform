@@ -41,7 +41,8 @@ import {
   StopCircle,
   Fingerprint,
   Loader2,
-  ChevronRight
+  ChevronRight,
+  Edit
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
@@ -293,17 +294,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
     triggerHaptic('medium');
     setActionFeedback(null);
-    // Auto-end any open break before checkout
-    if (activeBreak && todayRecord) {
-      const durationMinutes = Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 60000);
-      const existingBreaks = todayRecord.breaks || [];
-      const updatedBreaks = existingBreaks.map(b => 
-        (b.startAt === activeBreak.startAt && !b.endAt) 
-          ? { ...b, endAt: new Date().toISOString(), durationMinutes } 
-          : b
-      );
-      updateAttendanceRecord(todayRecord.id, { breaks: updatedBreaks, totalBreakMinutes: (todayRecord.totalBreakMinutes || 0) + durationMinutes });
-    }
+    
     const res = await recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     
     if (res.success) triggerHaptic('success');
