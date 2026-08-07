@@ -55,6 +55,7 @@ import { EmployeeTeamDirectory } from './EmployeeTeamDirectory';
 import { EmployeePayslips } from './EmployeePayslips';
 import { ConsentModal } from '../shared/ConsentModal';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
+import { getEmployeeDescriptor } from '../../lib/faceRecognitionEngine';
 import { BreakEntry } from '../../types';
 
 interface EmployeePortalProps {
@@ -284,7 +285,12 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     if (!hasConsent) {
       setIsConsentModalOpen(true);
     } else {
-      setIsFaceModalOpen(true);
+      const isEnrolled = getEmployeeDescriptor(activeEmployee.id) !== null;
+      if (!isEnrolled) {
+        setIsEnrollFaceModalOpen(true);
+      } else {
+        setIsFaceModalOpen(true);
+      }
     }
   };
 

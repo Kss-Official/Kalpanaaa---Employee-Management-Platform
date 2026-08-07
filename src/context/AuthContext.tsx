@@ -11,7 +11,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig } from '../lib/firebase';
-import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest } from '../types';
+import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
 import {
   INITIAL_EMPLOYEES,
   generateInitialAttendance,
@@ -127,7 +127,7 @@ interface AuthContextType {
   addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => Promise<{ success: boolean; message?: string } | Employee>;
   updateEmployee: (id: string, updates: Partial<Employee>) => void;
   deleteEmployee: (id: string) => void;
-  recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => void;
   updateSettings: (newSettings: Partial<CompanySettings>) => void;
@@ -1097,7 +1097,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newToken;
   };
 
-  const recordCheckIn = async (employeeId: string, lat?: number, lon?: number, accuracy: number = 8) => {
+  const recordCheckIn = async (employeeId: string, lat?: number, lon?: number, accuracy: number = 8, method: AttendanceMethod = 'Facial Recognition') => {
     if (!navigator.onLine) {
       return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-In blocked.' };
     }
@@ -1155,7 +1155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       checkOutAt: null,
       workingMinutes: 0,
       status: evalResult.status,
-      attendanceMethod: 'QR Code',
+      attendanceMethod: method,
 
       // Work Zone Location Snapshot fields
       officeLatitude: companyWorkZone.latitude,
