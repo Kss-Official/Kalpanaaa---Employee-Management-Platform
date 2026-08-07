@@ -128,11 +128,16 @@ export const Header: React.FC<HeaderProps> = ({
 
 
         {/* Role badge — hidden on small screens */}
-        <div className="hidden sm:flex items-center gap-1 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 text-xs">
-          <span className={`px-2 py-0.5 rounded-md text-[11px] font-extrabold border ${getRoleBadgeColor(role)}`}>
-            {getRoleLabel(role, activeEmployee?.designation)}
-          </span>
-        </div>
+        {(() => {
+          const effectiveRole = activeEmployee?.role || role;
+          return (
+            <div className="hidden sm:flex items-center gap-1 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 text-xs">
+              <span className={`px-2 py-0.5 rounded-md text-[11px] font-extrabold border ${getRoleBadgeColor(effectiveRole)}`}>
+                {getRoleLabel(effectiveRole, activeEmployee?.designation)}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Profile avatar dropdown */}
         <div className="relative" onClick={e => e.stopPropagation()}>

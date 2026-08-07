@@ -1065,6 +1065,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const updated = { ...e, ...sanitizedUpdates, updatedAt: new Date().toISOString() };
         if (activeEmployee && activeEmployee.id === id) {
           setActiveEmployee(updated);
+          if (sanitizedUpdates.role) {
+            setRole(sanitizedUpdates.role);
+          }
         }
 
         // Persist update to Firestore

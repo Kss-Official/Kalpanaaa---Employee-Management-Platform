@@ -31,10 +31,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile 
 }) => {
   const { role, logout, activeEmployee } = useAuth();
+  const effectiveRole = activeEmployee?.role || role;
 
-  const isExecutive = role === 'SUPER_ADMIN'; // CEO / CTO
-  const isHr = role === 'HR_ADMIN';
-  const isPm = role === 'PROJECT_MANAGER';
+  const isExecutive = effectiveRole === 'SUPER_ADMIN'; // CEO / CTO
+  const isHr = effectiveRole === 'HR_ADMIN';
+  const isPm = effectiveRole === 'PROJECT_MANAGER';
   const isAdmin = isExecutive || isHr;
 
   const executiveNavItems = [
