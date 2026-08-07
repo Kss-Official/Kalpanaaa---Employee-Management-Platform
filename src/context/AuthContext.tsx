@@ -140,6 +140,7 @@ interface AuthContextType {
   sendBroadcast: (title: string, message: string) => Promise<void>;
   markAllNotificationsRead: () => void;
   updateCurrentEmployeePassword: (newPassword: string) => Promise<{ success: boolean; message: string }>;
+  requestMobilePushPermission: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -1460,6 +1461,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // ── Root-Level FCM Mobile Push Token Registration ──
+  useEffect(() => {
+    if (isAuthenticated && activeEmployee) {
+      if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+          registerFcmToken(activeEmployee.id, activeEmployee.role);
+        } else if (Notification.permission !== 'denied') {
+          Notification.requestPermission().then(permission => {
+            if (permission === 'granted') {
+              registerFcmToken(activeEmployee.id, activeEmployee.role);
+            }
+          });
+        }
+      }
+    }
+  }, [isAuthenticated, activeEmployee?.id, activeEmployee?.role]);
+
+  const requestMobilePushPermission = async (): Promise<boolean> => {
+    if (!('Notification' in window)) return false;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted' && activeEmployee) {
+        await registerFcmToken(activeEmployee.id, activeEmployee.role);
+        return true;
+      }
+      return permission === 'granted';
+    } catch {
+      return false;
+    }
+  };
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -1498,7 +1530,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setEmployeeInitialPassword,
       sendBroadcast,
       markAllNotificationsRead,
-      updateCurrentEmployeePassword
+      updateCurrentEmployeePassword,
+      requestMobilePushPermission
     }}>
       {children}
     </AuthContext.Provider>
