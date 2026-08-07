@@ -1344,6 +1344,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         employeeName={activeEmployee.fullName}
         employeeId={activeEmployee.id}
         profilePhotoUrl={activeEmployee.profilePhotoUrl}
+        cloudDescriptor={activeEmployee.faceDescriptor}
       />
 
       {/* Diagnostic Facial Recognition Accuracy Test Modal (Zero Shift / Attendance Impact) */}
@@ -1357,6 +1358,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         }}
         employeeName={activeEmployee.fullName}
         employeeId={activeEmployee.id}
+        cloudDescriptor={activeEmployee.faceDescriptor}
         isTestMode={true}
       />
 
@@ -1365,14 +1367,22 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         isOpen={isEnrollFaceModalOpen}
         onClose={() => setIsEnrollFaceModalOpen(false)}
         onSuccess={() => {
+          executeCheckInProcess();
+        }}
+        onEnrollSuccess={(descriptorArray) => {
           triggerHaptic('success');
-          updateEmployee(activeEmployee.id, { isFaceEnrolled: true, faceEnrolledAt: new Date().toISOString() });
-          setActionFeedback({ success: true, message: '✓ Face Biometric Template Successfully Enrolled & Saved!' });
+          updateEmployee(activeEmployee.id, {
+            isFaceEnrolled: true,
+            faceEnrolledAt: new Date().toISOString(),
+            faceDescriptor: descriptorArray
+          });
+          setActionFeedback({ success: true, message: '✓ Face Biometric Template Successfully Enrolled & Synced to Cloud DB!' });
           setTimeout(() => setActionFeedback(null), 3500);
         }}
         employeeName={activeEmployee.fullName}
         employeeId={activeEmployee.id}
         profilePhotoUrl={activeEmployee.profilePhotoUrl}
+        cloudDescriptor={activeEmployee.faceDescriptor}
         isEnrollmentMode={true}
       />
 

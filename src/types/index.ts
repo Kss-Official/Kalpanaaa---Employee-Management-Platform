@@ -72,6 +72,7 @@ export interface Employee {
   // Facial Biometrics
   isFaceEnrolled?: boolean;
   faceEnrolledAt?: string;
+  faceDescriptor?: number[];
 
   // System
   role: UserRole;

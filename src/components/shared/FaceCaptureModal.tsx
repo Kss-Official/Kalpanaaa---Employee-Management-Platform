@@ -16,9 +16,11 @@ interface FaceCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  onEnrollSuccess?: (descriptorArray: number[]) => void;
   employeeName?: string;
   employeeId?: string;
   profilePhotoUrl?: string;
+  cloudDescriptor?: number[];
   isTestMode?: boolean;
   isEnrollmentMode?: boolean;
 }
@@ -27,9 +29,11 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  onEnrollSuccess,
   employeeName = 'Employee',
   employeeId = 'emp-001',
   profilePhotoUrl,
+  cloudDescriptor,
   isTestMode = false,
   isEnrollmentMode = false
 }) => {
@@ -123,7 +127,9 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
 
   // Handle Enrollment Action
   const handlePerformEnrollment = (scannedDescriptor: Float32Array) => {
+    const descriptorArray = Array.from(scannedDescriptor);
     saveEmployeeDescriptor(employeeId, scannedDescriptor);
+    onEnrollSuccess?.(descriptorArray);
     setIsEnrolled(true);
     setCurrentModeIsEnroll(false);
     setConfidencePercent(99);
@@ -172,7 +178,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
             }
 
             // Mode B: Verification Mode -> Match against registered face descriptor or profile photo
-            const match = verifyFaceAgainstEnrolled(scan.descriptor, employeeId, profileDescriptor);
+            const match = verifyFaceAgainstEnrolled(scan.descriptor, employeeId, profileDescriptor, cloudDescriptor);
 
             if (!match.enrolled) {
               // Not enrolled yet!

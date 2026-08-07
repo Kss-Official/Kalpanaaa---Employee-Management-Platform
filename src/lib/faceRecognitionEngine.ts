@@ -134,15 +134,22 @@ export const saveEmployeeDescriptor = (employeeId: string, descriptor: Float32Ar
   localStorage.setItem(`${STORAGE_PREFIX}${employeeId}`, JSON.stringify(arrayData));
 };
 
-export const getEmployeeDescriptor = (employeeId: string): Float32Array | null => {
+export const getEmployeeDescriptor = (employeeId: string, cloudDescriptor?: number[]): Float32Array | null => {
   const stored = localStorage.getItem(`${STORAGE_PREFIX}${employeeId}`);
-  if (!stored) return null;
-  try {
-    const arrayData = JSON.parse(stored) as number[];
-    return new Float32Array(arrayData);
-  } catch {
-    return null;
+  if (stored) {
+    try {
+      const arrayData = JSON.parse(stored) as number[];
+      return new Float32Array(arrayData);
+    } catch {}
   }
+  
+  if (cloudDescriptor && cloudDescriptor.length > 0) {
+    // Restore from Cloud Firestore backup!
+    saveEmployeeDescriptor(employeeId, new Float32Array(cloudDescriptor));
+    return new Float32Array(cloudDescriptor);
+  }
+
+  return null;
 };
 
 export const clearEmployeeDescriptor = (employeeId: string): void => {
@@ -163,9 +170,10 @@ export interface MatchVerificationResult {
 export const verifyFaceAgainstEnrolled = (
   scannedDescriptor: Float32Array,
   employeeId: string,
-  profilePhotoDescriptor?: Float32Array | null
+  profilePhotoDescriptor?: Float32Array | null,
+  cloudDescriptor?: number[]
 ): MatchVerificationResult => {
-  let referenceDescriptor = getEmployeeDescriptor(employeeId);
+  let referenceDescriptor = getEmployeeDescriptor(employeeId, cloudDescriptor);
   let isProfilePhoto = false;
 
   // Fallback to Profile Photo descriptor if no local biometric enrolled yet
