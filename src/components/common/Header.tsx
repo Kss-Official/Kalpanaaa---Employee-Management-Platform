@@ -11,6 +11,7 @@ import {
   Download
 } from 'lucide-react';
 import { UserRole } from '../../types';
+import { NotificationBell } from './NotificationBell';
 
 interface HeaderProps {
   onOpenScanner?: () => void;
@@ -60,15 +61,17 @@ export const Header: React.FC<HeaderProps> = ({
 
   const getRoleBadgeColor = (r: UserRole) => {
     switch (r) {
-      case 'SUPER_ADMIN': return 'bg-purple-500/20 text-purple-300 border-purple-500/40';
-      case 'HR_ADMIN':    return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
-      case 'EMPLOYEE':    return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+      case 'SUPER_ADMIN':    return 'bg-purple-500/20 text-purple-300 border-purple-500/40';
+      case 'HR_ADMIN':       return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+      case 'PROJECT_MANAGER': return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+      case 'EMPLOYEE':       return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
     }
   };
 
   const getRoleLabel = (r: UserRole, designation?: string) => {
     if (r === 'SUPER_ADMIN') return designation?.includes('CEO') ? 'CEO' : 'CTO';
     if (r === 'HR_ADMIN') return 'HR Lead';
+    if (r === 'PROJECT_MANAGER') return 'PM';
     return 'Employee';
   };
 
@@ -119,6 +122,9 @@ export const Header: React.FC<HeaderProps> = ({
           <Clock className="w-3 h-3 text-slate-500" />
           <span className="font-bold text-white">{timeStr}</span>
         </div>
+
+        {/* Notification Bell — visible for all authenticated roles */}
+        <NotificationBell />
 
 
         {/* Role badge — hidden on small screens */}

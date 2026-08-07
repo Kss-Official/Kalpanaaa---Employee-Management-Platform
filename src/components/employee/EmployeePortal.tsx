@@ -42,7 +42,8 @@ import {
   Fingerprint,
   Loader2,
   ChevronRight,
-  Edit
+  Edit,
+  ScanFace
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
@@ -52,6 +53,8 @@ import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
 import { EmployeeTeamDirectory } from './EmployeeTeamDirectory';
 import { EmployeePayslips } from './EmployeePayslips';
+import { ConsentModal } from '../shared/ConsentModal';
+import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 import { BreakEntry } from '../../types';
 
 interface EmployeePortalProps {
@@ -86,6 +89,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [gpsLocation, setGpsLocation] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Biometric & Face Modal state
+  const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
+  const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
+  const [isTestFaceModalOpen, setIsTestFaceModalOpen] = useState(false);
 
   // Profile Edit State
   const [profilePhoto, setProfilePhoto] = useState(activeEmployee?.profilePhotoUrl || AVATAR_PRESETS[0]);
@@ -269,13 +277,19 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     );
   }
 
-  const handleSelfCheckIn = async () => {
+  const handleSelfCheckIn = () => {
     triggerHaptic('medium');
+    const hasConsent = localStorage.getItem('kss_biometric_consent') === 'true';
+    if (!hasConsent) {
+      setIsConsentModalOpen(true);
+    } else {
+      setIsFaceModalOpen(true);
+    }
+  };
+
+  const executeCheckInProcess = async () => {
     setIsCheckingIn(true);
     setActionFeedback(null);
-    
-    // Simulate loading for the animation requirement
-    await new Promise(resolve => setTimeout(resolve, 800));
     
     const res = await recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     if (res.success && res.record && isWfh) {
@@ -1025,6 +1039,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       <Camera className="w-3.5 h-3.5 text-blue-400" />
                       <span>{isCapturingCamera ? 'Capturing Snapshot...' : 'Take Camera Photo'}</span>
                     </button>
+
+                    {/* Test Facial Recognition Accuracy Button (Zero Attendance Risk) */}
+                    <button
+                      type="button"
+                      onClick={() => setIsTestFaceModalOpen(true)}
+                      className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 font-extrabold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-sm"
+                      title="Test live camera face matching accuracy without affecting attendance status"
+                    >
+                      <ScanFace className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>🔍 Test Facial Recognition Accuracy</span>
+                    </button>
                   </div>
 
                   {/* Preset Avatars Selection */}
@@ -1276,6 +1301,47 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
           </form>
         </div>
       )}
+
+      {/* Biometric Consent Modal */}
+      <ConsentModal
+        isOpen={isConsentModalOpen}
+        onConsent={() => {
+          localStorage.setItem('kss_biometric_consent', 'true');
+          setIsConsentModalOpen(false);
+          setIsFaceModalOpen(true);
+        }}
+        onDecline={() => {
+          setIsConsentModalOpen(false);
+          executeCheckInProcess();
+        }}
+      />
+
+      {/* Face Capture Verification Modal */}
+      <FaceCaptureModal
+        isOpen={isFaceModalOpen}
+        onClose={() => setIsFaceModalOpen(false)}
+        onSuccess={() => {
+          executeCheckInProcess();
+        }}
+        employeeName={activeEmployee.fullName}
+        employeeId={activeEmployee.id}
+        profilePhotoUrl={activeEmployee.profilePhotoUrl}
+      />
+
+      {/* Diagnostic Facial Recognition Accuracy Test Modal (Zero Shift / Attendance Impact) */}
+      <FaceCaptureModal
+        isOpen={isTestFaceModalOpen}
+        onClose={() => setIsTestFaceModalOpen(false)}
+        onSuccess={() => {
+          triggerHaptic('success');
+          setActionFeedback({ success: true, message: '✓ Live Facial Recognition Accuracy Test Passed (95%+ Confidence)' });
+          setTimeout(() => setActionFeedback(null), 3000);
+        }}
+        employeeName={activeEmployee.fullName}
+        employeeId={activeEmployee.id}
+        profilePhotoUrl={activeEmployee.profilePhotoUrl}
+        isTestMode={true}
+      />
 
     </div>
   );

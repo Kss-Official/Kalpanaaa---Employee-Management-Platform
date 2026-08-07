@@ -1,4 +1,4 @@
-export type UserRole = 'SUPER_ADMIN' | 'HR_ADMIN' | 'EMPLOYEE';
+export type UserRole = 'SUPER_ADMIN' | 'HR_ADMIN' | 'PROJECT_MANAGER' | 'EMPLOYEE';
 
 export type EmploymentType = 'Full-Time' | 'Part-Time' | 'Contract' | 'Intern';
 
@@ -25,9 +25,14 @@ export interface LeaveRequest {
   requestDate: string;
   reviewedBy?: string;
   reviewNotes?: string;
+  // PM Pipeline fields
+  pmRecommendation?: 'Approved' | 'Rejected';
+  pmNotes?: string;
+  pmReviewedBy?: string;
+  pmReviewedAt?: string;
 }
 
-export type AttendanceMethod = 'QR Code' | 'Manual Admin' | 'Self Portal' | 'Biometric';
+export type AttendanceMethod = 'QR Code' | 'Manual Admin' | 'Self Portal' | 'Biometric' | 'Facial Recognition';
 
 export interface Employee {
   id: string; // Firestore document ID
@@ -63,6 +68,10 @@ export interface Employee {
   skills?: string[];
   preferredShift?: string;
   linkedinUrl?: string;
+
+  // Facial Biometrics
+  isFaceEnrolled?: boolean;
+  faceEnrolledAt?: string;
 
   // System
   role: UserRole;
@@ -172,4 +181,67 @@ export interface DocumentTemplate {
   description: string;
   category: 'HR' | 'Attendance' | 'ID Card' | 'Certification';
   contentMarkdown: string;
+}
+
+// PM & Project Models
+export type ProjectStatus = 'Not Started' | 'In Progress' | 'In Review' | 'Completed' | 'On Track' | 'At Risk' | 'Delayed';
+export type TaskPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
+export type TaskStatus = 'Backlog' | 'To Do' | 'In Progress' | 'In Review' | 'Done';
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  client?: string;
+  startDate: string;
+  deadline: string;
+  status: ProjectStatus;
+  progressPercent: number;
+  teamMemberIds: string[];
+  managerId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectTask {
+  id: string;
+  projectId: string;
+  projectName: string;
+  title: string;
+  description: string;
+  assigneeId: string;
+  assigneeName: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  dueDate: string;
+  estimatedHours?: number;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OneOnOneNote {
+  id: string;
+  employeeId: string;
+  managerId: string;
+  date: string;
+  agenda: string;
+  notes: string;
+  actionItems: string[];
+  createdAt: string;
+}
+
+export interface SalaryDisbursement {
+  id: string;
+  month: string; // e.g. "2026-07"
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  baseSalary: number;
+  allowances: number;
+  deductions: number;
+  netPay: number;
+  daysWorked: number;
+  status: 'Draft' | 'Approved' | 'Paid';
+  processedAt?: string;
 }

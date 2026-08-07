@@ -26,6 +26,14 @@ const LeaveApprovalsView   = lazy(() => import('./components/admin/LeaveApproval
 const EmployeePortal       = lazy(() => import('./components/employee/EmployeePortal').then(m => ({ default: m.EmployeePortal })));
 const VerificationView     = lazy(() => import('./components/public/VerificationView').then(m => ({ default: m.VerificationView })));
 
+// HR & PM Portal Lazy Components
+const HRDashboard          = lazy(() => import('./components/hr/HRDashboard').then(m => ({ default: m.HRDashboard })));
+const HRLeaveWfhApprovals  = lazy(() => import('./components/hr/HRLeaveWfhApprovals').then(m => ({ default: m.HRLeaveWfhApprovals })));
+const HRPayrollView        = lazy(() => import('./components/hr/HRPayrollView').then(m => ({ default: m.HRPayrollView })));
+const PMDashboard          = lazy(() => import('./components/pm/PMDashboard').then(m => ({ default: m.PMDashboard })));
+const PMProjectsView       = lazy(() => import('./components/pm/PMProjectsView').then(m => ({ default: m.PMProjectsView })));
+const PMTeamPerformance    = lazy(() => import('./components/pm/PMTeamPerformance').then(m => ({ default: m.PMTeamPerformance })));
+
 // Minimal spinner used as Suspense fallback inside the app (not a splash)
 const ViewLoader = () => (
   <div className="flex items-center justify-center h-64 w-full">
@@ -70,8 +78,15 @@ const MainLayout: React.FC = () => {
   // Strict role-based tab routing
   useEffect(() => {
     if (role === 'SUPER_ADMIN' || role === 'HR_ADMIN') {
+      // Admin roles: force away from employee-only tabs on role change
       if (activeTab.startsWith('emp_')) setActiveTab('dashboard');
+    } else if (role === 'PROJECT_MANAGER') {
+      // PM can access pm_* tabs and their personal emp_ workspace
+      if (!activeTab.startsWith('emp_') && !activeTab.startsWith('pm_')) {
+        setActiveTab('pm_dashboard');
+      }
     } else {
+      // Employee: can only access emp_ tabs
       if (!activeTab.startsWith('emp_')) setActiveTab('emp_dashboard');
     }
   }, [role]);
@@ -95,7 +110,7 @@ const MainLayout: React.FC = () => {
     }
 
     return (
-      <div className="flex-1 flex flex-col relative w-full h-full">
+      <div className="flex-1 flex flex-col relative w-full h-full overflow-hidden">
         <Header
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           isMobileSidebarOpen={isMobileSidebarOpen}
@@ -103,7 +118,7 @@ const MainLayout: React.FC = () => {
           onShowSplash={() => {}}
         />
 
-        <div className="flex-1 flex w-full max-w-[1700px] mx-auto relative">
+        <div className="flex-1 flex w-full max-w-[1700px] mx-auto relative h-full overflow-hidden">
           <Sidebar
             activeTab={activeTab}
             setActiveTab={setActiveTab}
@@ -111,7 +126,7 @@ const MainLayout: React.FC = () => {
             onCloseMobile={() => setIsMobileSidebarOpen(false)}
           />
 
-          <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto">
+          <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto h-full">
             {!activeTab.startsWith('emp_') && role === 'EMPLOYEE' ? (
               <div className="bg-slate-900 border border-rose-900/50 rounded-3xl p-8 max-w-2xl mx-auto my-12 text-center space-y-5 shadow-2xl">
                 <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
@@ -134,11 +149,22 @@ const MainLayout: React.FC = () => {
             ) : (
               <Suspense fallback={<ViewLoader />}>
                 {activeTab === 'dashboard' && (
-                  <DashboardView
-                    onNavigateTab={tab => setActiveTab(tab)}
-                    onOpenAddEmployee={() => setIsAddModalOpen(true)}
-                  />
+                  role === 'HR_ADMIN' ? (
+                    <HRDashboard onNavigateTab={tab => setActiveTab(tab)} />
+                  ) : role === 'PROJECT_MANAGER' ? (
+                    <PMDashboard onNavigateTab={tab => setActiveTab(tab)} />
+                  ) : (
+                    <DashboardView
+                      onNavigateTab={tab => setActiveTab(tab)}
+                      onOpenAddEmployee={() => setIsAddModalOpen(true)}
+                    />
+                  )
                 )}
+
+                {activeTab === 'hr_payroll' && <HRPayrollView />}
+                {activeTab === 'pm_dashboard' && <PMDashboard onNavigateTab={tab => setActiveTab(tab)} />}
+                {activeTab === 'pm_projects' && <PMProjectsView />}
+                {activeTab === 'pm_team' && <PMTeamPerformance />}
 
                 {activeTab === 'my_id_card' && (
                   <div className="flex flex-col items-center justify-center p-8 bg-slate-900 rounded-3xl border border-slate-800 shadow-xl mt-12 mx-auto max-w-lg text-center animate-in fade-in zoom-in-95">
@@ -172,7 +198,9 @@ const MainLayout: React.FC = () => {
                 {activeTab === 'documents' && <DocumentGenerator />}
                 {activeTab === 'settings' && <SettingsView />}
                 {activeTab === 'audit_logs' && <AuditLogsView />}
-                {activeTab === 'leave_approvals' && <LeaveApprovalsView />}
+                {activeTab === 'leave_approvals' && (
+                  role === 'HR_ADMIN' ? <HRLeaveWfhApprovals /> : <LeaveApprovalsView />
+                )}
 
                 {activeTab.startsWith('emp_') && (
                   <EmployeePortal activeTab={activeTab} setActiveTab={setActiveTab} />

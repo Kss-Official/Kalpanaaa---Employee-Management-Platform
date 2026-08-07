@@ -21,7 +21,7 @@ import {
 import { initializeApp } from 'firebase/app';
 import { evaluateAttendanceScan, calculateGpsDistanceMeters } from '../lib/attendanceEngine';
 import { fetchAbsoluteTime } from '../lib/absoluteTime';
-import { sendDiscordAlert } from '../lib/discord';
+import { sendKssNotification, sendAdminBroadcast, registerFcmToken, KssNotification } from '../lib/notifications';
 
 const generateDeviceFingerprint = () => {
   return btoa(`${navigator.userAgent}|${screen.width}x${screen.height}|${navigator.language}|${new Date().getTimezoneOffset()}`);
@@ -115,6 +115,8 @@ interface AuthContextType {
   settings: CompanySettings;
   companyWorkZone: WorkZone;
   leaveRequests: LeaveRequest[];
+  notifications: KssNotification[];
+  unreadNotificationCount: number;
 
   // Actions
   submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => void;
@@ -135,6 +137,8 @@ interface AuthContextType {
   regenerateQrToken: (employeeId: string) => string;
   sendPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
   setEmployeeInitialPassword: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
+  sendBroadcast: (title: string, message: string) => Promise<void>;
+  markAllNotificationsRead: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -224,6 +228,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Notifications state — real-time feed from Firestore
+  const [notifications, setNotifications] = useState<KssNotification[]>([]);
+  const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('kss_v1_read_notifs');
+    return new Set(saved ? JSON.parse(saved) : []);
+  });
+
   // Always keep the ref in sync with state
   useEffect(() => {
     employeesRef.current = employees;
@@ -242,6 +253,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, 500);
     return () => clearTimeout(handler);
   }, [employees, attendance, auditLogs, settings, companyWorkZone, leaveRequests]);
+
+  // Real-time Firestore listener for KSS notifications
+  useEffect(() => {
+    if (!isFirestoreConnected) return;
+
+    const q = (collection as any)(db, 'notifications');
+    let unsubscribe: () => void = () => {};
+    
+    import('firebase/firestore').then(({ query, orderBy, limit, onSnapshot }) => {
+      const notifQuery = query(
+        collection(db, 'notifications'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+      
+      unsubscribe = onSnapshot(notifQuery, (snapshot: any) => {
+        const notifs: KssNotification[] = snapshot.docs.map((d: any) => ({
+          id: d.id,
+          ...d.data(),
+          createdAt: d.data().createdAt?.toDate?.()?.toISOString() ?? new Date().toISOString()
+        }));
+        setNotifications(notifs);
+      }, (err: any) => {
+        console.warn('[Notifications] Listener error:', err);
+      });
+    });
+    
+    return () => unsubscribe();
+  }, [isFirestoreConnected]);
+
+  // Register FCM token when user logs in and Firestore is connected
+  useEffect(() => {
+    if (isAuthenticated && activeEmployee && isFirestoreConnected) {
+      registerFcmToken(activeEmployee.id, activeEmployee.role).catch(() => {});
+    }
+  }, [isAuthenticated, activeEmployee?.id, isFirestoreConnected]);
 
   // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
   useEffect(() => {
@@ -729,10 +776,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       handleFirestoreError(err, OperationType.WRITE, `auditLogs/${newLog.id}`);
     });
 
-    // Discord alerts for major events
-    const majorEvents = ['EMPLOYEE_CREATED', 'EMPLOYEE_DELETED', 'USER_SIGNUP', 'USER_LOGIN', 'ATTENDANCE_CHECKIN', 'ATTENDANCE_CHECKOUT', 'ATTENDANCE_BREAK_START', 'ATTENDANCE_BREAK_END'];
-    if (majorEvents.includes(action)) {
-      sendDiscordAlert(`**Event:** ${action}\n**Target:** ${target}\n**Details:** ${details}\n**By:** ${newLog.actorName}`);
+    // Firebase notifications for major events
+    const notificationMap: Record<string, { title: string }> = {
+      'EMPLOYEE_CREATED':        { title: '👤 New Employee Added' },
+      'EMPLOYEE_DELETED':        { title: '🗑️ Employee Removed' },
+      'USER_LOGIN':              { title: '🔐 Employee Login' },
+      'USER_LOGOUT':             { title: '🚪 Employee Logout' },
+      'ATTENDANCE_CHECKIN':      { title: '🟢 Check-In Recorded' },
+      'ATTENDANCE_CHECKOUT':     { title: '🔴 Check-Out Recorded' },
+      'ATTENDANCE_BREAK_START':  { title: '🟡 Break Started' },
+      'ATTENDANCE_BREAK_END':    { title: '🟡 Break Ended' },
+      'LEAVE_APPROVED':          { title: '✅ Leave Approved' },
+      'LEAVE_REJECTED':          { title: '❌ Leave Rejected' },
+      'PAYROLL_RUN':             { title: '💰 Payroll Run' },
+    };
+    const notifConfig = notificationMap[action];
+    if (notifConfig) {
+      sendKssNotification(
+        action as any,
+        notifConfig.title,
+        `${details} — by ${newLog.actorName}`,
+        { actorId: newLog.actorId, actorName: newLog.actorName }
+      );
     }
   };
 
@@ -1337,6 +1402,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addAuditLog('SYSTEM_RESET', 'Database', 'Re-seeded system with demo enterprise workforce dataset');
   };
 
+  // ── Admin Broadcast: send one-click custom notification to all employees ──
+  const sendBroadcast = async (title: string, message: string): Promise<void> => {
+    if (!activeEmployee) return;
+    await sendAdminBroadcast(title, message, activeEmployee.id, activeEmployee.fullName);
+    addAuditLog('ADMIN_BROADCAST', 'All Employees', `Broadcast sent: "${title}" — ${message}`);
+  };
+
+  // ── Mark all visible notifications as read ──
+  const markAllNotificationsRead = () => {
+    const allIds = notifications.map(n => n.id).filter(Boolean) as string[];
+    const newSet = new Set([...Array.from(readNotificationIds), ...allIds]);
+    setReadNotificationIds(newSet);
+    localStorage.setItem('kss_v1_read_notifs', JSON.stringify(Array.from(newSet)));
+  };
+
+  const unreadNotificationCount = notifications.filter(
+    n => n.id && !readNotificationIds.has(n.id)
+  ).length;
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -1353,6 +1437,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       settings,
       companyWorkZone,
       leaveRequests,
+      notifications,
+      unreadNotificationCount,
       loginWithEmail,
       quickDemoLogin,
       logout,
@@ -1370,7 +1456,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       resetToDemoData,
       regenerateQrToken,
       sendPasswordReset,
-      setEmployeeInitialPassword
+      setEmployeeInitialPassword,
+      sendBroadcast,
+      markAllNotificationsRead
     }}>
       {children}
     </AuthContext.Provider>

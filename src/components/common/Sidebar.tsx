@@ -13,7 +13,8 @@ import {
   CreditCard,
   FolderLock,
   LogOut,
-  X
+  X,
+  Banknote
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const isExecutive = role === 'SUPER_ADMIN'; // CEO / CTO
   const isHr = role === 'HR_ADMIN';
+  const isPm = role === 'PROJECT_MANAGER';
   const isAdmin = isExecutive || isHr;
 
   const executiveNavItems = [
@@ -48,27 +50,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const hrNavItems = [
-    { id: 'dashboard', label: 'Workspace Overview', icon: LayoutDashboard },
+    { id: 'dashboard', label: 'HR Control Room', icon: LayoutDashboard },
     { id: 'employees', label: 'Team Directory', icon: Users },
-    { id: 'my_id_card', label: 'My ID Card (QR/Barcode)', icon: CreditCard },
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
-    { id: 'reports', label: 'Reports & Issuance', icon: FileSpreadsheet },
-    { id: 'leave_approvals', label: 'Leave & WFH Sanctions', icon: FileText },
-    { id: 'documents', label: 'Document Generator', icon: FileText },
+    { id: 'leave_approvals', label: 'Leave & WFH Inbox', icon: FileText },
+    { id: 'hr_payroll', label: 'Salary Disbursement', icon: Banknote },
+    { id: 'reports', label: 'Reports & Intelligence', icon: FileSpreadsheet },
     { id: 'settings', label: 'Policy & Rules', icon: Settings },
-    { id: 'audit_logs', label: 'Audit Trail', icon: ShieldCheck },
+  ];
+
+  const pmNavItems = [
+    { id: 'pm_dashboard', label: 'PM Control Center', icon: LayoutDashboard },
+    { id: 'pm_projects', label: 'Projects & Kanban', icon: FolderLock },
+    { id: 'pm_team', label: 'Team Performance & 1:1s', icon: Users },
+    { id: 'emp_dashboard', label: 'My Personal Workspace', icon: UserCheck },
   ];
 
   const employeeNavItems = [
     { id: 'emp_dashboard', label: 'My Workspace', icon: LayoutDashboard },
     { id: 'emp_attendance', label: 'My Attendance', icon: UserCheck },
     { id: 'emp_leave', label: 'My Leave & WFH', icon: CalendarCheck2 },
+    { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },
     { id: 'emp_qr', label: 'Barcode & QR Printing', icon: CreditCard },
     { id: 'emp_directory', label: 'Team Directory', icon: Users },
     { id: 'emp_profile', label: 'My Profile', icon: UserCheck },
   ];
 
-  const navItems = isExecutive ? executiveNavItems : isHr ? hrNavItems : employeeNavItems;
+  const navItems = isExecutive ? executiveNavItems : isHr ? hrNavItems : isPm ? pmNavItems : employeeNavItems;
 
   const handleSelectTab = (id: string) => {
     setActiveTab(id);
@@ -89,8 +97,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside className={`
-        fixed md:sticky top-0 left-0 bottom-0 inset-y-0 z-50
-        w-72 md:w-64 h-screen h-[100dvh] bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-800
+        fixed md:sticky top-0 left-0 z-50
+        w-72 md:w-64 h-full bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-800
         transition-transform duration-300 ease-in-out
         ${isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:translate-x-0'}
       `}>
