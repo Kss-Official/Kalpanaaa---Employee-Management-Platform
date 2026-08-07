@@ -139,11 +139,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
 
         {/* Bottom Actions Area */}
-        <div className="p-3 border-t border-slate-800 space-y-2">
+        <div className="p-3 border-t border-slate-800">
           {/* Sign Out Button in Sidebar */}
           <button
             onClick={() => logout()}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-900/30 transition-all cursor-pointer"
+            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-all cursor-pointer"
           >
             <div className="flex items-center gap-2.5">
               <LogOut className="w-4 h-4 text-rose-400" />
@@ -151,12 +151,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <span className="text-[10px] bg-rose-500/10 px-1.5 py-0.5 rounded-md font-mono">Exit</span>
           </button>
-
-          {/* Security Banner */}
-          <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-400 text-[11px] leading-relaxed">
-            <div className="font-semibold text-slate-200 text-[10px]">Enterprise Rules Active</div>
-            <p className="text-[10px] text-slate-500">Firestore & Auth Protected</p>
-          </div>
         </div>
       </aside>
     </>

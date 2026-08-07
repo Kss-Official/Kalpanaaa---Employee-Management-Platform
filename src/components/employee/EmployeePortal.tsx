@@ -50,6 +50,8 @@ import { generateEmployeeQrToken, calculateGpsDistanceMeters } from '../../lib/a
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
+import { EmployeeTeamDirectory } from './EmployeeTeamDirectory';
+import { EmployeePayslips } from './EmployeePayslips';
 import { BreakEntry } from '../../types';
 
 interface EmployeePortalProps {
@@ -93,6 +95,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [dateOfBirth, setDateOfBirth] = useState(activeEmployee?.dateOfBirth || '');
   const [permanentAddress, setPermanentAddress] = useState(activeEmployee?.permanentAddress || '');
   const [currentAddress, setCurrentAddress] = useState(activeEmployee?.currentAddress || '');
+  const [sameAsPermanentAddress, setSameAsPermanentAddress] = useState(false);
+
+  const handleSameAsPermanentToggle = (checked: boolean) => {
+    setSameAsPermanentAddress(checked);
+    if (checked) {
+      setCurrentAddress(permanentAddress);
+    }
+  };
   const [city, setCity] = useState(activeEmployee?.city || '');
   const [state, setState] = useState(activeEmployee?.state || '');
   const [postalCode, setPostalCode] = useState(activeEmployee?.postalCode || '');
@@ -145,9 +155,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Break live timer ticker
   useEffect(() => {
     if (!activeBreak) { setBreakElapsedSec(0); return; }
-    const interval = setInterval(() => {
-      setBreakElapsedSec(Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 1000));
-    }, 1000);
+    const calc = () => {
+      setBreakElapsedSec(Math.max(0, Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 1000)));
+    };
+    calc();
+    const interval = setInterval(calc, 1000);
     return () => clearInterval(interval);
   }, [activeBreak]);
 
@@ -324,7 +336,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const handleEndBreak = () => {
     if (!activeBreak || !todayRecord) return;
     const endAt = new Date().toISOString();
-    const durationMinutes = Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 60000);
+    const durationMinutes = Math.round((Date.now() - new Date(activeBreak.startAt).getTime()) / 60000);
     
     const existingBreaks = todayRecord.breaks || [];
     const updatedBreaks = existingBreaks.map(b => 
@@ -585,7 +597,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       <CheckCircle2 className="w-12 h-12 mb-3" strokeWidth={2} />
                       <span className="font-bold text-sm tracking-wide">Checked In</span>
                       <span className="text-[10px] font-mono mt-1 opacity-80">
-                        {new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(todayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                       </span>
                     </button>
                   ) : (
@@ -604,11 +616,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                          </button>
                        ) : (
                          <>
-                           <button onClick={() => handleStartBreak('Tea Break')} className={`px-4 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-semibold text-xs shadow-md ${animations.tap}`}>
-                             🍵 Tea
+                           <button onClick={() => handleStartBreak('Tea Break')} className={`px-5 py-2.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 font-bold text-sm shadow-md transition-colors ${animations.tap}`}>
+                             🍵 Tea Break
                            </button>
-                           <button onClick={() => handleStartBreak('Lunch Break')} className={`px-4 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-semibold text-xs shadow-md ${animations.tap}`}>
-                             🍽️ Lunch
+                           <button onClick={() => handleStartBreak('Lunch Break')} className={`px-5 py-2.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 hover:bg-rose-500/30 font-bold text-sm shadow-md transition-colors ${animations.tap}`}>
+                             🍽️ Lunch Break
                            </button>
                          </>
                        )}
@@ -677,132 +689,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             </div>
           </div>
 
-          {/* Section 2: Productivity & Workflow */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Current Tasks */}
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
-              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-slate-500" /> Current Tasks
-              </h3>
-              <div className="space-y-3">
-                {[
-                  { title: "Review PR #4812 - Core API Optimization", project: "Infrastructure", status: "In Progress" },
-                  { title: "Design System Architecture Document", project: "Platform", status: "To Do" },
-                  { title: "Q3 Roadmap Planning Sync", project: "Management", status: "Completed" }
-                ].map((task, i) => (
-                  <div key={i} className="flex items-start justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/40 hover:border-slate-700 transition-colors cursor-default">
-                    <div>
-                      <p className="text-sm font-medium text-white mb-0.5">{task.title}</p>
-                      <span className="text-[10px] font-mono text-slate-500">{task.project}</span>
-                    </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                      task.status === 'Completed' ? 'text-emerald-400 border-emerald-400/20 bg-emerald-400/10' :
-                      task.status === 'In Progress' ? 'text-blue-400 border-blue-400/20 bg-blue-400/10' :
-                      'text-slate-400 border-slate-700 bg-slate-800'
-                    }`}>
-                      {task.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
 
-            {/* Leave Balance & Performance Summary */}
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
-              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-slate-500" /> Leave Balance & Summary
-              </h3>
-              
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="p-4 bg-slate-950/50 rounded-xl border border-slate-800/40">
-                  <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Annual Leave</span>
-                  <div className="flex items-end gap-2">
-                    <span className="text-2xl font-bold text-white leading-none">14</span>
-                    <span className="text-xs text-slate-400 font-medium pb-0.5">/ 21 days</span>
-                  </div>
-                  <div className="w-full h-1 bg-slate-800 rounded-full mt-3 overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: '66%' }}></div>
-                  </div>
-                </div>
-                <div className="p-4 bg-slate-950/50 rounded-xl border border-slate-800/40">
-                  <span className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Sick Leave</span>
-                  <div className="flex items-end gap-2">
-                    <span className="text-2xl font-bold text-white leading-none">5</span>
-                    <span className="text-xs text-slate-400 font-medium pb-0.5">/ 7 days</span>
-                  </div>
-                  <div className="w-full h-1 bg-slate-800 rounded-full mt-3 overflow-hidden">
-                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: '71%' }}></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Performance Mini-Stat */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/40">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                    <Zap className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-white">Performance Score</p>
-                    <p className="text-[10px] text-slate-500">Based on Q2 Reviews</p>
-                  </div>
-                </div>
-                <span className="text-lg font-bold text-white font-mono">4.8<span className="text-slate-500 text-xs">/5</span></span>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 3: Culture & Communication */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Announcements */}
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
-              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-slate-500" /> Company Announcements
-              </h3>
-              <div className="space-y-4">
-                {[
-                  { title: "Q3 Engineering All-Hands", date: "Today", desc: "Join us at 4 PM for product roadmap updates and architecture review." },
-                  { title: "New Security Policies", date: "Yesterday", desc: "Please review the updated device fingerprinting and concurrent login policies." },
-                ].map((news, i) => (
-                  <div key={i} className="relative pl-4 border-l-2 border-slate-800">
-                    <div className="absolute w-2 h-2 rounded-full bg-blue-500 -left-[5px] top-1.5"></div>
-                    <p className="text-sm font-bold text-white mb-0.5">{news.title}</p>
-                    <p className="text-xs text-slate-400 mb-1">{news.desc}</p>
-                    <span className="text-[10px] font-mono text-slate-500">{news.date}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Notifications / Calendar */}
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-sm">
-              <h3 className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-slate-500" /> Today's Agenda
-              </h3>
-              <div className="space-y-3">
-                {[
-                  { time: "10:00 AM", title: "Daily Engineering Standup", type: "meeting" },
-                  { time: "01:30 PM", title: "Architecture Review: Payment Gateway", type: "meeting" },
-                  { time: "04:00 PM", title: "Q3 Engineering All-Hands", type: "event" }
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-slate-950/50 border border-slate-800/40">
-                    <div className="text-center min-w-[60px]">
-                      <span className="block text-[10px] font-mono text-slate-400">{item.time.split(' ')[0]}</span>
-                      <span className="block text-[9px] font-bold text-slate-500">{item.time.split(' ')[1]}</span>
-                    </div>
-                    <div className="w-px h-8 bg-slate-800"></div>
-                    <div>
-                      <p className="text-sm font-medium text-white">{item.title}</p>
-                      <p className="text-[10px] text-slate-500 uppercase font-semibold">{item.type}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-          </div>
 
           {/* Break Management - Condensed & Minimal */}
           {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
@@ -829,11 +716,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
-                  <button onClick={() => handleStartBreak('Tea Break')} className="px-4 py-2 bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold text-xs rounded-lg transition-colors flex items-center gap-2">
-                    <Coffee className="w-3.5 h-3.5" /> Tea Break
+                  <button onClick={() => handleStartBreak('Tea Break')} className="px-5 py-3 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-amber-900/40 transition-all flex items-center gap-2">
+                    <Coffee className="w-4 h-4" /> Start Tea Break
                   </button>
-                  <button onClick={() => handleStartBreak('Lunch Break')} className="px-4 py-2 bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold text-xs rounded-lg transition-colors flex items-center gap-2">
-                    <UtensilsCrossed className="w-3.5 h-3.5" /> Lunch Break
+                  <button onClick={() => handleStartBreak('Lunch Break')} className="px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-rose-900/40 transition-all flex items-center gap-2">
+                    <UtensilsCrossed className="w-4 h-4" /> Start Lunch Break
                   </button>
                 </div>
               )}
@@ -844,17 +731,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
       {/* 2. ATTENDANCE HISTORY TAB */}
       {activeTab === 'emp_attendance' && (
-        <div className="bg-[var(--bg-secondary)] min-h-[500px] flex flex-col space-y-4">
-          <div className="flex items-center justify-between pb-2">
-            <h2 className="text-lg font-bold text-[var(--text-primary)] flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-[var(--accent-blue)]" />
-              History
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 min-h-[500px] flex flex-col space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-400" />
+              Attendance History
             </h2>
-            <span className="text-xs text-[var(--text-tertiary)] font-mono">{empHistory.length} Records</span>
+            <span className="text-xs text-slate-400 font-mono">{empHistory.length} Records</span>
           </div>
 
           {/* Filter Chips */}
-          <div className="flex overflow-x-auto no-scrollbar gap-2 pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="flex overflow-x-auto no-scrollbar gap-2 pb-2">
             {['All', 'Present', 'Late', 'Absent', 'Leave'].map(filter => (
               <button
                 key={filter}
@@ -862,10 +749,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   triggerHaptic();
                   setAttendanceFilter(filter as any);
                 }}
-                className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 border ${
+                className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-semibold transition-all duration-200 border ${
                   attendanceFilter === filter 
-                    ? 'bg-[var(--accent-blue)] text-white border-[var(--accent-blue)] shadow-[var(--shadow-glow-blue)]' 
-                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)]'
+                    ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-900/40' 
+                    : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800'
                 }`}
               >
                 {filter}
@@ -884,21 +771,21 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             }}
           >
             {empHistory.length === 0 ? (
-              <div className="py-12 flex flex-col items-center justify-center text-center">
-                <Calendar className="w-12 h-12 text-[var(--text-muted)] mb-3" />
-                <h3 className="text-[var(--text-primary)] font-semibold text-sm">No records found</h3>
-                <p className="text-[var(--text-tertiary)] text-xs mt-1">Check back after you've checked in, or try a different filter.</p>
+              <div className="py-12 flex flex-col items-center justify-center text-center bg-slate-950/50 rounded-2xl border border-slate-800 border-dashed">
+                <Calendar className="w-12 h-12 text-slate-600 mb-3" />
+                <h3 className="text-white font-semibold text-sm">No records found</h3>
+                <p className="text-slate-500 text-xs mt-1">Check back after you've checked in, or try a different filter.</p>
               </div>
             ) : (
               empHistory.map((rec) => {
                 const statusColorMap = {
-                  'Present': 'var(--accent-emerald)',
-                  'Late': 'var(--accent-amber)',
-                  'Absent': 'var(--accent-rose)',
-                  'On Leave': 'var(--accent-violet)',
-                  'Leave': 'var(--accent-violet)',
+                  'Present': '#10b981', // emerald-500
+                  'Late': '#f59e0b', // amber-500
+                  'Absent': '#f43f5e', // rose-500
+                  'On Leave': '#8b5cf6', // violet-500
+                  'Leave': '#8b5cf6', // violet-500
                 };
-                const statusColor = (statusColorMap as any)[rec.status] || 'var(--text-muted)';
+                const statusColor = (statusColorMap as any)[rec.status] || '#64748b'; // slate-500
 
                 return (
                   <motion.div
@@ -910,9 +797,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     className="relative overflow-hidden group"
                   >
                     {/* Background swipe action hints */}
-                    <div className="absolute inset-0 rounded-2xl flex items-center justify-between px-4 text-white text-xs font-bold -z-10">
-                      <div className="flex items-center gap-2 text-[var(--accent-amber)]"><Edit className="w-4 h-4" /> Correction</div>
-                      <div className="flex items-center gap-2 text-[var(--accent-blue)]">Details <ChevronRight className="w-4 h-4" /></div>
+                    <div className="absolute inset-0 rounded-2xl flex items-center justify-between px-4 text-white text-xs font-bold -z-10 bg-slate-800">
+                      <div className="flex items-center gap-2 text-amber-400"><Edit className="w-4 h-4" /> Correction</div>
+                      <div className="flex items-center gap-2 text-blue-400">Details <ChevronRight className="w-4 h-4" /></div>
                     </div>
 
                     <motion.div
@@ -932,14 +819,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                           setTimeout(() => setActionFeedback(null), 2000);
                         }
                       }}
-                      className="bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-2xl p-4 shadow-[var(--shadow-sm)] flex items-center justify-between z-10 bg-[var(--bg-tertiary)]"
-                      style={{ background: 'var(--bg-tertiary)' }}
+                      className="bg-slate-950 border border-slate-800/80 rounded-2xl p-4 shadow-sm flex items-center justify-between z-10"
                     >
                       <div className="flex items-center gap-4">
                         {/* Date Cube */}
-                        <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] shrink-0">
-                          <span className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">{new Date(rec.date).toLocaleDateString('en-US', { weekday: 'short' })}</span>
-                          <span className="text-lg font-black text-[var(--text-primary)] leading-none mt-0.5">{new Date(rec.date).getDate()}</span>
+                        <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 shrink-0">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{new Date(rec.date).toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                          <span className="text-lg font-black text-white leading-none mt-0.5">{new Date(rec.date).getDate()}</span>
                         </div>
 
                         <div>
@@ -948,28 +834,28 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                               className="w-2 h-2 rounded-full" 
                               style={{ backgroundColor: statusColor, boxShadow: `0 0 10px ${statusColor}80` }}
                             />
-                            <span className="text-sm font-bold text-[var(--text-primary)]">{rec.status}</span>
-                            {rec.isWfh && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[var(--accent-blue)]/20 text-[var(--accent-blue)]">WFH</span>}
+                            <span className="text-sm font-bold text-white">{rec.status}</span>
+                            {rec.isWfh && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-400 border border-blue-500/30">WFH</span>}
                           </div>
                           
-                          <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)] font-mono mt-1">
+                          <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-1">
                             <div className="flex items-center gap-1">
-                              <Timer className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
-                              {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                              <Timer className="w-3.5 h-3.5 text-slate-500" />
+                              {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--'}
                               {' - '}
-                              {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                              {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--'}
                             </div>
                           </div>
                         </div>
                       </div>
 
                       <div className="text-right shrink-0">
-                        <div className="text-sm font-black text-[var(--text-primary)] tabular-nums">
+                        <div className="text-sm font-black text-white tabular-nums">
                           {rec.workingMinutes ? `${Math.floor(rec.workingMinutes/60)}h ${rec.workingMinutes%60}m` : '--'}
                         </div>
-                        <div className="text-[10px] text-[var(--text-tertiary)] mt-1 flex items-center justify-end gap-1">
-                          {rec.locationVerified ? <MapPin className="w-3 h-3 text-[var(--accent-emerald)]" /> : null}
-                          {rec.locationVerified ? 'Verified' : 'Unverified'}
+                        <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-end gap-1 font-semibold">
+                          {rec.locationVerified ? <MapPin className="w-3 h-3 text-emerald-500" /> : null}
+                          {rec.locationVerified ? <span className="text-emerald-500/80">Verified</span> : 'Unverified'}
                         </div>
                       </div>
                     </motion.div>
@@ -1058,7 +944,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         <EmployeeLeaveTab />
       )}
 
-      {/* 5. EDIT PROFILE & FACE PHOTO SETTINGS TAB */}
+      {/* 5. TEAM DIRECTORY TAB */}
+      {activeTab === 'emp_directory' && (
+        <EmployeeTeamDirectory />
+      )}
+
+      {/* 6. PAYSLIPS TAB */}
+      {activeTab === 'emp_payslips' && (
+        <EmployeePayslips />
+      )}
+
+      {/* 7. EDIT PROFILE & FACE PHOTO SETTINGS TAB */}
       {activeTab === 'emp_profile' && (
         <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-6 sm:p-8 shadow-2xl max-w-4xl mx-auto space-y-8 text-xs">
           
@@ -1231,11 +1127,27 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Current Address <span className="text-rose-500">*</span></label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-400 font-semibold">Current Address <span className="text-rose-500">*</span></label>
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={sameAsPermanentAddress}
+                          onChange={(e) => handleSameAsPermanentToggle(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500/50" 
+                        />
+                        <span className="text-[10px] text-slate-500 group-hover:text-slate-300 font-semibold uppercase tracking-wider">Same as Permanent</span>
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={currentAddress}
-                      onChange={e => setCurrentAddress(e.target.value)}
+                      onChange={e => {
+                        setCurrentAddress(e.target.value);
+                        if (sameAsPermanentAddress && e.target.value !== permanentAddress) {
+                          setSameAsPermanentAddress(false);
+                        }
+                      }}
                       className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
                     />
                   </div>
