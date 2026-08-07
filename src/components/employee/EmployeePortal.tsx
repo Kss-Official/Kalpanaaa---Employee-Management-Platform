@@ -43,7 +43,11 @@ import {
   Loader2,
   ChevronRight,
   Edit,
-  ScanFace
+  ScanFace,
+  Lock,
+  Eye,
+  EyeOff,
+  Key
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
@@ -74,7 +78,7 @@ const AVATAR_PRESETS = [
 ];
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
-  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout } = useAuth();
+  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout, updateCurrentEmployeePassword } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   // Time-aware greeting
@@ -96,6 +100,41 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
   const [isTestFaceModalOpen, setIsTestFaceModalOpen] = useState(false);
   const [isEnrollFaceModalOpen, setIsEnrollFaceModalOpen] = useState(false);
+
+  // Real-time Password Update state
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordUpdateMsg, setPasswordUpdateMsg] = useState<{ success: boolean; message: string } | null>(null);
+  const [isUpdatingPass, setIsUpdatingPass] = useState(false);
+
+  const handleUpdatePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword) return;
+    if (newPassword.trim().length < 6) {
+      setPasswordUpdateMsg({ success: false, message: 'Password must be at least 6 characters long.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordUpdateMsg({ success: false, message: 'New password and confirmation password do not match.' });
+      return;
+    }
+
+    setIsUpdatingPass(true);
+    setPasswordUpdateMsg(null);
+    const res = await updateCurrentEmployeePassword(newPassword);
+    setIsUpdatingPass(false);
+    setPasswordUpdateMsg(res);
+
+    if (res.success) {
+      setNewPassword('');
+      setConfirmPassword('');
+      triggerHaptic('success');
+      setTimeout(() => setPasswordUpdateMsg(null), 5000);
+    } else {
+      triggerHaptic('error');
+    }
+  };
 
   // Profile Edit State
   const [profilePhoto, setProfilePhoto] = useState(activeEmployee?.profilePhotoUrl || AVATAR_PRESETS[0]);
@@ -1393,6 +1432,98 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             </div>
 
           </form>
+
+          {/* SECTION E: ACCOUNT SECURITY & PASSWORD CHANGE (Real-Time) */}
+          <div className="bg-slate-950/70 p-6 rounded-2xl border border-slate-800 space-y-4 pt-4 mt-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-extrabold text-white text-xs uppercase tracking-wider text-rose-400 flex items-center gap-2">
+                <Lock className="w-4 h-4 text-rose-400" />
+                Account Security & Password Change
+              </h3>
+              <span className="text-[10px] text-slate-400 font-mono">Real-time Firebase Auth Update</span>
+            </div>
+
+            {passwordUpdateMsg && (
+              <div className={`p-3 rounded-xl text-xs font-bold border flex items-center gap-2 ${
+                passwordUpdateMsg.success 
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+              }`}>
+                {passwordUpdateMsg.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+                <span>{passwordUpdateMsg.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleUpdatePasswordSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-400 font-semibold mb-1">New Password <span className="text-rose-500">*</span></label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white font-medium focus:outline-hidden focus:border-rose-500 transition-colors pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-semibold mb-1">Confirm New Password <span className="text-rose-500">*</span></label>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
+                    required
+                    className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-white font-medium focus:outline-hidden focus:border-rose-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Password Strength Meter */}
+              {newPassword.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex justify-between items-center text-[11px] font-bold">
+                    <span className="text-slate-400">Password Strength:</span>
+                    <span className={
+                      newPassword.length >= 8 && /[A-Z]/.test(newPassword) && /[0-9]/.test(newPassword) ? 'text-emerald-400' :
+                      newPassword.length >= 6 ? 'text-amber-400' : 'text-rose-400'
+                    }>
+                      {newPassword.length >= 8 && /[A-Z]/.test(newPassword) && /[0-9]/.test(newPassword) ? 'Strong 🟢' :
+                       newPassword.length >= 6 ? 'Medium 🟡' : 'Weak 🔴'}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden flex">
+                    <div className={`h-full transition-all duration-300 ${
+                      newPassword.length >= 8 && /[A-Z]/.test(newPassword) && /[0-9]/.test(newPassword) ? 'w-full bg-emerald-500' :
+                      newPassword.length >= 6 ? 'w-2/3 bg-amber-500' : 'w-1/3 bg-rose-500'
+                    }`} />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={isUpdatingPass || !newPassword}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-rose-900/30 disabled:opacity-50"
+                >
+                  {isUpdatingPass ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Key className="w-4 h-4 text-white" />}
+                  <span>{isUpdatingPass ? 'Updating Password...' : '🔐 Update Password Real-Time'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

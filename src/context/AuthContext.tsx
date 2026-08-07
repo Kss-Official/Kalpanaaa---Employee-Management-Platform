@@ -139,6 +139,7 @@ interface AuthContextType {
   setEmployeeInitialPassword: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
   sendBroadcast: (title: string, message: string) => Promise<void>;
   markAllNotificationsRead: () => void;
+  updateCurrentEmployeePassword: (newPassword: string) => Promise<{ success: boolean; message: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -1421,6 +1422,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     n => n.id && !readNotificationIds.has(n.id)
   ).length;
 
+  // Real-time Employee Password Update (Firebase Auth + Firestore Audit)
+  const updateCurrentEmployeePassword = async (newPassword: string): Promise<{ success: boolean; message: string }> => {
+    const cleanPass = newPassword ? newPassword.trim() : '';
+    if (!cleanPass || cleanPass.length < 6) {
+      return { success: false, message: 'Password must be at least 6 characters long.' };
+    }
+    if (!activeEmployee) {
+      return { success: false, message: 'No active employee session found.' };
+    }
+
+    try {
+      if (auth.currentUser) {
+        const { updatePassword } = await import('firebase/auth');
+        await updatePassword(auth.currentUser, cleanPass);
+      }
+
+      updateEmployee(activeEmployee.id, { 
+        updatedAt: new Date().toISOString() 
+      });
+
+      addAuditLog('SECURITY_PASSWORD_CHANGE', activeEmployee.fullName, 'Employee updated account password successfully.');
+      sendKssNotification(
+        'SECURITY_ALERT',
+        '🔐 Account Password Updated',
+        `Account password for ${activeEmployee.fullName} (${activeEmployee.email}) was updated successfully.`,
+        { actorId: activeEmployee.id, actorName: activeEmployee.fullName }
+      );
+
+      return { success: true, message: 'Your account password has been updated successfully!' };
+    } catch (err: any) {
+      console.warn('[AuthContext] Update password error:', err);
+      if (err?.code === 'auth/requires-recent-login') {
+        return { success: false, message: 'For security reasons, please log out and log in again before updating your password.' };
+      }
+      return { success: false, message: err?.message || 'Failed to update password. Please try again.' };
+    }
+  };
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -1458,7 +1497,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sendPasswordReset,
       setEmployeeInitialPassword,
       sendBroadcast,
-      markAllNotificationsRead
+      markAllNotificationsRead,
+      updateCurrentEmployeePassword
     }}>
       {children}
     </AuthContext.Provider>
