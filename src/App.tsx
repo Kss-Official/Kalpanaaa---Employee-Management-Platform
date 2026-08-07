@@ -1,7 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthView } from './components/auth/AuthView';
-import { SplashScreen } from './components/common/SplashScreen';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
 import { Employee } from './types';
 import { ShieldCheck, CreditCard, Loader2 } from 'lucide-react';
@@ -27,22 +26,24 @@ const LeaveApprovalsView   = lazy(() => import('./components/admin/LeaveApproval
 const EmployeePortal       = lazy(() => import('./components/employee/EmployeePortal').then(m => ({ default: m.EmployeePortal })));
 const VerificationView     = lazy(() => import('./components/public/VerificationView').then(m => ({ default: m.VerificationView })));
 
-// Minimal spinner for Suspense fallbacks
+// Minimal spinner used as Suspense fallback inside the app (not a splash)
 const ViewLoader = () => (
   <div className="flex items-center justify-center h-64 w-full">
     <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
   </div>
 );
 
+// Dismiss the HTML splash screen defined in index.html
+const dismissHtmlSplash = () => {
+  if (typeof window !== 'undefined' && typeof (window as any).__hideSplash === 'function') {
+    (window as any).__hideSplash();
+  }
+};
+
 const MainLayout: React.FC = () => {
   const { role, isAuthenticated, activeEmployee, isSessionReady } = useAuth();
 
-  // viewMode drives what the user sees after splash
   const [viewMode, setViewMode] = useState<'landing' | 'app' | 'auth'>('landing');
-  // showSplash is true until the splash screen calls onFinish
-  const [showSplash, setShowSplash] = useState(true);
-
-  // Navigation
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -52,11 +53,17 @@ const MainLayout: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [idCardEmployee, setIdCardEmployee] = useState<Employee | null>(null);
 
-  // Auto-transition when session is restored and user is authenticated
+  // Dismiss the HTML splash as soon as session state is resolved
+  useEffect(() => {
+    if (isSessionReady) {
+      dismissHtmlSplash();
+    }
+  }, [isSessionReady]);
+
+  // Auto-transition to app view when authenticated
   useEffect(() => {
     if (isAuthenticated && activeEmployee) {
       setViewMode('app');
-      setShowSplash(false);
     }
   }, [isAuthenticated, activeEmployee]);
 
@@ -71,36 +78,13 @@ const MainLayout: React.FC = () => {
 
   const handleLandingGetStarted = () => setViewMode('auth');
 
-  // ── SPLASH GATE: while showSplash=true, render ONLY the splash ──
-  // If the session is not ready yet (first-time Firestore load), we also keep the splash visible.
-  if (showSplash) {
-    return (
-      <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased flex flex-col">
-        <SplashScreen
-          onFinish={() => {
-            // Only dismiss splash once session check has completed
-            if (isSessionReady) {
-              setShowSplash(false);
-            } else {
-              // Session check still running — keep splash up, wait for isSessionReady
-              const wait = setInterval(() => {
-                // This closure captures isSessionReady via module-level flag below
-              }, 100);
-              clearInterval(wait);
-            }
-          }}
-        />
-      </div>
-    );
-  }
-
   const renderView = () => {
     if (viewMode === 'landing' && (!isAuthenticated || !activeEmployee)) {
       return (
         <Suspense fallback={<ViewLoader />}>
           <LandingView
             onGetStarted={handleLandingGetStarted}
-            onShowSplash={() => setShowSplash(true)}
+            onShowSplash={() => {}}
           />
         </Suspense>
       );
@@ -116,7 +100,7 @@ const MainLayout: React.FC = () => {
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           isMobileSidebarOpen={isMobileSidebarOpen}
           onShowLanding={() => setViewMode('landing')}
-          onShowSplash={() => setShowSplash(true)}
+          onShowSplash={() => {}}
         />
 
         <div className="flex-1 flex w-full max-w-[1700px] mx-auto relative">
@@ -135,7 +119,8 @@ const MainLayout: React.FC = () => {
                 </div>
                 <h2 className="text-xl font-black text-white">Admin Access Restricted</h2>
                 <p className="text-xs text-slate-300 leading-relaxed max-w-lg mx-auto">
-                  The Workspace Admin Dashboard &amp; Management System is strictly restricted to company <strong className="text-white font-black">Executives and HR Administrators</strong> using official corporate credentials at Kalpanaaa Software Solutions.
+                  The Workspace Admin Dashboard &amp; Management System is strictly restricted to company{' '}
+                  <strong className="text-white font-black">Executives and HR Administrators</strong> using official corporate credentials at Kalpanaaa Software Solutions.
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                   <button
@@ -161,7 +146,9 @@ const MainLayout: React.FC = () => {
                       <CreditCard className="w-8 h-8" />
                     </div>
                     <h2 className="text-2xl font-bold mb-3 text-white">My Official ID Card</h2>
-                    <p className="text-sm text-slate-400 mb-8 leading-relaxed">Click the button below to view, print, or share your official corporate ID badge.</p>
+                    <p className="text-sm text-slate-400 mb-8 leading-relaxed">
+                      Click the button below to view, print, or share your official corporate ID badge.
+                    </p>
                     <button
                       onClick={() => setIdCardEmployee(activeEmployee)}
                       className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
@@ -242,43 +229,6 @@ const MainLayout: React.FC = () => {
   );
 };
 
-// ── Session-aware splash wrapper ──
-// Keeps splash visible until isSessionReady so we never flash a wrong view
-const SessionAwareApp: React.FC = () => {
-  const { isSessionReady, isAuthenticated, activeEmployee } = useAuth();
-  const [splashDone, setSplashDone] = useState(false);
-
-  // Once splash animation finishes AND session is resolved, open the app
-  const handleSplashFinish = () => {
-    if (isSessionReady) {
-      setSplashDone(true);
-    }
-    // If session not ready yet, we wait — the useEffect below will trigger
-  };
-
-  useEffect(() => {
-    if (isSessionReady && !splashDone) {
-      // Session resolved after splash finished — safe to open now
-      // (splash itself also auto-dismisses; this covers edge-case order)
-    }
-  }, [isSessionReady, splashDone]);
-
-  if (!splashDone) {
-    return (
-      <div className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased flex flex-col">
-        <SplashScreen
-          onFinish={() => {
-            // Always mark splash done; if session not ready the MainLayout will show a loader
-            setSplashDone(true);
-          }}
-        />
-      </div>
-    );
-  }
-
-  return <MainLayout />;
-};
-
 export default function App() {
   const isVerifyRoute = window.location.pathname === '/verify';
 
@@ -294,7 +244,7 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <SessionAwareApp />
+      <MainLayout />
     </AuthProvider>
   );
 }
