@@ -75,21 +75,29 @@ const MainLayout: React.FC = () => {
     }
   }, [isAuthenticated, activeEmployee]);
 
-  // Strict role-based tab routing
+  // Strict role-based tab routing based on Admin-assigned role
   useEffect(() => {
-    if (role === 'SUPER_ADMIN' || role === 'HR_ADMIN') {
-      // Admin roles: force away from employee-only tabs on role change
-      if (activeTab.startsWith('emp_')) setActiveTab('dashboard');
-    } else if (role === 'PROJECT_MANAGER') {
-      // PM can access pm_* tabs and their personal emp_ workspace
-      if (!activeTab.startsWith('emp_') && !activeTab.startsWith('pm_')) {
+    const effectiveRole = activeEmployee?.role || role;
+
+    if (effectiveRole === 'SUPER_ADMIN') {
+      if (activeTab.startsWith('emp_') || activeTab.startsWith('hr_') || activeTab.startsWith('pm_')) {
+        setActiveTab('dashboard');
+      }
+    } else if (effectiveRole === 'HR_ADMIN') {
+      if (!activeTab.startsWith('hr_') && !activeTab.startsWith('emp_')) {
+        setActiveTab('hr_dashboard');
+      }
+    } else if (effectiveRole === 'PROJECT_MANAGER') {
+      if (!activeTab.startsWith('pm_') && !activeTab.startsWith('emp_')) {
         setActiveTab('pm_dashboard');
       }
     } else {
-      // Employee: can only access emp_ tabs
-      if (!activeTab.startsWith('emp_')) setActiveTab('emp_dashboard');
+      // Standard EMPLOYEE: locked strictly to emp_* tabs
+      if (!activeTab.startsWith('emp_')) {
+        setActiveTab('emp_dashboard');
+      }
     }
-  }, [role]);
+  }, [role, activeEmployee?.role, activeEmployee?.id]);
 
   const handleLandingGetStarted = () => setViewMode('auth');
 

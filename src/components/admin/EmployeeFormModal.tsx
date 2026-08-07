@@ -72,10 +72,12 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     } else {
       setFormData(prev => {
         const newData = { ...prev, [e.target.name]: e.target.value };
-        if (e.target.name === 'designation') {
-          if (['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(e.target.value)) {
+        if (!isEdit && e.target.name === 'designation') {
+          if (['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)'].includes(e.target.value)) {
             newData.role = 'SUPER_ADMIN';
-          } else if (e.target.value === 'HR Manager') {
+          } else if (e.target.value === 'Project Manager') {
+            newData.role = 'PROJECT_MANAGER';
+          } else if (e.target.value.includes('HR')) {
             newData.role = 'HR_ADMIN';
           } else {
             newData.role = 'EMPLOYEE';
@@ -436,21 +438,20 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 />
               </div>
 
-              {!['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)', 'Project Manager'].includes(formData.designation) && (
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">System Role Access</label>
-                  <select
-                    name="role"
-                    value={formData.role}
-                    onChange={handleChange}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl font-bold text-purple-400 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="EMPLOYEE">EMPLOYEE</option>
-                    <option value="HR_ADMIN">HR_ADMIN</option>
-                    <option value="SUPER_ADMIN">SUPER_ADMIN</option>
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">System Role Access <span className="text-purple-400 font-normal">(Admin Assigned)</span></label>
+                <select
+                  name="role"
+                  value={formData.role}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl font-bold text-purple-400 focus:outline-none focus:border-purple-500"
+                >
+                  <option value="EMPLOYEE">EMPLOYEE — Employee Workspace</option>
+                  <option value="PROJECT_MANAGER">PROJECT_MANAGER — PM Kanban & Team Portal</option>
+                  <option value="HR_ADMIN">HR_ADMIN — HR Approvals & Payroll Portal</option>
+                  <option value="SUPER_ADMIN">SUPER_ADMIN — Executive Admin Portal</option>
+                </select>
+              </div>
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Account Status</label>
