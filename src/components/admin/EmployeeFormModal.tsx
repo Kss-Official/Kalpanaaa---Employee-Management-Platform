@@ -139,18 +139,14 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     }
 
     const cleanEmail = formData.email.trim().toLowerCase();
-    const isExecutive = formData.role === 'SUPER_ADMIN' || formData.role === 'HR_ADMIN';
+    const isValidCompanyEmail = 
+      cleanEmail.endsWith('@kalpanaaa.in') || 
+      cleanEmail.endsWith('@kalpanaaasoftwaresolutions.in') || 
+      cleanEmail.endsWith('@kalpanaaasoftwaresoutions.in');
 
-    if (isExecutive) {
-      if (!cleanEmail.endsWith('@kalpanaaa.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresolutions.in') && !cleanEmail.endsWith('@kalpanaaasoftwaresoutions.in')) {
-        setErrorMsg('Executive emails must end with @kalpanaaa.in or @kalpanaaasoftwaresolutions.in');
-        return;
-      }
-    } else {
-      if (!cleanEmail.endsWith('@kalpanaaa.in')) {
-        setErrorMsg('All employee emails strictly must end with @kalpanaaa.in');
-        return;
-      }
+    if (!isValidCompanyEmail) {
+      setErrorMsg('Employee email must end with @kalpanaaa.in or @kalpanaaasoftwaresolutions.in');
+      return;
     }
 
     if (isEdit && employeeToEdit) {
@@ -244,7 +240,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={formData.email}
                   onChange={handleChange}
                   required
-                  placeholder="e.g. user@company.hr"
+                  placeholder="e.g. user@kalpanaaasoftwaresolutions.in"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
