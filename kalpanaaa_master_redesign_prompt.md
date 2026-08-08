@@ -209,7 +209,7 @@ Touch Targets:
 - Background: lighten by 3% on press
 - On release: spring back to 1 (200ms, --ease-spring)
 - Ripple effect from touch point (CSS-only, radial-gradient animation)
-```
+```knklk
 
 #### C. Bottom Sheet Entry
 ```

@@ -198,16 +198,16 @@ export const LeaveApprovalsView: React.FC = () => {
                   </div>
 
                   {req.status === 'Pending' && (
-                    <div className="flex items-center gap-3 mt-2 sm:hidden">
+                    <div className="flex items-center gap-3 mt-2">
                       <button
                         onClick={() => handleReject(req.id)}
-                        className="flex-1 py-3 bg-[var(--accent-rose)]/10 text-[var(--accent-rose)] border border-[var(--accent-rose)]/20 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                        className="flex-1 py-3 bg-[var(--accent-rose)]/10 text-[var(--accent-rose)] border border-[var(--accent-rose)]/20 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-[var(--accent-rose)]/20 cursor-pointer"
                       >
                         <X className="w-4 h-4" /> Reject
                       </button>
                       <button
                         onClick={() => handleApprove(req.id)}
-                        className="flex-1 py-3 bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] border border-[var(--accent-emerald)]/20 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                        className="flex-1 py-3 bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] border border-[var(--accent-emerald)]/20 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-[var(--accent-emerald)]/20 cursor-pointer"
                       >
                         <Check className="w-4 h-4" /> Approve
                       </button>

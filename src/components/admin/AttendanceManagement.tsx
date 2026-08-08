@@ -24,7 +24,7 @@ export const AttendanceManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'all'>('today');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'all'>('all');
 
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
   const [editStatus, setEditStatus] = useState<AttendanceStatus>('Present');
@@ -223,7 +223,7 @@ export const AttendanceManagement: React.FC = () => {
                 </tr>
               ) : (
                 filteredRecords.map(rec => (
-                  <tr key={rec.id} className="hover:bg-slate-800/50 transition-colors">
+                  <tr key={rec.id} className="hover:bg-slate-800/50 transition-colors align-middle">
                     <td className="py-3 px-4">
                       <div className="font-bold text-white">{rec.employeeName}</div>
                       <div className="text-[11px] text-slate-400 font-mono">{rec.employeeCode} • {rec.department}</div>
@@ -249,7 +249,7 @@ export const AttendanceManagement: React.FC = () => {
                           {new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       ) : rec.checkInAt ? (
-                        <span className="text-emerald-300 font-semibold text-[11px] bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/30 animate-pulse">
+                        <span className="inline-flex items-center font-semibold text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md border border-emerald-500/30 animate-pulse whitespace-nowrap">
                           Active Now
                         </span>
                       ) : (

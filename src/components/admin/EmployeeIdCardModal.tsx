@@ -141,11 +141,13 @@ export const EmployeeIdCardModal: React.FC<EmployeeIdCardModalProps> = ({ employ
                     </div>
 
                     {/* Footer: Barcode */}
-                    <div className="w-full flex flex-col items-center mt-auto pb-2">
-                      <div className="bg-white/90 p-2 rounded-xl w-full flex justify-center backdrop-blur-md">
-                        <Barcode value={employee.employeeId} width={1.8} height={40} displayValue={false} margin={0} background="transparent" lineColor="#000" />
+                    <div className="w-full flex flex-col items-center justify-center mt-auto pb-2">
+                      <div className="bg-white/90 p-2 rounded-xl w-full flex items-center justify-center backdrop-blur-md overflow-hidden">
+                        <div className="flex justify-center">
+                          <Barcode value={employee.employeeId} width={1.8} height={40} displayValue={false} margin={0} background="transparent" lineColor="#000" />
+                        </div>
                       </div>
-                      <span className="mt-2 text-xs font-mono font-bold text-white/70 tracking-[0.2em]">{employee.employeeId}</span>
+                      <span className="mt-2 text-xs font-mono font-bold text-white/70 tracking-[0.2em] text-center w-full">{employee.employeeId}</span>
                     </div>
                   </div>
                 </div>

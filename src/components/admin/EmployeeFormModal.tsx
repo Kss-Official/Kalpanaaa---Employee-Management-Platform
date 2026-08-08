@@ -608,11 +608,11 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           </div>
 
           {/* Form Actions - Sticky Footer */}
-          <div className="pt-3 pb-3 sm:pt-4 border-t border-slate-800 flex items-center justify-end gap-3 sticky bottom-0 bg-slate-900/95 backdrop-blur-md z-10 -mx-4 -mb-4 px-4 sm:-mx-6 sm:-mb-6 sm:px-6">
+          <div className="pt-3 pb-safe sm:pb-3 sm:pt-4 border-t border-slate-800 flex items-center justify-end gap-3 sticky bottom-0 bg-slate-900 backdrop-blur-md z-10 -mx-4 -mb-4 px-4 sm:-mx-6 sm:-mb-6 sm:px-6 shadow-[0_-4px_20px_rgba(0,0,0,0.4)]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer"
+              className="px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl cursor-pointer transition-colors"
             >
               Cancel
             </button>

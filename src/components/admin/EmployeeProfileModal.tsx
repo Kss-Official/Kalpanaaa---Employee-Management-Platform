@@ -97,12 +97,12 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
           <div className="bg-[var(--bg-tertiary)] p-5 sm:p-6 pt-10 sm:pt-6 relative border-b border-[var(--border-subtle)] shrink-0 z-10">
             <button
               onClick={() => { triggerHaptic('light'); onClose(); }}
-              className={`absolute top-4 right-4 p-2 text-[var(--text-tertiary)] hover:text-white hover:bg-[var(--bg-elevated)] rounded-full transition-colors cursor-pointer outline-none ${animations.tap}`}
+              className={`absolute top-3 right-3 sm:top-4 sm:right-4 z-30 p-2 text-[var(--text-tertiary)] hover:text-white hover:bg-[var(--bg-elevated)] rounded-full transition-colors cursor-pointer outline-none ${animations.tap}`}
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 pr-6 sm:pr-0">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 pr-8 sm:pr-0">
               <div className="relative shrink-0">
                 <img
                   src={employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(employee.fullName)}&background=111118&color=fff`}

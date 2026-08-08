@@ -743,9 +743,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     </div>
                   )}
                   
-                  {/* Break Actions (if checked in) */}
+                  {/* Break Actions (if checked in) — placed in normal flow, not absolute */}
                   {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
-                    <div className="absolute bottom-[-10px] flex gap-2">
+                    <div className="flex flex-wrap gap-2 justify-center mt-4">
                        {activeBreak ? (
                          <button onClick={handleEndBreak} className={`px-4 py-1.5 rounded-full bg-[var(--accent-amber)] text-amber-950 font-bold text-xs shadow-lg ${animations.tap}`}>
                            End Break ({String(Math.floor(breakElapsedSec / 60)).padStart(2, '0')}:{String(breakElapsedSec % 60).padStart(2, '0')})
@@ -930,40 +930,16 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       hidden: { opacity: 0, y: 10 },
                       show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
                     }}
-                    className="relative overflow-hidden group"
+                    className="bg-slate-950 border border-slate-800/80 rounded-2xl p-4 shadow-sm"
                   >
-                    {/* Background swipe action hints */}
-                    <div className="absolute inset-0 rounded-2xl flex items-center justify-between px-4 text-white text-xs font-bold -z-10 bg-slate-800">
-                      <div className="flex items-center gap-2 text-amber-400"><Edit className="w-4 h-4" /> Correction</div>
-                      <div className="flex items-center gap-2 text-blue-400">Details <ChevronRight className="w-4 h-4" /></div>
-                    </div>
-
-                    <motion.div
-                      drag="x"
-                      dragConstraints={{ left: -80, right: 80 }}
-                      dragElastic={0.1}
-                      onDragEnd={(e, info) => {
-                        if (info.offset.x > 50) {
-                          triggerHaptic();
-                          // Swipe right -> Request Correction (mock)
-                          setActionFeedback({ success: true, message: "Correction request opened" });
-                          setTimeout(() => setActionFeedback(null), 2000);
-                        } else if (info.offset.x < -50) {
-                          triggerHaptic();
-                          // Swipe left -> View Details (mock)
-                          setActionFeedback({ success: true, message: "Viewing detailed log" });
-                          setTimeout(() => setActionFeedback(null), 2000);
-                        }
-                      }}
-                      className="bg-slate-950 border border-slate-800/80 rounded-2xl p-4 shadow-sm flex items-center justify-between z-10"
-                    >
-                      <div className="flex items-center gap-4">
+                    {/* Row 1: Date + Status + Working Hours */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
                         {/* Date Cube */}
                         <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 shrink-0">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{new Date(rec.date).toLocaleDateString('en-US', { weekday: 'short' })}</span>
                           <span className="text-lg font-black text-white leading-none mt-0.5">{new Date(rec.date).getDate()}</span>
                         </div>
-
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <span 
@@ -971,30 +947,61 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                               style={{ backgroundColor: statusColor, boxShadow: `0 0 10px ${statusColor}80` }}
                             />
                             <span className="text-sm font-bold text-white">{rec.status}</span>
-                            {rec.isWfh && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-400 border border-blue-500/30">WFH</span>}
+                            {rec.isWfh && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-400 border border-blue-500/30">🏠 WFH</span>}
                           </div>
-                          
-                          <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-1">
-                            <div className="flex items-center gap-1">
-                              <Timer className="w-3.5 h-3.5 text-slate-500" />
-                              {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--'}
-                              {' - '}
-                              {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--'}
-                            </div>
+                          <div className="text-[11px] text-slate-400 font-mono">
+                            {new Date(rec.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                           </div>
                         </div>
                       </div>
-
                       <div className="text-right shrink-0">
                         <div className="text-sm font-black text-white tabular-nums">
                           {rec.workingMinutes ? `${Math.floor(rec.workingMinutes/60)}h ${rec.workingMinutes%60}m` : '--'}
                         </div>
-                        <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-end gap-1 font-semibold">
-                          {rec.locationVerified ? <MapPin className="w-3 h-3 text-emerald-500" /> : null}
-                          {rec.locationVerified ? <span className="text-emerald-500/80">Verified</span> : 'Unverified'}
+                        <div className="text-[10px] text-slate-500 mt-0.5 font-semibold">Working Time</div>
+                      </div>
+                    </div>
+
+                    {/* Row 2: Check In/Out Times */}
+                    <div className="grid grid-cols-2 gap-3 bg-slate-900/60 rounded-xl p-3 mb-3 border border-slate-800/50">
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Check In</div>
+                        <div className="font-mono font-bold text-white text-sm">
+                          {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--'}
                         </div>
                       </div>
-                    </motion.div>
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Check Out</div>
+                        <div className="font-mono font-bold text-white text-sm">
+                          {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : <span className="text-emerald-400 text-xs animate-pulse">Active</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Row 3: Break + GPS + Method */}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {(rec.totalBreakMinutes || 0) > 0 && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          ☕ Break: {rec.totalBreakMinutes}m
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 ${
+                        rec.locationVerified ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-400 border border-slate-700'
+                      }`}>
+                        <MapPin className="w-3 h-3" />
+                        {rec.locationVerified ? 'GPS Verified' : 'Unverified'}
+                      </span>
+                      {rec.attendanceMethod && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                          {rec.attendanceMethod}
+                        </span>
+                      )}
+                      {rec.notes && (
+                        <span className="text-[10px] text-slate-400 italic truncate max-w-[200px]" title={rec.notes}>
+                          {rec.notes}
+                        </span>
+                      )}
+                    </div>
                   </motion.div>
                 );
               })
@@ -1274,73 +1281,89 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Permanent Address <span className="text-rose-500">*</span></label>
-                    <input
-                      type="text"
-                      value={permanentAddress}
-                      onChange={e => setPermanentAddress(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-slate-400 font-semibold">Current Address <span className="text-rose-500">*</span></label>
-                      <label className="flex items-center gap-2 cursor-pointer group">
-                        <input 
-                          type="checkbox" 
-                          checked={sameAsPermanentAddress}
-                          onChange={(e) => handleSameAsPermanentToggle(e.target.checked)}
-                          className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500/50" 
-                        />
-                        <span className="text-[10px] text-slate-500 group-hover:text-slate-300 font-semibold uppercase tracking-wider">Same as Permanent</span>
-                      </label>
+                {/* Permanent Address — 3 separate fields */}
+                <div className="sm:col-span-2">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block"></span>
+                    Permanent Address
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-3">
+                      <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Street / House Address <span className="text-rose-500">*</span></label>
+                      <input
+                        type="text"
+                        value={permanentAddress}
+                        onChange={e => setPermanentAddress(e.target.value)}
+                        placeholder="e.g. 123, MG Road, Indiranagar"
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
+                      />
                     </div>
-                    <input
-                      type="text"
-                      value={currentAddress}
-                      onChange={e => {
-                        setCurrentAddress(e.target.value);
-                        if (sameAsPermanentAddress && e.target.value !== permanentAddress) {
-                          setSameAsPermanentAddress(false);
-                        }
-                      }}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
-                    />
+                    <div>
+                      <label className="block text-slate-400 font-semibold mb-1 text-[11px]">City <span className="text-rose-500">*</span></label>
+                      <input
+                        type="text"
+                        value={city}
+                        onChange={e => setCity(e.target.value)}
+                        placeholder="e.g. Bengaluru"
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-semibold mb-1 text-[11px]">State</label>
+                      <input
+                        type="text"
+                        value={state}
+                        onChange={e => setState(e.target.value)}
+                        placeholder="e.g. Karnataka"
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Pincode <span className="text-rose-500">*</span></label>
+                      <input
+                        type="text"
+                        value={postalCode}
+                        onChange={e => setPostalCode(e.target.value)}
+                        placeholder="e.g. 560038"
+                        maxLength={10}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">City <span className="text-rose-500">*</span></label>
-                  <input
-                    type="text"
-                    value={city}
-                    onChange={e => setCity(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
+                {/* Current Address — single free-form textarea */}
+                <div className="sm:col-span-2">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                    Current Address
+                    <label className="flex items-center gap-1.5 cursor-pointer group ml-auto">
+                      <input
+                        type="checkbox"
+                        checked={sameAsPermanentAddress}
+                        onChange={(e) => handleSameAsPermanentToggle(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500/50"
+                      />
+                      <span className="text-[10px] text-slate-500 group-hover:text-slate-300 font-semibold uppercase tracking-wider">Same as Permanent</span>
+                    </label>
+                  </h4>
+                  <textarea
+                    rows={3}
+                    value={currentAddress}
+                    onChange={e => {
+                      setCurrentAddress(e.target.value);
+                      if (sameAsPermanentAddress && e.target.value !== permanentAddress) {
+                        setSameAsPermanentAddress(false);
+                      }
+                    }}
+                    placeholder="Enter your complete current address including street, city, and pincode..."
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors resize-none leading-relaxed"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-slate-400 font-semibold mb-1">State / Postal Code <span className="text-rose-500">*</span></label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="State"
-                      value={state}
-                      onChange={e => setState(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Postal Code"
-                      value={postalCode}
-                      onChange={e => setPostalCode(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500"
-                    />
-                  </div>
-                </div>
 
+                {/* Emergency Contact */}
+                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-400 font-semibold mb-1">Emergency Phone</label>
                   <input
@@ -1361,8 +1384,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-semibold focus:outline-hidden focus:border-blue-500 transition-colors"
                   />
                 </div>
+                </div>
               </div>
             </div>
+
 
             {/* SECTION D: SUMMARY, SKILLS & PREFERENCES */}
             <div className="space-y-4">
@@ -1512,15 +1537,27 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
               )}
 
-              <div className="flex items-center justify-end pt-2">
-                <button
-                  type="submit"
-                  disabled={isUpdatingPass || !newPassword}
-                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-rose-900/30 disabled:opacity-50"
-                >
-                  {isUpdatingPass ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Key className="w-4 h-4 text-white" />}
-                  <span>{isUpdatingPass ? 'Updating Password...' : '🔐 Update Password Real-Time'}</span>
-                </button>
+              <div className="flex items-center justify-between pt-2">
+                {confirmPassword.length > 0 && newPassword !== confirmPassword && (
+                  <span className="text-[11px] text-rose-400 font-semibold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Passwords do not match
+                  </span>
+                )}
+                {confirmPassword.length > 0 && newPassword === confirmPassword && newPassword.length >= 6 && (
+                  <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Passwords match
+                  </span>
+                )}
+                <div className="ml-auto">
+                  <button
+                    type="submit"
+                    disabled={isUpdatingPass || !newPassword || !confirmPassword || newPassword !== confirmPassword || newPassword.trim().length < 6}
+                    className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-rose-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isUpdatingPass ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Key className="w-4 h-4 text-white" />}
+                    <span>{isUpdatingPass ? 'Updating Password...' : '🔐 Update Password Real-Time'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>

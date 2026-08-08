@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useHaptic } from '../../hooks/useHaptic';
 export const EmployeeLeaveTab: React.FC = () => {
-  const { activeEmployee, leaveRequests, submitLeaveRequest } = useAuth();
+  const { activeEmployee, leaveRequests, submitLeaveRequest, cancelLeaveRequest } = useAuth();
   const { triggerHaptic } = useHaptic();
   
   const [type, setType] = useState<'Leave' | 'WFH'>('WFH');
@@ -227,10 +227,17 @@ export const EmployeeLeaveTab: React.FC = () => {
                         </span>
                       ) : (
                         <button 
-                          onClick={() => triggerHaptic()} 
-                          className="text-[10px] font-bold text-[var(--accent-rose)] bg-[var(--accent-rose)]/10 px-3 py-1 rounded-lg active:scale-95 transition-transform"
+                          onClick={() => {
+                            triggerHaptic('warning');
+                            if (window.confirm(`Cancel this ${req.type} request for ${req.startDate}?`)) {
+                              cancelLeaveRequest(req.id);
+                              setFeedback({ success: true, message: `${req.type} request cancelled successfully.` });
+                              setTimeout(() => setFeedback(null), 3000);
+                            }
+                          }} 
+                          className="text-[10px] font-bold text-[var(--accent-rose)] bg-[var(--accent-rose)]/10 border border-[var(--accent-rose)]/20 px-3 py-1.5 rounded-lg active:scale-95 transition-all hover:bg-[var(--accent-rose)]/20 flex items-center gap-1"
                         >
-                          Cancel
+                          <X className="w-3 h-3" /> Cancel Request
                         </button>
                       )}
                     </div>

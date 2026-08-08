@@ -75,7 +75,7 @@ export const getAssignedEmployeeDetails = (fullName: string, employees: Employee
   if (name.includes('koushik')) {
     return {
       employeeId: 'KSS2407003',
-      role: 'HR_ADMIN' as UserRole, // Project Manager
+      role: 'PROJECT_MANAGER' as UserRole,
       designation: 'Project Manager'
     };
   }
@@ -121,6 +121,7 @@ interface AuthContextType {
   // Actions
   submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => void;
   updateLeaveRequestStatus: (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => void;
+  cancelLeaveRequest: (id: string) => void;
   loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
   quickDemoLogin: (role: UserRole | 'CEO' | 'CTO') => void;
   logout: () => void;
@@ -291,6 +292,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       registerFcmToken(activeEmployee.id, activeEmployee.role).catch(() => {});
     }
   }, [isAuthenticated, activeEmployee?.id, isFirestoreConnected]);
+
+  // ROOT-LEVEL ROLE & SESSION SYNC: Continuously sync activeEmployee and role whenever employees state updates (e.g. from Firestore or Admin edit)
+  useEffect(() => {
+    if (!activeEmployee) return;
+    const updatedSelf = employees.find(e => 
+      e.id === activeEmployee.id || 
+      (e.employeeId && e.employeeId === activeEmployee.employeeId) ||
+      (e.email && activeEmployee.email && e.email.toLowerCase() === activeEmployee.email.toLowerCase())
+    );
+
+    if (updatedSelf) {
+      let nextRole = updatedSelf.role;
+      if (updatedSelf.employeeId === 'CEO001' || updatedSelf.employeeId === 'CTO001') {
+        if (updatedSelf.role === 'SUPER_ADMIN') nextRole = 'SUPER_ADMIN';
+      }
+
+      if (updatedSelf.role !== activeEmployee.role || role !== nextRole || JSON.stringify(updatedSelf) !== JSON.stringify(activeEmployee)) {
+        setActiveEmployee(updatedSelf);
+        setRole(nextRole);
+      }
+    }
+  }, [employees, activeEmployee?.id, activeEmployee?.role, role]);
 
   // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
   useEffect(() => {
@@ -463,6 +486,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             deduplicated.reverse();
 
             // Ensure Official D. Koushik (Project Manager) exists in Team Directory
+            // NOTE: Only seed if not already in Firestore — never override existing role
             const koushikExists = deduplicated.some(e => 
               e.employeeId === 'KSS2407003' || 
               e.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')
@@ -474,7 +498,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 employeeId: 'KSS2407003',
                 fullName: 'D. Koushik',
                 email: 'd.koushik@kalpanaaasoftwaresolutions.in',
-                role: 'HR_ADMIN',
+                role: 'PROJECT_MANAGER', // correct role — HR_ADMIN was wrong
                 department: 'Software Engineering',
                 designation: 'Project Manager',
                 status: 'Active',
@@ -693,7 +717,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveEmployee(matched);
       let assignedRole = matched.role;
       if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
-      if (matched.employeeId === 'KSS2407003' || matched.email?.toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')) assignedRole = 'HR_ADMIN';
       setRole(assignedRole);
       setIsAuthenticated(true);
       setIsSessionReady(true);
@@ -1063,12 +1086,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setEmployees(prev => prev.map(e => {
       if (e.id === id) {
         const updated = { ...e, ...sanitizedUpdates, updatedAt: new Date().toISOString() };
-        if (activeEmployee && activeEmployee.id === id) {
-          setActiveEmployee(updated);
-          if (sanitizedUpdates.role) {
-            setRole(sanitizedUpdates.role);
-          }
-        }
 
         // Persist update to Firestore
         setDoc(doc(db, 'employees', id), updated, { merge: true }).catch(err => {
@@ -1371,6 +1388,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addAuditLog('LEAVE_DECISION', reviewedBy, `${status} leave request ${id}`);
   };
 
+  const cancelLeaveRequest = (id: string) => {
+    setLeaveRequests(prev => prev.filter(req => req.id !== id));
+    // Remove from Firestore
+    deleteDoc(doc(db, 'leaveRequests', id)).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `leaveRequests/${id}`);
+    });
+    addAuditLog('LEAVE_CANCELLED', activeEmployee?.fullName || 'Employee', `Cancelled leave request ${id}`);
+  };
+
   const resetToDemoData = () => {
     setEmployees(INITIAL_EMPLOYEES);
     setAttendance(generateInitialAttendance());
@@ -1526,6 +1552,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       saveCompanyWorkZone,
       submitLeaveRequest,
       updateLeaveRequestStatus,
+      cancelLeaveRequest,
       addAuditLog,
       resetToDemoData,
       regenerateQrToken,
