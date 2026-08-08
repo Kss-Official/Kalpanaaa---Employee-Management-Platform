@@ -324,27 +324,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [employees, activeEmployee?.id, activeEmployee?.role, role]);
 
-  // ROOT-LEVEL DUAL-DEVICE SESSION MANAGER: Smart Enforcement (Max 1 Desktop/Laptop + 1 Mobile simultaneously)
-  useEffect(() => {
-    if (!activeEmployee) return;
-
-    const localSessionId = localStorage.getItem('kss_v1_session_id');
-    const deviceCategory = (localStorage.getItem('kss_v1_device_category') as 'desktop' | 'mobile') || getDeviceCategory();
-
-    if (!localSessionId) return;
-
-    if (deviceCategory === 'desktop') {
-      if (activeEmployee.desktopSessionId && activeEmployee.desktopSessionId !== localSessionId) {
-        logout();
-        alert('🔒 SESSION SECURITY ALERT: You have been logged out because your account was accessed from another Desktop/Laptop device. (Max 1 Laptop + 1 Mobile allowed simultaneously).');
-      }
-    } else if (deviceCategory === 'mobile') {
-      if (activeEmployee.mobileSessionId && activeEmployee.mobileSessionId !== localSessionId) {
-        logout();
-        alert('🔒 SESSION SECURITY ALERT: You have been logged out because your account was accessed from another Mobile/Tablet device. (Max 1 Laptop + 1 Mobile allowed simultaneously).');
-      }
-    }
-  }, [activeEmployee?.desktopSessionId, activeEmployee?.mobileSessionId]);
 
   // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
   useEffect(() => {
