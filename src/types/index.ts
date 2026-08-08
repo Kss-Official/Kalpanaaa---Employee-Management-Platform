@@ -78,8 +78,10 @@ export interface Employee {
   role: UserRole;
   qrToken: string;
   approvedWfhDates?: string[]; // YYYY-MM-DD format
-  currentSessionId?: string; // For preventing concurrent logins
-  sessionFingerprint?: string; // For preventing session token theft / device spoofing
+  currentSessionId?: string; // For backward compatibility
+  desktopSessionId?: string; // Active Laptop/Desktop session ID
+  mobileSessionId?: string;  // Active Mobile/Tablet session ID
+  sessionFingerprint?: string;
   failedLoginCount?: number;
   lockoutUntil?: number; // timestamp
   createdAt: string;

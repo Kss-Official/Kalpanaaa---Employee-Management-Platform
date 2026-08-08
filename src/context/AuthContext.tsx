@@ -27,6 +27,15 @@ const generateDeviceFingerprint = () => {
   return btoa(`${navigator.userAgent}|${screen.width}x${screen.height}|${navigator.language}|${new Date().getTimezoneOffset()}`);
 };
 
+const getDeviceCategory = (): 'desktop' | 'mobile' => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'desktop';
+  const ua = navigator.userAgent || '';
+  if (/Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
+    return 'mobile';
+  }
+  return 'desktop';
+};
+
 const sanitizeInput = <T extends any>(data: T): T => {
   if (typeof data === 'string') {
     // Skip sanitization for base64 images to prevent regex corruption of large strings
@@ -315,6 +324,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [employees, activeEmployee?.id, activeEmployee?.role, role]);
 
+  // ROOT-LEVEL DUAL-DEVICE SESSION MANAGER: Smart Enforcement (Max 1 Desktop/Laptop + 1 Mobile simultaneously)
+  useEffect(() => {
+    if (!activeEmployee) return;
+
+    const localSessionId = localStorage.getItem('kss_v1_session_id');
+    const deviceCategory = (localStorage.getItem('kss_v1_device_category') as 'desktop' | 'mobile') || getDeviceCategory();
+
+    if (!localSessionId) return;
+
+    if (deviceCategory === 'desktop') {
+      if (activeEmployee.desktopSessionId && activeEmployee.desktopSessionId !== localSessionId) {
+        logout();
+        alert('🔒 SESSION SECURITY ALERT: You have been logged out because your account was accessed from another Desktop/Laptop device. (Max 1 Laptop + 1 Mobile allowed simultaneously).');
+      }
+    } else if (deviceCategory === 'mobile') {
+      if (activeEmployee.mobileSessionId && activeEmployee.mobileSessionId !== localSessionId) {
+        logout();
+        alert('🔒 SESSION SECURITY ALERT: You have been logged out because your account was accessed from another Mobile/Tablet device. (Max 1 Laptop + 1 Mobile allowed simultaneously).');
+      }
+    }
+  }, [activeEmployee?.desktopSessionId, activeEmployee?.mobileSessionId]);
+
   // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
   useEffect(() => {
     const checkAutoCheckout = async () => {
@@ -371,21 +402,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(interval);
   }, [attendance]);
 
-  // TOP 1% SECURITY: Concurrent Login Abuse Prevention & Device Spoofing
-  useEffect(() => {
-    if (activeEmployee) {
-      const localSessionId = localStorage.getItem('kss_v1_session_id');
-      const localFingerprint = generateDeviceFingerprint();
-
-      if (activeEmployee.currentSessionId && localSessionId && activeEmployee.currentSessionId !== localSessionId) {
-        logout();
-        alert('SECURITY ALERT: You have been logged out because your account was accessed from another device. Concurrent logins are prohibited.');
-      } else if (activeEmployee.sessionFingerprint && activeEmployee.sessionFingerprint !== localFingerprint) {
-        logout();
-        alert('SECURITY ALERT: Session hijacked or device spoofed. You have been forcibly logged out.');
-      }
-    }
-  }, [activeEmployee]);
 
   // Sync to & from Firestore
   useEffect(() => {
@@ -714,6 +730,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Helper to apply a matched employee to state
     const applySession = (matched: Employee) => {
+      const cat = getDeviceCategory();
+      let localSessId = localStorage.getItem('kss_v1_session_id');
+      if (!localSessId) {
+        localSessId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        localStorage.setItem('kss_v1_session_id', localSessId);
+        localStorage.setItem('kss_v1_device_category', cat);
+        const sessionUpdates = cat === 'desktop' ? { desktopSessionId: localSessId } : { mobileSessionId: localSessId };
+        setDoc(doc(db, 'employees', matched.id), sessionUpdates, { merge: true }).catch(() => { });
+      }
+
       setActiveEmployee(matched);
       let assignedRole = matched.role;
       if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
@@ -874,10 +900,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const matched = employees.find(e => e.email?.toLowerCase() === cleanEmail || e.id === userCred.user.uid);
           if (matched) {
-            const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-            const newFingerprint = generateDeviceFingerprint();
+            const cat = getDeviceCategory();
+            const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            const sessionUpdates = cat === 'desktop' ? { desktopSessionId: newSessionId } : { mobileSessionId: newSessionId };
 
-            const updatedMatched = { ...matched, currentSessionId: newSessionId, sessionFingerprint: newFingerprint };
+            const updatedMatched = { ...matched, ...sessionUpdates, currentSessionId: newSessionId };
             setActiveEmployee(updatedMatched);
 
             const assignedRole = matched.role;
@@ -885,7 +912,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsAuthenticated(true);
             localStorage.setItem('kss_v1_session', matched.id);
             localStorage.setItem('kss_v1_session_id', newSessionId);
-            setDoc(doc(db, 'employees', matched.id), { currentSessionId: newSessionId, sessionFingerprint: newFingerprint }, { merge: true }).catch(() => { });
+            localStorage.setItem('kss_v1_device_category', cat);
+            setDoc(doc(db, 'employees', matched.id), sessionUpdates, { merge: true }).catch(() => { });
 
             addAuditLog('USER_LOGIN', matched.fullName, `Firebase Auth Login (${assignedRole})`);
             clearLockout(matched.id);
@@ -997,10 +1025,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (targetEmp) {
-        setActiveEmployee(targetEmp);
+        const cat = getDeviceCategory();
+        const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const sessionUpdates = cat === 'desktop' ? { desktopSessionId: newSessionId } : { mobileSessionId: newSessionId };
+
+        const updatedTarget = { ...targetEmp, ...sessionUpdates };
+        setActiveEmployee(updatedTarget);
         const assignedRole = (targetEmp.employeeId === 'CEO001' || targetEmp.employeeId === 'CTO001') ? 'SUPER_ADMIN' : targetEmp.role;
         setRole(assignedRole);
         localStorage.setItem('kss_v1_session', targetEmp.id);
+        localStorage.setItem('kss_v1_session_id', newSessionId);
+        localStorage.setItem('kss_v1_device_category', cat);
+        setDoc(doc(db, 'employees', targetEmp.id), sessionUpdates, { merge: true }).catch(() => { });
       } else {
         setRole('SUPER_ADMIN');
       }
@@ -1018,6 +1054,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAuthenticated(false);
     setIsDemoMode(true);
     localStorage.removeItem('kss_v1_session');
+    localStorage.removeItem('kss_v1_session_id');
+    localStorage.removeItem('kss_v1_device_category');
   };
 
   const addEmployee = async (empData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => {
