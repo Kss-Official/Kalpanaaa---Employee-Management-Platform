@@ -21,7 +21,10 @@ export default defineConfig(({ command }) => {
           globPatterns: command === 'build' ? ['**/*.{js,css,html,ico,png,svg,jpeg}'] : [],
           maximumFileSizeToCacheInBytes: 6000000, // 6MB to accommodate large JS bundles and logo
           skipWaiting: true,
-          clientsClaim: true
+          clientsClaim: true,
+          // Load the FCM background-messaging handler inside the generated sw.js so
+          // push notifications work even when the PWA tab is closed (required for FCM).
+          importScripts: ['/firebase-messaging-sw.js']
         },
         manifest: {
           name: 'Kalpanaaa Software Solutions',

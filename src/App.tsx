@@ -30,6 +30,7 @@ const VerificationView     = lazy(() => import('./components/public/Verification
 const HRDashboard          = lazy(() => import('./components/hr/HRDashboard').then(m => ({ default: m.HRDashboard })));
 const HRLeaveWfhApprovals  = lazy(() => import('./components/hr/HRLeaveWfhApprovals').then(m => ({ default: m.HRLeaveWfhApprovals })));
 const HRPayrollView        = lazy(() => import('./components/hr/HRPayrollView').then(m => ({ default: m.HRPayrollView })));
+const HRRulesView          = lazy(() => import('./components/hr/HRRulesView').then(m => ({ default: m.HRRulesView })));
 const PMDashboard          = lazy(() => import('./components/pm/PMDashboard').then(m => ({ default: m.PMDashboard })));
 const PMProjectsView       = lazy(() => import('./components/pm/PMProjectsView').then(m => ({ default: m.PMProjectsView })));
 const PMTeamPerformance    = lazy(() => import('./components/pm/PMTeamPerformance').then(m => ({ default: m.PMTeamPerformance })));
@@ -84,8 +85,12 @@ const MainLayout: React.FC = () => {
         setActiveTab('dashboard');
       }
     } else if (effectiveRole === 'HR_ADMIN') {
-      if (!activeTab.startsWith('hr_') && !activeTab.startsWith('emp_')) {
-        setActiveTab('hr_dashboard');
+      // HR portal home is the HR Dashboard; only redirect from tabs that are not part of the HR portal
+      const validHrTabs = ['dashboard', 'employees', 'attendance', 'leave_approvals', 'hr_payroll', 'hr_rules', 'reports'];
+      if (activeTab === 'hr_dashboard') {
+        setActiveTab('dashboard');
+      } else if (!validHrTabs.includes(activeTab) && !activeTab.startsWith('emp_')) {
+        setActiveTab('dashboard');
       }
     } else if (effectiveRole === 'PROJECT_MANAGER') {
       if (!activeTab.startsWith('pm_') && !activeTab.startsWith('emp_')) {
@@ -170,6 +175,8 @@ const MainLayout: React.FC = () => {
                 )}
 
                 {activeTab === 'hr_payroll' && <HRPayrollView />}
+                {activeTab === 'hr_rules' && <HRRulesView />}
+                {activeTab === 'hr_dashboard' && <HRDashboard onNavigateTab={tab => setActiveTab(tab)} />}
                 {activeTab === 'pm_dashboard' && <PMDashboard onNavigateTab={tab => setActiveTab(tab)} />}
                 {activeTab === 'pm_projects' && <PMProjectsView />}
                 {activeTab === 'pm_team' && <PMTeamPerformance />}

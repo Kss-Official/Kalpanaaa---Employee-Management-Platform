@@ -174,9 +174,10 @@ export const EmployeeLeaveTab: React.FC = () => {
                 const statusColor = 
                   req.status === 'Approved' ? 'var(--accent-emerald)' : 
                   req.status === 'Rejected' ? 'var(--accent-rose)' : 
+                  req.status === 'Cancelled' ? 'var(--text-tertiary)' : 
                   'var(--accent-amber)';
 
-                const Icon = req.status === 'Approved' ? Check : req.status === 'Rejected' ? X : Clock;
+                const Icon = req.status === 'Approved' ? Check : (req.status === 'Rejected' || req.status === 'Cancelled') ? X : Clock;
 
                 return (
                   <motion.div 

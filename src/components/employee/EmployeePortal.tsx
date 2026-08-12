@@ -47,11 +47,13 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Key
+  Key,
+  Users,
+  History
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
-import { generateEmployeeQrToken, calculateGpsDistanceMeters } from '../../lib/attendanceEngine';
+import { generateEmployeeQrToken, calculateGpsDistanceMeters, SHIFT_END_HOUR } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
@@ -78,7 +80,7 @@ const AVATAR_PRESETS = [
 ];
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
-  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout, updateCurrentEmployeePassword } = useAuth();
+  const { activeEmployee, attendance, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout, updateCurrentEmployeePassword, myAuditLogs } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   // Time-aware greeting
@@ -180,7 +182,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   });
 
   // Break & WFH state
-  const [activeBreak, setActiveBreak] = useState<{ type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break'; startAt: string } | null>(null);
+  const [activeBreak, setActiveBreak] = useState<{ type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break' | 'Team Huddle' | 'Official Event'; startAt: string } | null>(null);
   const [breakElapsedSec, setBreakElapsedSec] = useState(0);
   const [isWfh, setIsWfh] = useState(false);
 
@@ -275,7 +277,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     : false;
 
   // Time-of-Day Break Classifier
-  const getAutoBreakTypeByTime = (): 'Lunch Break' | 'Tea Break' | 'Geo-Fence Auto Break' => {
+  const getAutoBreakTypeByTime = (): 'Lunch Break' | 'Tea Break' | 'Geo-Fence Auto Break' | 'Team Huddle' | 'Official Event' => {
     const now = new Date();
     const timeInMins = now.getHours() * 60 + now.getMinutes();
 
@@ -291,8 +293,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   };
 
   // Autonomous Geo-Fence Departure & Return Handler
+  // After 7:00 PM (shift end) auto-breaks are skipped — the strict auto-checkout
+  // at 7:00 PM handles closing the shift instead of pausing it forever.
   useEffect(() => {
     if (!settings.gpsRequired || !todayRecord?.checkInAt || todayRecord?.checkOutAt || isWfh) return;
+
+    const localMins = new Date().getHours() * 60 + new Date().getMinutes();
+    const isPastShiftEnd = localMins >= SHIFT_END_HOUR * 60;
+    if (isPastShiftEnd) return;
 
     if (liveDistanceMeters !== null) {
       if (!isVerifiedLocation && !activeBreak) {
@@ -416,6 +424,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const res = await recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     if (res.success && res.record && isWfh) {
       updateAttendanceRecord(res.record.id, { isWfh: true, status: 'Work From Home', notes: 'Self check-in — Work From Home' });
+      addAuditLog('ATTENDANCE_WFH_CHECKIN', res.record.id, `${activeEmployee.fullName} self check-in recorded as Work From Home (${res.record.date}).`);
     }
     
     if (res.success) {
@@ -430,6 +439,36 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const [isCheckingIn, setIsCheckingIn] = useState(false);
 
+  // Try to get a fresh GPS fix (up to ~8s). Falls back to the latest watchPosition
+  // cache if the fix times out or permission is missing. Returns undefined as a
+  // last resort so recordCheckOut can fall back to the verified check-in snapshot.
+  const acquireFreshLocation = (): Promise<{ lat: number; lon: number; accuracy: number } | undefined> => {
+    return new Promise(resolve => {
+      if (!('geolocation' in navigator)) {
+        resolve(gpsLocation ?? undefined);
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        resolve(gpsLocation ?? undefined);
+      }, 8000);
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          window.clearTimeout(timer);
+          resolve({
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            accuracy: Math.round(pos.coords.accuracy) || 8
+          });
+        },
+        () => {
+          window.clearTimeout(timer);
+          resolve(gpsLocation ?? undefined);
+        },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 7000 }
+      );
+    });
+  };
+
   const handleSelfCheckOut = async () => {
     triggerHaptic('warning');
     const isFinal = window.confirm(
@@ -442,8 +481,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
     triggerHaptic('medium');
     setActionFeedback(null);
-    
-    const res = await recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
+
+    const freshGps = await acquireFreshLocation();
+    const { lat, lon, accuracy } = freshGps ?? {};
+
+    const res = await recordCheckOut(activeEmployee.id, lat, lon, accuracy);
     
     if (res.success) triggerHaptic('success');
     else triggerHaptic('error');
@@ -451,7 +493,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     setActionFeedback({ success: res.success, message: res.message });
   };
 
-  const handleStartBreak = (type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break') => {
+  const handleStartBreak = (type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break' | 'Team Huddle' | 'Official Event') => {
     triggerHaptic('medium');
     if (!todayRecord || activeBreak) return;
 
@@ -514,6 +556,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         status: newVal ? 'Work From Home' : 'Present',
         notes: newVal ? 'Employee marked as Work From Home' : 'Switched to office attendance'
       });
+      addAuditLog('ATTENDANCE_WFH_TOGGLE', todayRecord.id, `${activeEmployee.fullName} ${newVal ? 'activated' : 'deactivated'} Work From Home mode for ${todayRecord.date}.`);
     }
     setActionFeedback({ success: true, message: newVal ? '🏠 Work From Home mode activated for today.' : '🏢 Office attendance mode restored.' });
   };
@@ -566,7 +609,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    updateEmployee(activeEmployee.id, {
+    const profileUpdates = {
       fullName,
       phone,
       gender: gender as any,
@@ -583,7 +626,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       skills,
       preferredShift,
       linkedinUrl
-    });
+    };
+    const changedFields = Object.entries(profileUpdates)
+      .filter(([key, val]) => val !== (activeEmployee as any)[key] && val !== '' && val !== undefined)
+      .map(([key]) => key)
+      .join(', ');
+    updateEmployee(activeEmployee.id, profileUpdates);
+    addAuditLog(
+      'SELF_PROFILE_UPDATE',
+      `${activeEmployee.employeeId} (${activeEmployee.fullName})`,
+      changedFields ? `Self-service profile update — fields changed: ${changedFields}` : 'Self-service profile update — saved (no field changes detected)'
+    );
     setSavedSuccess(true);
     setIsSaving(false);
     setTimeout(() => setSavedSuccess(false), 2500);
@@ -758,6 +811,12 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                            <button onClick={() => handleStartBreak('Lunch Break')} className={`px-5 py-2.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 hover:bg-rose-500/30 font-bold text-sm shadow-md transition-colors ${animations.tap}`}>
                              🍽️ Lunch Break
                            </button>
+                           <button onClick={() => handleStartBreak('Team Huddle')} className={`px-5 py-2.5 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 hover:bg-blue-500/30 font-bold text-sm shadow-md transition-colors ${animations.tap}`}>
+                             👥 Team Huddle
+                           </button>
+                           <button onClick={() => handleStartBreak('Official Event')} className={`px-5 py-2.5 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 font-bold text-sm shadow-md transition-colors ${animations.tap}`}>
+                             🎉 Official Work / Event
+                           </button>
                          </>
                        )}
                     </div>
@@ -857,6 +916,12 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   </button>
                   <button onClick={() => handleStartBreak('Lunch Break')} className="px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-rose-900/40 transition-all flex items-center gap-2">
                     <UtensilsCrossed className="w-4 h-4" /> Start Lunch Break
+                  </button>
+                  <button onClick={() => handleStartBreak('Team Huddle')} className="px-5 py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-blue-900/40 transition-all flex items-center gap-2">
+                    <Users className="w-4 h-4" /> Team Huddle
+                  </button>
+                  <button onClick={() => handleStartBreak('Official Event')} className="px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-purple-900/40 transition-all flex items-center gap-2">
+                    <Briefcase className="w-4 h-4" /> Official Work
                   </button>
                 </div>
               )}
@@ -967,16 +1032,36 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       <div>
                         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Check In</div>
                         <div className="font-mono font-bold text-white text-sm">
-                          {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--'}
+                          {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : '--:--'}
                         </div>
                       </div>
                       <div>
                         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Check Out</div>
                         <div className="font-mono font-bold text-white text-sm">
-                          {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : <span className="text-emerald-400 text-xs animate-pulse">Active</span>}
+                          {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : <span className="text-emerald-400 text-xs animate-pulse">Active</span>}
                         </div>
                       </div>
                     </div>
+
+                    {/* Break Details Block */}
+                    {rec.breaks && rec.breaks.length > 0 && (
+                      <div className="bg-slate-900/40 rounded-xl p-3 mb-3 border border-slate-800/30">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Break History</div>
+                        <div className="space-y-1.5">
+                          {rec.breaks.map((b, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-slate-300">☕ {b.type}</span>
+                              </div>
+                              <div className="font-mono text-slate-400">
+                                {new Date(b.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} - {b.endAt ? new Date(b.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Active'} 
+                                <span className="ml-2 text-amber-400/80 font-bold">({b.durationMinutes}m)</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Row 3: Break + GPS + Method */}
                     <div className="flex items-center gap-3 flex-wrap">
@@ -1095,6 +1180,80 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       {/* 6. PAYSLIPS TAB */}
       {activeTab === 'emp_payslips' && (
         <EmployeePayslips />
+      )}
+
+      {/* 6B. MY ACTIVITY LOG TAB — permanent audit trail of every self-service action */}
+      {activeTab === 'emp_activity' && (
+        <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-6 sm:p-8 shadow-2xl max-w-4xl mx-auto space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
+            <div>
+              <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
+                <History className="w-5 h-5 text-blue-400" />
+                My Activity Log
+              </h2>
+              <p className="text-slate-400 text-xs mt-0.5">
+                Permanent, tamper-proof record of every action you perform in the portal.
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-300 text-[11px] font-bold shrink-0">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              {myAuditLogs.length} recorded action{myAuditLogs.length === 1 ? '' : 's'}
+            </span>
+          </div>
+
+          {myAuditLogs.length === 0 ? (
+            <div className="py-16 flex flex-col items-center justify-center text-center">
+              <div className="w-16 h-16 rounded-2xl bg-slate-800/60 border border-slate-700 flex items-center justify-center mb-4">
+                <ShieldCheck className="w-8 h-8 text-slate-500" />
+              </div>
+              <h3 className="text-slate-300 font-bold text-sm">No activity recorded yet</h3>
+              <p className="text-slate-500 text-xs mt-1 max-w-[260px]">
+                Actions like check-in, breaks, leave requests, and profile changes will appear here permanently.
+              </p>
+            </div>
+          ) : (
+            <div className="relative space-y-3">
+              <div className="absolute left-[18px] top-2 bottom-2 w-px bg-gradient-to-b from-blue-500/40 via-slate-700 to-transparent" />
+              {myAuditLogs.map(log => {
+                const catColor: Record<string, string> = {
+                  attendance: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+                  leave: 'text-violet-400 bg-violet-500/10 border-violet-500/20',
+                  profile: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+                  security: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
+                  payroll: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+                  rules: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+                  admin: 'text-orange-400 bg-orange-500/10 border-orange-500/20',
+                  system: 'text-slate-400 bg-slate-500/10 border-slate-500/20',
+                };
+                const badgeClass = catColor[log.category || 'system'] || catColor.system;
+                return (
+                  <div key={log.id} className="relative flex items-start gap-4 pl-0">
+                    <div className="relative z-10 shrink-0 mt-1 w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+                      <ShieldCheck className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div className="flex-1 bg-slate-950/50 border border-slate-800/70 rounded-2xl p-4">
+                      <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                        <span className="font-mono text-[10px] font-bold bg-slate-900 text-slate-300 px-2 py-0.5 rounded-md border border-slate-700">
+                          {log.action}
+                        </span>
+                        <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${badgeClass}`}>
+                          {log.category || 'system'}
+                        </span>
+                        <span className="text-[10px] text-slate-500 ml-auto font-medium tabular-nums">
+                          {new Date(log.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">{log.details}</p>
+                      {log.ipAddress && (
+                        <p className="text-[10px] text-slate-600 mt-1.5 font-mono">IP: {log.ipAddress}</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
       {/* 7. EDIT PROFILE & FACE PHOTO SETTINGS TAB */}
@@ -1620,6 +1779,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             faceEnrolledAt: new Date().toISOString(),
             faceDescriptor: descriptorArray
           });
+          addAuditLog('SECURITY_FACE_ENROLLED', activeEmployee.id, `${activeEmployee.fullName} enrolled a face biometric template for attendance verification.`);
           setActionFeedback({ success: true, message: '✓ Face Biometric Template Successfully Enrolled & Synced to Cloud DB!' });
           setTimeout(() => setActionFeedback(null), 3500);
         }}

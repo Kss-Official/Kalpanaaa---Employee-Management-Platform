@@ -96,7 +96,7 @@ export const LeaveApprovalsView: React.FC = () => {
           {(activeTab === 'pending' ? pendingRequests : pastRequests).map((req, i) => {
             const emp = employees.find(e => e.id === req.employeeId || e.employeeId === req.employeeId);
             const isWfh = req.type === 'WFH';
-            const statusColor = req.status === 'Approved' ? 'var(--accent-emerald)' : req.status === 'Rejected' ? 'var(--accent-rose)' : 'var(--accent-amber)';
+            const statusColor = req.status === 'Approved' ? 'var(--accent-emerald)' : req.status === 'Rejected' ? 'var(--accent-rose)' : req.status === 'Cancelled' ? 'var(--text-tertiary)' : 'var(--accent-amber)';
 
             return (
               <motion.div

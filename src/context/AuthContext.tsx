@@ -8,7 +8,10 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
-  onSnapshot
+  onSnapshot,
+  query,
+  where,
+  limit
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig } from '../lib/firebase';
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
@@ -19,9 +22,9 @@ import {
   INITIAL_COMPANY_SETTINGS
 } from '../lib/demoData';
 import { initializeApp } from 'firebase/app';
-import { evaluateAttendanceScan, calculateGpsDistanceMeters } from '../lib/attendanceEngine';
+import { evaluateAttendanceScan, calculateGpsDistanceMeters, computeShiftWorkingMinutes, getShiftEndForDate, SHIFT_END_HOUR } from '../lib/attendanceEngine';
 import { fetchAbsoluteTime } from '../lib/absoluteTime';
-import { sendKssNotification, sendAdminBroadcast, registerFcmToken, KssNotification } from '../lib/notifications';
+import { sendKssNotification, sendAdminBroadcast, registerFcmToken, setupFcmForegroundListener, KssNotification } from '../lib/notifications';
 
 const generateDeviceFingerprint = () => {
   return btoa(`${navigator.userAgent}|${screen.width}x${screen.height}|${navigator.language}|${new Date().getTimezoneOffset()}`);
@@ -34,6 +37,41 @@ const getDeviceCategory = (): 'desktop' | 'mobile' => {
     return 'mobile';
   }
   return 'desktop';
+};
+
+// Best-effort client IP capture — resolved once, cached for the session + device
+let cachedIp: string | null = null;
+const resolveClientIp = (): string | null => {
+  try {
+    if (cachedIp) return cachedIp;
+    const existing = localStorage.getItem('kss_v1_client_ip');
+    if (existing) {
+      cachedIp = existing;
+      return cachedIp;
+    }
+    fetch('https://api.ipify.org?format=json', { mode: 'cors' })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && typeof data.ip === 'string' && data.ip.length <= 45) {
+          cachedIp = data.ip;
+          localStorage.setItem('kss_v1_client_ip', data.ip);
+        }
+      })
+      .catch(() => { /* best-effort only — never block an action on IP lookup */ });
+  } catch { /* ignore */ }
+  return cachedIp;
+};
+
+const deriveAuditCategory = (action: string): AuditLog['category'] => {
+  const a = action.toUpperCase();
+  if (a.startsWith('ATTENDANCE') || a === 'AUTO_CHECKOUT') return 'attendance';
+  if (a.startsWith('LEAVE')) return 'leave';
+  if (a === 'SELF_PROFILE_UPDATE' || a === 'EMPLOYEE_PROFILE_UPDATE' || a.startsWith('EMPLOYEE')) return 'profile';
+  if (a.startsWith('SECURITY') || a === 'USER_LOGIN' || a === 'USER_LOGOUT') return 'security';
+  if (a.startsWith('PAYROLL') || a.startsWith('SALARY')) return 'payroll';
+  if (a.startsWith('RULE') || a.startsWith('COMPANY_RULE')) return 'rules';
+  if (a.startsWith('SETTINGS') || a.startsWith('ADMIN') || a === 'QR_REGENERATED' || a === 'COMPANY_WORKZONE_UPDATED' || a === 'ADMIN_BROADCAST') return 'admin';
+  return 'system';
 };
 
 const sanitizeInput = <T extends any>(data: T): T => {
@@ -121,6 +159,7 @@ interface AuthContextType {
   employees: Employee[];
   attendance: AttendanceRecord[];
   auditLogs: AuditLog[];
+  myAuditLogs: AuditLog[];
   settings: CompanySettings;
   companyWorkZone: WorkZone;
   leaveRequests: LeaveRequest[];
@@ -203,10 +242,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
     const saved = localStorage.getItem('kss_v1_attendance');
     if (saved) {
-      const todayStr = new Date().toISOString().split('T')[0];
       const parsed = JSON.parse(saved) as AttendanceRecord[];
-      // Purge yesterday and all past testing attendance records
-      return parsed.filter(a => a.date >= todayStr);
+      return parsed;
     }
     return [];
   });
@@ -215,6 +252,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = localStorage.getItem('kss_v1_audit_logs');
     return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
   });
+
+  // Personal, permanent activity feed — every authenticated employee sees their own trail
+  const [myAuditLogs, setMyAuditLogs] = useState<AuditLog[]>([]);
 
   const [settings, setSettings] = useState<CompanySettings>(() => {
     const saved = localStorage.getItem('kss_v1_settings');
@@ -255,9 +295,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Debounced localStorage persistence — batches all state saves into one write per 500ms
   useEffect(() => {
     const handler = setTimeout(() => {
-      const todayStr = new Date().toISOString().split('T')[0];
       localStorage.setItem('kss_v1_employees', JSON.stringify(employees));
-      localStorage.setItem('kss_v1_attendance', JSON.stringify(attendance.filter(a => a.date >= todayStr)));
+      localStorage.setItem('kss_v1_attendance', JSON.stringify(attendance));
       localStorage.setItem('kss_v1_audit_logs', JSON.stringify(auditLogs));
       localStorage.setItem('kss_v1_settings', JSON.stringify(settings));
       localStorage.setItem('kss_v1_work_zone', JSON.stringify(companyWorkZone));
@@ -299,6 +338,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (isAuthenticated && activeEmployee && isFirestoreConnected) {
       registerFcmToken(activeEmployee.id, activeEmployee.role).catch(() => {});
+      setupFcmForegroundListener();
     }
   }, [isAuthenticated, activeEmployee?.id, isFirestoreConnected]);
 
@@ -325,41 +365,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [employees, activeEmployee?.id, activeEmployee?.role, role]);
 
 
-  // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
+  // SYSTEM RULE: Strict Auto-Checkout at 7:00 PM (19:00) shift end.
+  // The working-hours timer is capped inside 10:00 AM – 7:00 PM; any open break is
+  // closed at cutoff so a forgotten checkout after hours is NEVER recorded as a break.
   useEffect(() => {
     const checkAutoCheckout = async () => {
       if (attendance.length === 0) return;
       const absoluteNow = await fetchAbsoluteTime();
       const todayStr = absoluteNow.toISOString().split('T')[0];
-      const currentHours = absoluteNow.getHours();
-      const currentMinutes = absoluteNow.getMinutes();
-      const isPastSevenThirtyPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 30);
+      const currentMins = absoluteNow.getHours() * 60 + absoluteNow.getMinutes();
+      const isPastShiftEnd = currentMins >= SHIFT_END_HOUR * 60;
 
       attendance.forEach(record => {
         const isPastDay = record.date < todayStr;
-        const isTodayPastCutoff = record.date === todayStr && isPastSevenThirtyPm;
+        const isTodayPastCutoff = record.date === todayStr && isPastShiftEnd;
 
         if (!record.checkOutAt && (isPastDay || isTodayPastCutoff)) {
-          // Construct 7:30 PM ISO cutoff timestamp for the record date
-          const autoCheckOutDate = new Date(`${record.date}T19:30:00`);
-          const forceCheckOutTime = autoCheckOutDate.toISOString();
+          // Strict 7:00 PM cutoff timestamp for the record date
+          const forceCheckOutTime = getShiftEndForDate(record.date).toISOString();
 
-          let totalMins = 0;
-          if (record.checkInAt) {
-            totalMins = Math.floor((autoCheckOutDate.getTime() - new Date(record.checkInAt).getTime()) / 60000);
-            if (record.totalBreakMinutes) {
-              totalMins = Math.max(0, totalMins - record.totalBreakMinutes);
-            }
+          // Close any open break so the record is fully consistent
+          const existingBreaks = record.breaks || [];
+          const openBreak = existingBreaks.find(b => !b.endAt);
+          let breakMinutes = record.totalBreakMinutes || 0;
+          let updatedBreaks = existingBreaks;
+
+          if (openBreak) {
+            const elapsed = Math.max(0, Math.floor((getShiftEndForDate(record.date).getTime() - new Date(openBreak.startAt).getTime()) / 60000));
+            breakMinutes += elapsed;
+            updatedBreaks = existingBreaks.map(b =>
+              b.startAt === openBreak.startAt && !b.endAt
+                ? { ...b, endAt: forceCheckOutTime, durationMinutes: elapsed }
+                : b
+            );
           }
-          totalMins = Math.max(0, totalMins);
 
-          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:30 PM (Default Shift End)';
+          const totalMins = computeShiftWorkingMinutes(record.date, record.checkInAt, forceCheckOutTime, breakMinutes);
+          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:00 PM (Strict Shift End)';
 
           // Update local state
           setAttendance(prev => prev.map(a => a.id === record.id ? {
             ...a,
             checkOutAt: forceCheckOutTime,
             workingMinutes: totalMins,
+            breaks: updatedBreaks,
+            totalBreakMinutes: breakMinutes,
             notes: updatedNotes
           } : a));
 
@@ -367,10 +417,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'attendance', record.id), {
             checkOutAt: forceCheckOutTime,
             workingMinutes: totalMins,
+            breaks: updatedBreaks,
+            totalBreakMinutes: breakMinutes,
             notes: updatedNotes
           }, { merge: true }).catch(() => { });
 
-          addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Auto-checked out at 7:30 PM for ${record.date}`);
+          addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Auto-checked out at 7:00 PM (strict shift end) for ${record.date}`);
         }
       });
     };
@@ -544,11 +596,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             snapshot.forEach(docSnap => {
               const data = { id: docSnap.id, ...docSnap.data() } as AttendanceRecord;
               
-              // AUTOMATICALLY PURGE YESTERDAY & PAST TESTING ATTENDANCE FROM FIRESTORE
-              if (data.date && data.date < todayStr) {
-                deleteDoc(doc(db, 'attendance', data.id)).catch(() => { });
-                return;
-              }
+              // (Removed auto-purge logic to allow attendance history to be maintained)
 
               // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KSS2407 and KS -> KSS
               if (data.employeeCode) {
@@ -675,7 +723,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let unsubLogs = () => { };
     if (isAuthenticated && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) {
-      unsubLogs = onSnapshot(collection(db, 'auditLogs'), (snapshot) => {
+      // Bounded read of the latest 1000 records — the full permanent archive stays in Firestore
+      unsubLogs = onSnapshot(query(collection(db, 'auditLogs'), limit(1000)), (snapshot) => {
         if (!snapshot.empty) {
           const fetched: AuditLog[] = [];
           snapshot.forEach(docSnap => {
@@ -694,6 +743,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     return () => unsubLogs();
   }, [isAuthenticated, role]);
+
+  // Personal permanent activity feed — every employee sees their own audit history
+  useEffect(() => {
+    let unsubMyLogs = () => { };
+    if (isAuthenticated && activeEmployee && role !== 'SUPER_ADMIN' && role !== 'HR_ADMIN') {
+      unsubMyLogs = onSnapshot(
+        query(collection(db, 'auditLogs'), where('actorId', '==', activeEmployee.id), limit(500)),
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const fetched: AuditLog[] = [];
+            snapshot.forEach(docSnap => {
+              fetched.push({ id: docSnap.id, ...docSnap.data() } as AuditLog);
+            });
+            fetched.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setMyAuditLogs(fetched);
+          } else {
+            setMyAuditLogs([]);
+          }
+        },
+        (error) => {
+          console.warn('Personal activity feed unavailable (offline or rules pending):', error);
+        }
+      );
+    } else {
+      setMyAuditLogs([]);
+    }
+    return () => unsubMyLogs();
+  }, [isAuthenticated, activeEmployee?.id, role]);
 
   // ── Session Restore: runs ONCE on mount, then waits for Firestore to populate via onSnapshot ──
   // The Firestore employees snapshot effect keeps employeesRef current.
@@ -788,20 +865,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const addAuditLog = (action: string, target: string, details: string) => {
+  const addAuditLog = (action: string, target: string, details: string, actorOverride?: { actorId?: string; actorName?: string; actorRole?: UserRole }) => {
+    const now = new Date().toISOString();
+    const randomSuffix = Math.random().toString(36).slice(2, 8);
     const newLog: AuditLog = {
-      id: `log-${Date.now()}`,
-      actorId: activeEmployee?.id || 'sys-admin',
-      actorName: activeEmployee?.fullName || 'System Admin',
-      actorRole: role,
+      id: `log-${Date.now()}-${randomSuffix}`,
+      actorId: actorOverride?.actorId || activeEmployee?.id || 'sys-admin',
+      actorName: actorOverride?.actorName || activeEmployee?.fullName || 'System Admin',
+      actorRole: actorOverride?.actorRole || role,
       action,
       target,
       details,
-      timestamp: new Date().toISOString()
+      timestamp: now,
+      ipAddress: resolveClientIp() || undefined,
+      category: deriveAuditCategory(action)
     };
-    setAuditLogs(prev => [newLog, ...prev]);
+    setAuditLogs(prev => [newLog, ...prev].slice(0, 1000));
+    if (newLog.actorId === activeEmployee?.id) {
+      setMyAuditLogs(prev => [newLog, ...prev.filter(l => l.id !== newLog.id)].slice(0, 500));
+    }
 
-    // Async write to Firestore
+    // Async write to Firestore — permanent, immutable record of every action
     setDoc(doc(db, 'auditLogs', newLog.id), newLog).catch(err => {
       handleFirestoreError(err, OperationType.WRITE, `auditLogs/${newLog.id}`);
     });
@@ -894,7 +978,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             localStorage.setItem('kss_v1_device_category', cat);
             setDoc(doc(db, 'employees', matched.id), sessionUpdates, { merge: true }).catch(() => { });
 
-            addAuditLog('USER_LOGIN', matched.fullName, `Firebase Auth Login (${assignedRole})`);
+            addAuditLog('USER_LOGIN', matched.fullName, `Firebase Auth Login (${assignedRole})`, { actorId: matched.id, actorName: matched.fullName, actorRole: assignedRole });
             clearLockout(matched.id);
             setIsLoading(false);
             return { success: true, message: `Welcome back, ${matched.fullName}!` };
@@ -1003,6 +1087,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         targetEmp = employees.find(e => e.role === 'EMPLOYEE') || employees[3];
       }
 
+      let assignedRole: UserRole = 'SUPER_ADMIN';
       if (targetEmp) {
         const cat = getDeviceCategory();
         const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -1010,7 +1095,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const updatedTarget = { ...targetEmp, ...sessionUpdates };
         setActiveEmployee(updatedTarget);
-        const assignedRole = (targetEmp.employeeId === 'CEO001' || targetEmp.employeeId === 'CTO001') ? 'SUPER_ADMIN' : targetEmp.role;
+        assignedRole = (targetEmp.employeeId === 'CEO001' || targetEmp.employeeId === 'CTO001') ? 'SUPER_ADMIN' : targetEmp.role;
         setRole(assignedRole);
         localStorage.setItem('kss_v1_session', targetEmp.id);
         localStorage.setItem('kss_v1_session_id', newSessionId);
@@ -1022,11 +1107,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAuthenticated(true);
       setIsDemoMode(true);
       setIsLoading(false);
-      addAuditLog('USER_LOGIN', `Demo Executive Login (${targetRole})`, `Switched workspace view to ${targetRole}`);
+      addAuditLog('USER_LOGIN', `Demo Executive Login (${targetRole})`, `Switched workspace view to ${targetRole}`, {
+        actorId: targetEmp?.id || 'demo',
+        actorName: targetEmp?.fullName || `Demo ${targetRole}`,
+        actorRole: assignedRole
+      });
     }, 150);
   };
 
   const logout = () => {
+    if (activeEmployee) {
+      addAuditLog('USER_LOGOUT', activeEmployee.fullName, `Signed out of the portal (${getDeviceCategory()})`, {
+        actorId: activeEmployee.id,
+        actorName: activeEmployee.fullName,
+        actorRole: activeEmployee.role
+      });
+    }
     auth.signOut();
     setUser(null);
     setActiveEmployee(null);
@@ -1274,18 +1370,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const finalTotalBreakMinutes = (existingRec.totalBreakMinutes || 0) + additionalBreakMins;
 
-    const startTime = new Date(existingRec.checkInAt).getTime();
-    let durationMins = Math.floor((new Date(nowISO).getTime() - startTime) / 60000);
-    
-    if (finalTotalBreakMinutes > 0) {
-      durationMins = Math.max(0, durationMins - finalTotalBreakMinutes);
-    }
-    durationMins = Math.max(1, durationMins);
+    // Working minutes are capped strictly inside the 10 AM – 7 PM shift window.
+    const durationMins = computeShiftWorkingMinutes(todayStr, existingRec.checkInAt, nowISO, finalTotalBreakMinutes);
+    const finalDurationMins = Math.max(1, durationMins);
 
     const updatedRecord: AttendanceRecord = {
       ...existingRec,
       checkOutAt: nowISO,
-      workingMinutes: durationMins,
+      workingMinutes: finalDurationMins,
       breaks: updatedBreaks,
       totalBreakMinutes: finalTotalBreakMinutes,
       officeLatitude: existingRec.officeLatitude || companyWorkZone.latitude,
@@ -1304,7 +1396,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       handleFirestoreError(err, OperationType.UPDATE, `attendance/${updatedRecord.id}`);
     });
 
-    addAuditLog('ATTENDANCE_CHECKOUT', `${emp.employeeId} (${emp.fullName})`, `Duration: ${Math.floor(durationMins / 60)}h ${durationMins % 60}m`);
+    addAuditLog('ATTENDANCE_CHECKOUT', `${emp.employeeId} (${emp.fullName})`, `Duration: ${Math.floor(finalDurationMins / 60)}h ${finalDurationMins % 60}m`);
 
     return { success: true, message: 'Checked Out Successfully', record: updatedRecord };
   };
@@ -1406,9 +1498,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const cancelLeaveRequest = (id: string) => {
-    setLeaveRequests(prev => prev.filter(req => req.id !== id));
-    // Remove from Firestore
-    deleteDoc(doc(db, 'leaveRequests', id)).catch(err => {
+    // Soft-cancel: the request is permanently archived as 'Cancelled' instead of being deleted,
+    // so the employee's full request history is always preserved.
+    setLeaveRequests(prev => prev.map(req => req.id === id ? {
+      ...req,
+      status: 'Cancelled' as const,
+      reviewedBy: activeEmployee?.fullName || 'Employee',
+      reviewNotes: 'Cancelled by employee before approval'
+    } : req));
+    setDoc(doc(db, 'leaveRequests', id), {
+      status: 'Cancelled',
+      reviewedBy: activeEmployee?.fullName || 'Employee',
+      reviewNotes: 'Cancelled by employee before approval',
+      cancelledAt: new Date().toISOString()
+    }, { merge: true }).catch(err => {
       handleFirestoreError(err, OperationType.UPDATE, `leaveRequests/${id}`);
     });
     addAuditLog('LEAVE_CANCELLED', activeEmployee?.fullName || 'Employee', `Cancelled leave request ${id}`);
@@ -1551,6 +1654,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       employees,
       attendance,
       auditLogs,
+      myAuditLogs,
       settings,
       companyWorkZone,
       leaveRequests,

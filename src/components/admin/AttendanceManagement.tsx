@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { AttendanceRecord, AttendanceStatus } from '../../types';
 import { 
@@ -14,12 +14,17 @@ import {
   Edit3, 
   UserCheck,
   Building2,
-  RefreshCw
+  RefreshCw,
+  History,
+  FileSpreadsheet,
+  X,
+  Grid3X3
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
+import { exportAttendanceToCSV } from '../../lib/exportCsv';
 
 export const AttendanceManagement: React.FC = () => {
-  const { attendance, employees, updateAttendanceRecord, settings } = useAuth();
+  const { attendance, employees, updateAttendanceRecord, settings, isFirestoreConnected } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
@@ -27,8 +32,22 @@ export const AttendanceManagement: React.FC = () => {
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'all'>('all');
 
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
-  const [editStatus, setEditStatus] = useState<AttendanceStatus>('Present');
+  const [editStatus, setEditStatus] = useState<AttendanceStatus | ''>('');
   const [editNotes, setEditNotes] = useState('');
+  
+  // Individual History Modal State
+  const [viewingHistoryEmployee, setViewingHistoryEmployee] = useState<{ id: string; name: string } | null>(null);
+
+  // Monthly Attendance Tracker State
+  const [showMonthlyTracker, setShowMonthlyTracker] = useState(true);
+  const [trackerMonth, setTrackerMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
+
+  // Live sync indicator
+  const [lastSyncedAt, setLastSyncedAt] = useState<string>(() => new Date().toLocaleTimeString());
+
+  useEffect(() => {
+    setLastSyncedAt(new Date().toLocaleTimeString());
+  }, [attendance]);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const yesterdayObj = new Date();
@@ -37,7 +56,26 @@ export const AttendanceManagement: React.FC = () => {
 
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
-  const filteredRecords = attendance.filter(rec => {
+  // Sanitize + deduplicate attendance records so empty/invalid or duplicate rows never appear
+  const cleanedAttendance = useMemo(() => {
+    const seen = new Map<string, AttendanceRecord>();
+    attendance.forEach(rec => {
+      const hasName = (rec.employeeName || '').trim() || (rec.employeeCode || '').trim();
+      const validDate = !!rec.date && !isNaN(new Date(rec.date).getTime());
+      if (!hasName || !validDate) return;
+      const key = `${rec.employeeId || rec.employeeCode}_${rec.date}`;
+      const prev = seen.get(key);
+      if (!prev || new Date(rec.updatedAt || rec.createdAt || 0).getTime() >= new Date(prev.updatedAt || prev.createdAt || 0).getTime()) {
+        seen.set(key, rec);
+      }
+    });
+    return Array.from(seen.values()).sort((a, b) => {
+      const t = b.date.localeCompare(a.date);
+      return t !== 0 ? t : (a.employeeName || '').localeCompare(b.employeeName || '');
+    });
+  }, [attendance]);
+
+  const filteredRecords = cleanedAttendance.filter(rec => {
     const matchesSearch = 
       (rec.employeeName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (rec.employeeCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -92,8 +130,8 @@ export const AttendanceManagement: React.FC = () => {
   const handleForceCheckout = () => {
     if (!editingRecord) return;
     
-    // Set to standard 7:30 PM checkout time for that date
-    const autoCheckOutDate = new Date(`${editingRecord.date}T19:30:00`);
+    // Set to standard 7:00 PM strict shift-end checkout time for that date
+    const autoCheckOutDate = new Date(`${editingRecord.date}T19:00:00`);
     const forceCheckOutTime = autoCheckOutDate.toISOString();
     
     let totalMins = 0;
@@ -108,9 +146,67 @@ export const AttendanceManagement: React.FC = () => {
     updateAttendanceRecord(editingRecord.id, {
       checkOutAt: forceCheckOutTime,
       workingMinutes: totalMins,
-      notes: editNotes ? `HR Force Checkout: ${editNotes}` : (editingRecord.notes ? `${editingRecord.notes} | HR Force Checkout at 19:30` : 'HR Force Checkout at 19:30')
+      notes: editNotes ? `HR Force Checkout: ${editNotes}` : (editingRecord.notes ? `${editingRecord.notes} | HR Force Checkout at 19:00` : 'HR Force Checkout at 19:00')
     });
     setEditingRecord(null);
+  };
+
+  // ── Monthly Attendance Tracker data ──
+  const trackerDaysInMonth = (() => {
+    const [y, m] = trackerMonth.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  })();
+
+  const trackerRecords = cleanedAttendance.filter(a => a.date.startsWith(trackerMonth));
+
+  const trackerRows = employees.map(emp => {
+    const empRecs = trackerRecords.filter(a => a.employeeId === emp.id || a.employeeCode === emp.employeeId);
+    const byDay: Record<number, AttendanceRecord> = {};
+    empRecs.forEach(rec => {
+      const day = Number(rec.date.slice(8, 10));
+      if (!day || isNaN(day)) return;
+      if (!byDay[day] || new Date(rec.updatedAt || rec.createdAt || 0).getTime() >= new Date(byDay[day].updatedAt || byDay[day].createdAt || 0).getTime()) {
+        byDay[day] = rec;
+      }
+    });
+    const summary = {
+      present: empRecs.filter(a => a.status === 'Present').length,
+      late: empRecs.filter(a => a.status === 'Late').length,
+      absent: empRecs.filter(a => a.status === 'Absent').length,
+      half: empRecs.filter(a => a.status === 'Half Day').length,
+      leave: empRecs.filter(a => a.status === 'On Leave').length,
+      wfh: empRecs.filter(a => a.status === 'Work From Home' || a.isWfh).length,
+      hours: empRecs.reduce((s, a) => s + (a.workingMinutes || 0), 0) / 60
+    };
+    return { emp, byDay, summary, count: empRecs.length };
+  });
+
+  const trackerNoRecordCount = trackerRows.filter(r => r.count === 0).length;
+
+  const statusDot = (status: AttendanceStatus) => {
+    switch (status) {
+      case 'Present': return 'bg-emerald-500';
+      case 'Late': return 'bg-amber-500';
+      case 'Absent': return 'bg-rose-500';
+      case 'Half Day': return 'bg-blue-500';
+      case 'On Leave': return 'bg-purple-500';
+      case 'Work From Home': return 'bg-sky-500';
+      case 'Holiday': return 'bg-slate-600';
+      default: return 'bg-slate-700';
+    }
+  };
+
+  const statusShort = (status: AttendanceStatus) => {
+    switch (status) {
+      case 'Present': return 'P';
+      case 'Late': return 'L';
+      case 'Absent': return 'A';
+      case 'Half Day': return 'HD';
+      case 'On Leave': return 'LV';
+      case 'Work From Home': return 'WFH';
+      case 'Holiday': return 'H';
+      default: return '?';
+    }
   };
 
   return (
@@ -124,13 +220,43 @@ export const AttendanceManagement: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => generateAttendanceReportPdf(filteredRecords, settings, 'Attendance Master Log Report')}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
-        >
-          <FileDown className="w-4 h-4" />
-          Export PDF Statement
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border ${
+            isFirestoreConnected
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isFirestoreConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            {isFirestoreConnected ? `Live • ${lastSyncedAt}` : 'Offline cache'}
+          </span>
+
+          <button
+            onClick={() => setShowMonthlyTracker(!showMonthlyTracker)}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer border ${
+              showMonthlyTracker
+                ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-900/40'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+            }`}
+          >
+            <Grid3X3 className="w-4 h-4" />
+            Monthly Tracker
+          </button>
+
+          <button
+            onClick={() => exportAttendanceToCSV(filteredRecords, `Attendance_Export_${new Date().toISOString().split('T')[0]}`)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-emerald-900/40"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => generateAttendanceReportPdf(filteredRecords, settings, 'Attendance Master Log Report')}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
+          >
+            <FileDown className="w-4 h-4" />
+            Export PDF
+          </button>
+        </div>
       </div>
 
       {/* Filters Bar */}
@@ -198,6 +324,102 @@ export const AttendanceManagement: React.FC = () => {
         </div>
       </div>
 
+      {/* Monthly Attendance Tracker */}
+      {showMonthlyTracker && (
+        <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
+          <div className="px-5 pt-5 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Grid3X3 className="w-4 h-4 text-purple-400" />
+                Monthly Attendance Tracker
+              </h2>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Whole-month attendance matrix per employee. {trackerNoRecordCount} employee{trackerNoRecordCount === 1 ? '' : 's'} have no records in this month.
+              </p>
+            </div>
+            <input
+              type="month"
+              value={trackerMonth}
+              onChange={e => setTrackerMonth(e.target.value)}
+              className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-2.5 bg-slate-950/50 border-b border-slate-800/60 text-[10px] font-semibold text-slate-400">
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Present</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Late</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Absent</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Half Day</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-purple-500" /> On Leave</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> Work From Home</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-700" /> No Record</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-950 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="py-2.5 px-4 min-w-[190px] sticky left-0 bg-slate-950 z-10 border-r border-slate-800/60">Employee</th>
+                  {Array.from({ length: trackerDaysInMonth }, (_, i) => i + 1).map(day => (
+                    <th key={day} className="py-2.5 px-1.5 text-center min-w-[26px]">{day}</th>
+                  ))}
+                  <th className="py-2.5 px-2 text-center min-w-[38px]">P</th>
+                  <th className="py-2.5 px-2 text-center min-w-[38px]">L</th>
+                  <th className="py-2.5 px-2 text-center min-w-[38px]">A</th>
+                  <th className="py-2.5 px-2 text-center min-w-[38px]">HD</th>
+                  <th className="py-2.5 px-2 text-center min-w-[38px]">LV</th>
+                  <th className="py-2.5 px-2 text-center min-w-[38px]">WFH</th>
+                  <th className="py-2.5 px-3 text-center min-w-[56px]">Hours</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-xs">
+                {trackerRows.map(({ emp, byDay, summary, count }) => (
+                  <tr key={emp.id} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="py-2.5 px-4 sticky left-0 bg-slate-900 z-10 border-r border-slate-800/60">
+                      <div className="font-bold text-white">{emp.fullName}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{emp.employeeId} • {emp.department}</div>
+                    </td>
+                    {count === 0 ? (
+                      <td colSpan={trackerDaysInMonth} className="py-2.5 px-3 text-slate-600 text-[10px] italic">
+                        No attendance records this month
+                      </td>
+                    ) : (
+                      Array.from({ length: trackerDaysInMonth }, (_, i) => i + 1).map(day => {
+                        const rec = byDay[day];
+                        return (
+                          <td key={day} className="py-2.5 px-1.5 text-center">
+                            {rec ? (
+                              <span
+                                title={`${rec.date} — ${rec.status}${rec.checkInAt ? ' · ' + new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}`}
+                                className={`inline-flex w-4 h-4 rounded-full ${statusDot(rec.status)} items-center justify-center text-[8px] font-black text-slate-950 cursor-help`}
+                              >
+                                {statusShort(rec.status)}
+                              </span>
+                            ) : (
+                              <span className="inline-block w-3 h-3 rounded-full bg-slate-800/80" />
+                            )}
+                          </td>
+                        );
+                      })
+                    )}
+                    <td className="py-2.5 px-2 text-center font-bold text-emerald-400">{summary.present}</td>
+                    <td className="py-2.5 px-2 text-center font-bold text-amber-400">{summary.late}</td>
+                    <td className="py-2.5 px-2 text-center font-bold text-rose-400">{summary.absent}</td>
+                    <td className="py-2.5 px-2 text-center font-bold text-blue-400">{summary.half}</td>
+                    <td className="py-2.5 px-2 text-center font-bold text-purple-400">{summary.leave}</td>
+                    <td className="py-2.5 px-2 text-center font-bold text-sky-400">{summary.wfh}</td>
+                    <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-200">
+                      {summary.hours > 0 ? `${summary.hours.toFixed(1)}h` : '--'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Attendance Master Table */}
       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
@@ -209,6 +431,7 @@ export const AttendanceManagement: React.FC = () => {
                 <th className="py-3.5 px-4">Check In</th>
                 <th className="py-3.5 px-4">Check Out</th>
                 <th className="py-3.5 px-4">Working Hours</th>
+                <th className="py-3.5 px-4">Breaks & Meals</th>
                 <th className="py-3.5 px-4">Status</th>
                 <th className="py-3.5 px-4">Method & GPS</th>
                 <th className="py-3.5 px-4 text-right">Correct</th>
@@ -217,7 +440,7 @@ export const AttendanceManagement: React.FC = () => {
             <tbody className="divide-y divide-slate-800 text-xs">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500 font-medium">
+                  <td colSpan={9} className="py-12 text-center text-slate-500 font-medium">
                     No attendance records match your search criteria.
                   </td>
                 </tr>
@@ -266,6 +489,23 @@ export const AttendanceManagement: React.FC = () => {
                     </td>
 
                     <td className="py-3 px-4">
+                      {rec.breaks && rec.breaks.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {rec.breaks.map((b, idx) => (
+                            <div key={idx} className="text-[10px] bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                              <span className="text-amber-400 font-bold">{b.type}</span>: {new Date(b.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {b.endAt ? new Date(b.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'} ({b.durationMinutes}m)
+                            </div>
+                          ))}
+                          <div className="text-[11px] text-slate-400 font-semibold mt-1">
+                            Total: {rec.totalBreakMinutes || 0}m
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 font-mono text-[11px]">No Breaks</span>
+                      )}
+                    </td>
+
+                    <td className="py-3 px-4">
                       <span className={`inline-block px-2.5 py-0.5 text-[10px] font-bold rounded-md border ${getStatusBadge(rec.status)}`}>
                         {rec.status}
                       </span>
@@ -280,17 +520,26 @@ export const AttendanceManagement: React.FC = () => {
                     </td>
 
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => {
-                          setEditingRecord(rec);
-                          setEditStatus(rec.status);
-                          setEditNotes(rec.notes || '');
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                        title="HR Manual Correction"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
+                      <div className="flex justify-end items-center gap-1">
+                        <button
+                          onClick={() => setViewingHistoryEmployee({ id: rec.employeeId || rec.employeeCode, name: rec.employeeName })}
+                          className="p-1.5 text-slate-400 hover:text-purple-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                          title="View Full History"
+                        >
+                          <History className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingRecord(rec);
+                            setEditStatus(rec.status);
+                            setEditNotes(rec.notes || '');
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                          title="HR Manual Correction"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -351,7 +600,7 @@ export const AttendanceManagement: React.FC = () => {
                   onClick={handleForceCheckout}
                   className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 border border-purple-500/50 text-xs font-semibold rounded-xl cursor-pointer shadow-md transition-colors"
                 >
-                  Force 7:30 PM Checkout
+                  Force 7:00 PM Checkout
                 </button>
               )}
 
@@ -370,6 +619,137 @@ export const AttendanceManagement: React.FC = () => {
               >
                 Save Correction
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Individual Employee History Modal */}
+      {viewingHistoryEmployee && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+              <div>
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <History className="w-5 h-5 text-purple-400" />
+                  {viewingHistoryEmployee.name} - Complete History
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Showing all recorded historical attendance days
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    const empsHistory = attendance.filter(a => a.employeeId === viewingHistoryEmployee.id || a.employeeCode === viewingHistoryEmployee.id);
+                    exportAttendanceToCSV(empsHistory, `${viewingHistoryEmployee.name}_History`);
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Export History CSV
+                </button>
+                <button
+                  onClick={() => setViewingHistoryEmployee(null)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full cursor-pointer transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-900/50">
+              {(() => {
+                const historyRecords = attendance
+                  .filter(a => a.employeeId === viewingHistoryEmployee.id || a.employeeCode === viewingHistoryEmployee.id)
+                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                const totalHours = historyRecords.reduce((s, a) => s + (a.workingMinutes || 0), 0) / 60;
+                const summary = {
+                  present: historyRecords.filter(a => a.status === 'Present').length,
+                  late: historyRecords.filter(a => a.status === 'Late').length,
+                  absent: historyRecords.filter(a => a.status === 'Absent').length,
+                  half: historyRecords.filter(a => a.status === 'Half Day').length,
+                  leave: historyRecords.filter(a => a.status === 'On Leave').length,
+                  wfh: historyRecords.filter(a => a.status === 'Work From Home' || a.isWfh).length
+                };
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 mb-5">
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Days Tracked</p>
+                      <p className="text-lg font-black text-white mt-0.5">{historyRecords.length}</p>
+                    </div>
+                    <div className="bg-slate-950 border border-emerald-500/20 rounded-xl p-3">
+                      <p className="text-[9px] font-bold text-emerald-400/80 uppercase tracking-wider">Present</p>
+                      <p className="text-lg font-black text-emerald-400 mt-0.5">{summary.present}</p>
+                    </div>
+                    <div className="bg-slate-950 border border-amber-500/20 rounded-xl p-3">
+                      <p className="text-[9px] font-bold text-amber-400/80 uppercase tracking-wider">Late</p>
+                      <p className="text-lg font-black text-amber-400 mt-0.5">{summary.late}</p>
+                    </div>
+                    <div className="bg-slate-950 border border-rose-500/20 rounded-xl p-3">
+                      <p className="text-[9px] font-bold text-rose-400/80 uppercase tracking-wider">Absent</p>
+                      <p className="text-lg font-black text-rose-400 mt-0.5">{summary.absent}</p>
+                    </div>
+                    <div className="bg-slate-950 border border-purple-500/20 rounded-xl p-3">
+                      <p className="text-[9px] font-bold text-purple-400/80 uppercase tracking-wider">Leave</p>
+                      <p className="text-lg font-black text-purple-400 mt-0.5">{summary.leave}</p>
+                    </div>
+                    <div className="bg-slate-950 border border-sky-500/20 rounded-xl p-3">
+                      <p className="text-[9px] font-bold text-sky-400/80 uppercase tracking-wider">WFH</p>
+                      <p className="text-lg font-black text-sky-400 mt-0.5">{summary.wfh}</p>
+                    </div>
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Hours</p>
+                      <p className="text-lg font-black text-white mt-0.5">{totalHours > 0 ? totalHours.toFixed(1) : '--'}</p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4">Check In</th>
+                    <th className="py-3 px-4">Check Out</th>
+                    <th className="py-3 px-4">Work Hrs</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Breaks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 text-xs">
+                  {attendance
+                    .filter(a => a.employeeId === viewingHistoryEmployee.id || a.employeeCode === viewingHistoryEmployee.id)
+                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .map(rec => (
+                    <tr key={rec.id} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="py-3 px-4 font-semibold text-slate-300">{rec.date}</td>
+                      <td className="py-3 px-4 font-mono text-slate-200">
+                        {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--'}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-200">
+                        {rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--'}
+                      </td>
+                      <td className="py-3 px-4 font-mono font-semibold text-slate-200">
+                        {rec.workingMinutes > 0 ? `${Math.floor(rec.workingMinutes / 60)}h ${rec.workingMinutes % 60}m` : '--'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-md border ${getStatusBadge(rec.status)}`}>
+                          {rec.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-[11px] text-slate-400">
+                        Total: {rec.totalBreakMinutes || 0}m
+                      </td>
+                    </tr>
+                  ))}
+                  {attendance.filter(a => a.employeeId === viewingHistoryEmployee.id || a.employeeCode === viewingHistoryEmployee.id).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500 font-medium">No history available</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

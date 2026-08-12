@@ -102,6 +102,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
     };
   });
 
+  // Break & Activity Analytics for today
+  const breakTypes = ['Tea Break', 'Lunch Break', 'Team Huddle', 'Official Event'];
+  const breakData = breakTypes.map(type => {
+    let totalMins = 0;
+    todayRecords.forEach(rec => {
+      if (rec.breaks) {
+        rec.breaks.forEach(b => {
+          if (b.type.includes(type) || (type === 'Official Event' && b.type.includes('Official Work'))) {
+             totalMins += b.durationMinutes || 0;
+          }
+        });
+      }
+    });
+    return { type: type === 'Official Event' ? 'Official Work' : type, minutes: totalMins };
+  });
   const recentCheckIns = todayRecords
     .filter(a => a.checkInAt)
     .sort((a, b) => new Date(b.checkInAt!).getTime() - new Date(a.checkInAt!).getTime())
@@ -447,6 +462,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           </div>
         </div>
       </div>
+
+      {/* Additional Analytics Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Break Usage Chart */}
+        <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] p-6 shadow-[var(--shadow-sm)] flex flex-col">
+          <div className="mb-6">
+            <h3 className="text-sm font-bold text-[var(--text-primary)]">Workforce Activity & Break Utilization</h3>
+            <p className="text-xs text-[var(--text-secondary)]">Total minutes spent across activities today</p>
+          </div>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={breakData} layout="vertical" margin={{ top: 10, right: 30, left: 40, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-medium)" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
+                <YAxis dataKey="type" type="category" tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: 'var(--bg-elevated)', borderRadius: '12px', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontSize: '12px', boxShadow: 'var(--shadow-md)' }}
+                  cursor={{fill: 'var(--border-subtle)'}}
+                  formatter={(val: number) => [`${val} mins`, 'Duration']}
+                />
+                <Bar dataKey="minutes" fill="var(--accent-purple)" radius={[0, 6, 6, 0]} barSize={20} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        
+        {/* Recent Activity Feed */}
+        <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] p-6 shadow-[var(--shadow-sm)] flex flex-col h-[340px]">
+          <div className="mb-4">
+            <h3 className="text-sm font-bold text-[var(--text-primary)]">Real-Time Event Stream</h3>
+            <p className="text-xs text-[var(--text-secondary)]">Live feed from Firestore database</p>
+          </div>
+          <div className="flex-1 overflow-y-auto pr-2 space-y-3">
+            {auditLogs.slice(0, 15).map(log => (
+              <div key={log.id} className="flex gap-3 items-start border-l-2 border-[var(--border-medium)] pl-3 py-1">
+                <div className="w-2 h-2 rounded-full bg-[var(--accent-blue)] mt-1.5 -ml-4 shrink-0 shadow-[0_0_8px_var(--accent-blue)]"></div>
+                <div>
+                  <div className="text-xs font-bold text-[var(--text-primary)]">{log.action.replace(/_/g, ' ')}</div>
+                  <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{log.details}</div>
+                  <div className="text-[10px] text-[var(--text-tertiary)] mt-1 font-mono">
+                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} • {log.target}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
 
       {/* Live Activity Feed */}
       <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] overflow-hidden shadow-[var(--shadow-sm)]">

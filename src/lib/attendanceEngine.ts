@@ -1,5 +1,33 @@
 import { CompanySettings, Employee, AttendanceRecord } from '../types';
 
+// Official working hours — the shift timer is strictly capped inside this window
+export const SHIFT_START_HOUR = 10; // 10:00 AM
+export const SHIFT_END_HOUR = 19;   // 7:00 PM (strict shift end)
+
+// Local shift-end timestamp for a given date (YYYY-MM-DD)
+export function getShiftEndForDate(dateStr: string): Date {
+  const end = new Date(`${dateStr}T${String(SHIFT_END_HOUR).padStart(2, '0')}:00:00`);
+  return isNaN(end.getTime()) ? new Date(dateStr) : end;
+}
+
+// Computes working minutes strictly within the 10:00 AM – 7:00 PM shift window.
+// Any time after 7:00 PM is never counted, even if the employee checks out late.
+export function computeShiftWorkingMinutes(
+  dateStr: string,
+  checkInAt: string | null,
+  checkOutAt: string | null,
+  totalBreakMinutes: number = 0
+): number {
+  if (!checkInAt) return 0;
+  const start = new Date(checkInAt).getTime();
+  const rawEnd = checkOutAt ? new Date(checkOutAt).getTime() : Date.now();
+  const shiftEnd = getShiftEndForDate(dateStr).getTime();
+  const cappedEnd = Math.min(rawEnd, shiftEnd);
+  if (cappedEnd <= start) return 0;
+  let mins = Math.floor((cappedEnd - start) / 60000) - (totalBreakMinutes || 0);
+  return Math.max(0, mins);
+}
+
 /**
  * Haversine formula to calculate distance between two GPS points in meters
  */
@@ -141,9 +169,21 @@ export function evaluateAttendanceScan(
         allowed: false,
         action: 'CHECK_IN',
         status: 'Present',
-        locationVerified,
+        locationVerified: false,
         distanceMeters,
         message: 'Shift has not started yet. Check-ins are only allowed from 10:00 AM onwards.'
+      };
+    }
+
+    const shiftEnd = getShiftEndForDate(now.toISOString().split('T')[0]);
+    if (now > shiftEnd) {
+      return {
+        allowed: false,
+        action: 'CHECK_IN',
+        status: 'Present',
+        locationVerified: false,
+        distanceMeters,
+        message: 'Shift has ended at 7:00 PM. Check-ins are no longer accepted today.'
       };
     }
     
@@ -180,13 +220,29 @@ export function evaluateAttendanceScan(
   if (todayRecord.checkInAt && !todayRecord.checkOutAt) {
     // Perform CHECK_OUT
     if (settings.gpsRequired && !locationVerified && !isApprovedWfh) {
+      // Graceful fallback: the employee already verified their location at check-in.
+      // Leaving the office (or a stale/unavailable GPS fix) must never lock them out
+      // of checking out — carry the verified check-in location snapshot instead.
+      if (todayRecord.locationVerified) {
+        return {
+          allowed: true,
+          action: 'CHECK_OUT',
+          status: todayRecord.status as 'Present' | 'Late' | 'Half Day',
+          locationVerified: true,
+          distanceMeters: todayRecord.distanceFromOffice ?? distanceMeters,
+          message: 'Checked Out Successfully (location verified at check-in)'
+        };
+      }
+
       return {
         allowed: false,
         action: 'CHECK_OUT',
         status: todayRecord.status as 'Present' | 'Late' | 'Half Day',
         locationVerified: false,
         distanceMeters,
-        message: `Outside authorized office perimeter for Check-Out (${distanceMeters}m away).`
+        message: userLat === undefined || userLon === undefined
+          ? 'GPS Location is required for Check-Out. Please enable location and try again.'
+          : `Outside authorized office perimeter for Check-Out (${distanceMeters}m away).`
       };
     }
 

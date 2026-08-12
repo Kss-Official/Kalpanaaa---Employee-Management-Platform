@@ -20,6 +20,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Test collection used for the connectivity probe
+    match /test/{docId} {
+      allow read: if true;
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if true; // Temporarily allow public read
@@ -39,6 +44,41 @@ service cloud.firestore {
       allow read: if true; 
       allow create, update: if isValidId(recordId);
       allow delete: if true;
+    }
+
+    // Leave & Work-From-Home Requests collection (multi-device sync)
+    match /leaveRequests/{requestId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && isValidId(requestId);
+      allow delete: if isSignedIn();
+    }
+
+    // Salary Disbursement collection (persisted payroll runs)
+    match /salaryDisbursements/{recordId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && isValidId(recordId);
+      allow delete: if false;
+    }
+
+    // Company & Employee Rules collection
+    match /companyRules/{ruleId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && isValidId(ruleId);
+      allow delete: if isSignedIn();
+    }
+
+    // Notifications collection
+    match /notifications/{notifId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // FCM push tokens collection
+    match /fcmTokens/{tokenId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if false;
     }
 
     // Audit logs collection

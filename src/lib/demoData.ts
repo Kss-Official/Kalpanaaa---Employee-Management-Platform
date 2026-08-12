@@ -13,7 +13,7 @@ export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
   gpsRequired: true,
   allowedRadiusMeters: 500,
   workStartTime: '10:00',
-  workEndTime: '19:30',
+  workEndTime: '19:00',
   gracePeriodMinutes: 60,
   lateThresholdMinutes: 60,
   teaBreakDurationMinutes: 10,

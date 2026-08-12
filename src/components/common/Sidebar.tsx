@@ -14,7 +14,8 @@ import {
   FolderLock,
   LogOut,
   X,
-  Banknote
+  Banknote,
+  History
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -57,7 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'leave_approvals', label: 'Leave & WFH Inbox', icon: FileText },
     { id: 'hr_payroll', label: 'Salary Disbursement', icon: Banknote },
     { id: 'reports', label: 'Reports & Intelligence', icon: FileSpreadsheet },
-    { id: 'settings', label: 'Policy & Rules', icon: Settings },
+    { id: 'hr_rules', label: 'Company & Employee Rules', icon: ShieldCheck },
   ];
 
   const pmNavItems = [
@@ -74,6 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },
     { id: 'emp_qr', label: 'Barcode & QR Printing', icon: CreditCard },
     { id: 'emp_directory', label: 'Team Directory', icon: Users },
+    { id: 'emp_activity', label: 'My Activity Log', icon: History },
     { id: 'emp_profile', label: 'My Profile', icon: UserCheck },
   ];
 

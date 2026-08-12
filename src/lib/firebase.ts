@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAnalytics, isSupported } from "firebase/analytics";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import { 
   getAuth, 
@@ -24,6 +25,14 @@ import {
   serverTimestamp,
   getDocFromServer
 } from "firebase/firestore";
+
+import { 
+  getStorage, 
+  ref, 
+  uploadBytesResumable, 
+  getDownloadURL, 
+  deleteObject 
+} from "firebase/storage";
 
 // Config explicitly provided in prompt
 export const firebaseConfig = {
@@ -55,6 +64,57 @@ export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true
 });
+
+// Initialize Firebase Storage
+export const storage = getStorage(app);
+
+// Initialize Analytics (only if supported in this environment)
+export const analytics = isSupported().then(yes => yes ? getAnalytics(app) : null);
+
+/**
+ * Upload a file to Firebase Storage efficiently with optional progress callback
+ */
+export async function uploadFile(
+  path: string, 
+  file: File, 
+  onProgress?: (progressPercent: number) => void
+): Promise<string> {
+  const storageRef = ref(storage, path);
+  const uploadTask = uploadBytesResumable(storageRef, file);
+
+  return new Promise((resolve, reject) => {
+    uploadTask.on(
+      'state_changed',
+      (snapshot) => {
+        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        if (onProgress) {
+          onProgress(Math.round(progress));
+        }
+      },
+      (error) => {
+        console.error('Firebase Storage upload error:', error);
+        reject(error);
+      },
+      async () => {
+        try {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve(downloadUrl);
+        } catch (err) {
+          reject(err);
+        }
+      }
+    );
+  });
+}
+
+/**
+ * Delete a file from Firebase Storage by full path or reference
+ */
+export async function deleteFile(path: string): Promise<void> {
+  const storageRef = ref(storage, path);
+  await deleteObject(storageRef);
+}
+
 
 // Error Handling Helper as per Firebase skill guidelines
 export enum OperationType {

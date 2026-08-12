@@ -19,7 +19,7 @@ import { LeaveRequest } from '../../types';
 export const HRLeaveWfhApprovals: React.FC = () => {
   const { leaveRequests, updateLeaveRequestStatus, activeEmployee } = useAuth();
   const [filterType, setFilterType] = useState<'All' | 'Leave' | 'WFH'>('All');
-  const [filterStatus, setFilterStatus] = useState<'All' | 'Pending' | 'Approved' | 'Rejected'>('Pending');
+  const [filterStatus, setFilterStatus] = useState<'All' | 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'>('Pending');
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredRequests = leaveRequests.filter(req => {
@@ -80,7 +80,7 @@ export const HRLeaveWfhApprovals: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {['Pending', 'Approved', 'Rejected', 'All'].map(status => (
+          {['Pending', 'Approved', 'Rejected', 'Cancelled', 'All'].map(status => (
             <button
               key={status}
               onClick={() => setFilterStatus(status as any)}
@@ -153,6 +153,7 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                       <span className={`font-bold text-[10px] px-2.5 py-0.5 rounded-full border ${
                         req.status === 'Approved' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
                         req.status === 'Rejected' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' :
+                        req.status === 'Cancelled' ? 'bg-slate-600/10 border-slate-600/30 text-slate-400' :
                         'bg-amber-500/10 border-amber-500/30 text-amber-400'
                       }`}>
                         {req.status}

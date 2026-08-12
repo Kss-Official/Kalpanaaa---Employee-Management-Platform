@@ -7,7 +7,7 @@ export type EmployeeStatus = 'Active' | 'On Leave' | 'Terminated' | 'Suspended';
 export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Half Day' | 'On Leave' | 'Holiday' | 'Work From Home';
 
 export interface BreakEntry {
-  type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break';
+  type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break' | 'Team Huddle' | 'Official Event';
   startAt: string;   // ISO timestamp
   endAt: string | null; // null = break is ongoing
   durationMinutes: number;
@@ -21,7 +21,7 @@ export interface LeaveRequest {
   startDate: string;
   endDate: string;
   reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
   requestDate: string;
   reviewedBy?: string;
   reviewNotes?: string;
@@ -144,6 +144,7 @@ export interface AuditLog {
   details: string;
   timestamp: string;
   ipAddress?: string;
+  category?: 'attendance' | 'leave' | 'profile' | 'security' | 'admin' | 'payroll' | 'system' | 'rules';
 }
 
 export interface CompanySettings {

@@ -327,12 +327,20 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                       <div className="p-2 bg-[var(--accent-blue)]/10 rounded-lg text-[var(--accent-blue)] shrink-0">
                         <Shield className="w-4 h-4" />
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
                           <span className="font-bold text-[var(--text-primary)] text-xs">{log.action}</span>
-                          <span className="text-[10px] text-[var(--text-tertiary)]">{new Date(log.timestamp).toLocaleString()}</span>
+                          {log.category && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-[var(--accent-blue)] bg-[var(--accent-blue)]/10 border border-[var(--accent-blue)]/20 px-1.5 py-0.5 rounded-md">
+                              {log.category}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-[var(--text-tertiary)] ml-auto">{new Date(log.timestamp).toLocaleString()}</span>
                         </div>
                         <p className="text-xs text-[var(--text-secondary)]">{log.details}</p>
+                        {log.ipAddress && (
+                          <p className="text-[10px] text-[var(--text-tertiary)] mt-1 font-mono">IP: {log.ipAddress}</p>
+                        )}
                       </div>
                     </div>
                   ))
