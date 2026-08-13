@@ -6,7 +6,7 @@ import {
   Download, RotateCcw, Shield, Clock
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { generateEmployeeQrToken } from '../../lib/attendanceEngine';
+import { generateEmployeeQrToken, isRecordForEmployee } from '../../lib/attendanceEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { triggerHaptic } from '../../hooks/useHaptic';
 import { animations } from '../../lib/animations';
@@ -25,7 +25,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   const [activeTab, setActiveTab] = useState<'details' | 'qr' | 'attendance' | 'activity'>('details');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
-  const empAttendance = attendance.filter(a => a.employeeId === employee.id || a.employeeCode === employee.employeeId);
+  const empAttendance = attendance.filter(a => isRecordForEmployee(a, employee));
   const empLogs = auditLogs.filter(l => l.target.includes(employee.employeeId) || l.actorId === employee.id);
 
   useEffect(() => {

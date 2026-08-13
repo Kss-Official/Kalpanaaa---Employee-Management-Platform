@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { exportAttendanceToCSV } from '../../lib/exportCsv';
+import { getLocalDateString, isCeoOrCto } from '../../lib/attendanceEngine';
 
 export const AttendanceManagement: React.FC = () => {
   const { attendance, employees, updateAttendanceRecord, settings, isFirestoreConnected } = useAuth();
@@ -49,10 +50,10 @@ export const AttendanceManagement: React.FC = () => {
     setLastSyncedAt(new Date().toLocaleTimeString());
   }, [attendance]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
   const yesterdayObj = new Date();
   yesterdayObj.setDate(yesterdayObj.getDate() - 1);
-  const yesterdayStr = yesterdayObj.toISOString().split('T')[0];
+  const yesterdayStr = getLocalDateString(yesterdayObj);
 
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
@@ -63,7 +64,13 @@ export const AttendanceManagement: React.FC = () => {
       const hasName = (rec.employeeName || '').trim() || (rec.employeeCode || '').trim();
       const validDate = !!rec.date && !isNaN(new Date(rec.date).getTime());
       if (!hasName || !validDate) return;
-      const key = `${rec.employeeId || rec.employeeCode}_${rec.date}`;
+
+      // Exclude CEO and CTO from regular employee attendance list
+      const matchingEmp = employees.find(e => e.id === rec.employeeId || e.employeeId === rec.employeeCode);
+      if (matchingEmp && isCeoOrCto(matchingEmp)) return;
+      if ((rec.employeeName || '').toLowerCase().includes('akshit') || (rec.employeeName || '').toLowerCase().includes('gaurav')) return;
+
+      const key = `${rec.employeeCode || rec.employeeId}_${rec.date}`;
       const prev = seen.get(key);
       if (!prev || new Date(rec.updatedAt || rec.createdAt || 0).getTime() >= new Date(prev.updatedAt || prev.createdAt || 0).getTime()) {
         seen.set(key, rec);
@@ -73,7 +80,7 @@ export const AttendanceManagement: React.FC = () => {
       const t = b.date.localeCompare(a.date);
       return t !== 0 ? t : (a.employeeName || '').localeCompare(b.employeeName || '');
     });
-  }, [attendance]);
+  }, [attendance, employees]);
 
   const filteredRecords = cleanedAttendance.filter(rec => {
     const matchesSearch = 
@@ -159,7 +166,7 @@ export const AttendanceManagement: React.FC = () => {
 
   const trackerRecords = cleanedAttendance.filter(a => a.date.startsWith(trackerMonth));
 
-  const trackerRows = employees.map(emp => {
+  const trackerRows = employees.filter(e => !isCeoOrCto(e)).map(emp => {
     const empRecs = trackerRecords.filter(a => a.employeeId === emp.id || a.employeeCode === emp.employeeId);
     const byDay: Record<number, AttendanceRecord> = {};
     empRecs.forEach(rec => {

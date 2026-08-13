@@ -37,6 +37,7 @@ import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 import { Employee, AttendanceRecord } from '../../types';
+import { getLocalDateString, isCeoOrCto } from '../../lib/attendanceEngine';
 
 interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
@@ -64,21 +65,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   };
   const displayName = activeEmployee?.fullName?.split(' ')[0] || 'there';
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayRecords = attendance.filter(a => a.date === todayStr);
+  const todayStr = getLocalDateString();
+  const regularEmployees = employees.filter(e => !isCeoOrCto(e));
+  const todayRecords = attendance.filter(a => 
+    a.date === todayStr && 
+    !isCeoOrCto(employees.find(e => e.id === a.employeeId || e.employeeId === a.employeeCode)) &&
+    !a.employeeName?.toLowerCase().includes('akshit') &&
+    !a.employeeName?.toLowerCase().includes('gaurav')
+  );
 
-  const totalEmployeesCount = employees.filter(e => e.status === 'Active').length;
+  const totalEmployeesCount = regularEmployees.filter(e => e.status === 'Active').length;
   const presentTodayCount = todayRecords.filter(a => a.status === 'Present').length;
   const lateTodayCount = todayRecords.filter(a => a.status === 'Late').length;
   const absentTodayCount = todayRecords.filter(a => a.status === 'Absent').length;
-  const onLeaveCount = employees.filter(e => e.status === 'On Leave').length;
+  const onLeaveCount = regularEmployees.filter(e => e.status === 'On Leave').length;
   const currentlyCheckedInCount = todayRecords.filter(a => a.checkInAt && !a.checkOutAt).length;
 
   // Compute 7-day attendance trend chart data
   const trendData = Array.from({ length: 7 }).map((_, idx) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - idx));
-    const dStr = d.toISOString().split('T')[0];
+    const dStr = getLocalDateString(d);
     const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' });
     const dayRecs = attendance.filter(a => a.date === dStr);
 
@@ -185,7 +192,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           <button
             onClick={async () => {
               triggerHaptic();
-              const todayStr = new Date().toISOString().split('T')[0];
+              const todayStr = getLocalDateString();
               const checkinLogs = auditLogs.filter(log => log.action === 'ATTENDANCE_CHECKIN' && log.timestamp.startsWith(todayStr));
               if (checkinLogs.length === 0) {
                 alert('No check-ins found in Audit Logs for today.'); return;

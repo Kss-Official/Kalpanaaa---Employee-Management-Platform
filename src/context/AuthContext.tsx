@@ -22,7 +22,7 @@ import {
   INITIAL_COMPANY_SETTINGS
 } from '../lib/demoData';
 import { initializeApp } from 'firebase/app';
-import { evaluateAttendanceScan, calculateGpsDistanceMeters, computeShiftWorkingMinutes, getShiftEndForDate, SHIFT_END_HOUR } from '../lib/attendanceEngine';
+import { evaluateAttendanceScan, calculateGpsDistanceMeters, computeShiftWorkingMinutes, getShiftEndForDate, SHIFT_END_HOUR, getLocalDateString, isRecordForEmployee } from '../lib/attendanceEngine';
 import { fetchAbsoluteTime } from '../lib/absoluteTime';
 import { sendKssNotification, sendAdminBroadcast, registerFcmToken, setupFcmForegroundListener, KssNotification } from '../lib/notifications';
 
@@ -372,7 +372,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const checkAutoCheckout = async () => {
       if (attendance.length === 0) return;
       const absoluteNow = await fetchAbsoluteTime();
-      const todayStr = absoluteNow.toISOString().split('T')[0];
+      const todayStr = getLocalDateString(absoluteNow);
       const currentMins = absoluteNow.getHours() * 60 + absoluteNow.getMinutes();
       const isPastShiftEnd = currentMins >= SHIFT_END_HOUR * 60;
 
@@ -403,15 +403,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const totalMins = computeShiftWorkingMinutes(record.date, record.checkInAt, forceCheckOutTime, breakMinutes);
           const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:00 PM (Strict Shift End)';
 
-          // Update local state
-          setAttendance(prev => prev.map(a => a.id === record.id ? {
-            ...a,
-            checkOutAt: forceCheckOutTime,
-            workingMinutes: totalMins,
-            breaks: updatedBreaks,
-            totalBreakMinutes: breakMinutes,
-            notes: updatedNotes
-          } : a));
+          // Update local state and sync to localStorage
+          setAttendance(prev => {
+            const next = prev.map(a => a.id === record.id ? {
+              ...a,
+              checkOutAt: forceCheckOutTime,
+              workingMinutes: totalMins,
+              breaks: updatedBreaks,
+              totalBreakMinutes: breakMinutes,
+              notes: updatedNotes
+            } : a);
+            localStorage.setItem('kss_v1_attendance', JSON.stringify(next));
+            return next;
+          });
 
           // Auto close the record in Firestore
           setDoc(doc(db, 'attendance', record.id), {
@@ -591,7 +595,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Subscribe to attendance records
         unsubAtt = onSnapshot(collection(db, 'attendance'), (snapshot) => {
           if (!snapshot.empty) {
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = getLocalDateString();
             const fetched: AttendanceRecord[] = [];
             snapshot.forEach(docSnap => {
               const data = { id: docSnap.id, ...docSnap.data() } as AttendanceRecord;
@@ -613,14 +617,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // Ensure both employeeCode and employeeId are normalized
+              if (!data.employeeCode && data.employeeId) {
+                data.employeeCode = data.employeeId;
+              }
+              if (!data.employeeId && data.employeeCode) {
+                data.employeeId = data.employeeCode;
+              }
+
               fetched.push(data);
             });
             if (fetched.length > 0) {
               // Sort descending by checkInAt / date
               fetched.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
               setAttendance(fetched);
+              localStorage.setItem('kss_v1_attendance', JSON.stringify(fetched));
             } else {
               setAttendance([]);
+              localStorage.setItem('kss_v1_attendance', JSON.stringify([]));
             }
           } else {
             setAttendance([]);
@@ -1243,8 +1257,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const absoluteNow = await fetchAbsoluteTime();
-    const todayStr = absoluteNow.toISOString().split('T')[0];
-    const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
+    const todayStr = getLocalDateString(absoluteNow);
+    const existingRec = attendance.find(a => isRecordForEmployee(a, emp) && a.date === todayStr);
 
     const isApprovedWfh = (emp.approvedWfhDates || []).includes(todayStr);
 
@@ -1280,9 +1294,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const nowISO = absoluteNow.toISOString();
     const newRecord: AttendanceRecord = {
-      id: existingRec ? existingRec.id : `att-${emp.employeeId}-${todayStr}`,
+      id: existingRec ? existingRec.id : `att-${emp.employeeId || emp.id}-${todayStr}`,
       employeeId: emp.id,
-      employeeCode: emp.employeeId,
+      employeeCode: emp.employeeId || emp.id,
       employeeName: emp.fullName,
       department: emp.department,
       date: todayStr,
@@ -1307,7 +1321,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: nowISO
     };
 
-    setAttendance(prev => [newRecord, ...prev.filter(a => a.id !== newRecord.id)]);
+    setAttendance(prev => {
+      const next = [newRecord, ...prev.filter(a => a.id !== newRecord.id)];
+      localStorage.setItem('kss_v1_attendance', JSON.stringify(next));
+      return next;
+    });
 
     // Write to Firestore
     setDoc(doc(db, 'attendance', newRecord.id), newRecord).catch(err => {
@@ -1330,8 +1348,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const absoluteNow = await fetchAbsoluteTime();
-    const todayStr = absoluteNow.toISOString().split('T')[0];
-    const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
+    const todayStr = getLocalDateString(absoluteNow);
+    const existingRec = attendance.find(a => isRecordForEmployee(a, emp) && a.date === todayStr);
 
     if (!existingRec || !existingRec.checkInAt) {
       return { success: false, message: 'No active check-in record found for today.' };
@@ -1351,7 +1369,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
       : (existingRec.distanceFromOffice || 0);
 
-    const nowISO = new Date().toISOString();
+    const nowISO = absoluteNow.toISOString();
     
     // Auto-close open break if any
     let additionalBreakMins = 0;
@@ -1389,7 +1407,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: nowISO
     };
 
-    setAttendance(prev => prev.map(a => a.id === updatedRecord.id ? updatedRecord : a));
+    setAttendance(prev => {
+      const next = prev.map(a => a.id === updatedRecord.id ? updatedRecord : a);
+      localStorage.setItem('kss_v1_attendance', JSON.stringify(next));
+      return next;
+    });
 
     // Write to Firestore
     setDoc(doc(db, 'attendance', updatedRecord.id), updatedRecord, { merge: true }).catch(err => {
@@ -1488,7 +1510,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         let curr = new Date(req.startDate);
         const end = new Date(req.endDate);
         while (curr <= end) {
-          dates.add(curr.toISOString().split('T')[0]);
+          dates.add(getLocalDateString(curr));
           curr.setDate(curr.getDate() + 1);
         }
         updateEmployee(targetEmp.id, { approvedWfhDates: Array.from(dates) });

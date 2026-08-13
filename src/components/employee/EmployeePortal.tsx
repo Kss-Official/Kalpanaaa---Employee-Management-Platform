@@ -53,7 +53,7 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
-import { generateEmployeeQrToken, calculateGpsDistanceMeters, SHIFT_END_HOUR } from '../../lib/attendanceEngine';
+import { generateEmployeeQrToken, calculateGpsDistanceMeters, SHIFT_END_HOUR, getLocalDateString, isRecordForEmployee } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
@@ -172,9 +172,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Late' | 'Absent' | 'Leave'>('All');
   
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayRecord = attendance.find(a => (a.employeeId === activeEmployee?.id || a.employeeCode === activeEmployee?.employeeId) && a.date === todayStr);
-  const rawHistory = attendance.filter(a => a.employeeId === activeEmployee?.id || a.employeeCode === activeEmployee?.employeeId);
+  const todayStr = getLocalDateString();
+  const todayRecord = attendance.find(a => isRecordForEmployee(a, activeEmployee) && a.date === todayStr);
+  const rawHistory = attendance.filter(a => isRecordForEmployee(a, activeEmployee));
   const empHistory = rawHistory.filter(rec => {
     if (attendanceFilter === 'All') return true;
     if (attendanceFilter === 'Leave') return rec.status === 'On Leave' || rec.status === 'Leave';
@@ -540,7 +540,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   };
 
   const handleToggleWfh = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     const approvedDates = activeEmployee.approvedWfhDates || [];
     
     if (!approvedDates.includes(todayStr)) {
@@ -849,14 +849,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   <button
                     onClick={handleToggleWfh}
                     className={`w-full max-w-[240px] py-2 rounded-xl text-xs font-semibold transition-all border ${
-                      !(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                      !(activeEmployee.approvedWfhDates || []).includes(getLocalDateString())
                         ? 'bg-transparent border-[var(--border-subtle)] text-[var(--text-muted)] cursor-not-allowed'
                         : isWfh
                           ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
                           : 'bg-transparent border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-sky-500/30'
                     } ${animations.tap}`}
                   >
-                    {!(activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0])
+                    {!(activeEmployee.approvedWfhDates || []).includes(getLocalDateString())
                       ? '🔒 WFH Locked (Requires Approval)'
                       : isWfh 
                         ? '🏠 Working From Home' 

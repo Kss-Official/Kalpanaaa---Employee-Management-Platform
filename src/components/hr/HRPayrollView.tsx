@@ -3,7 +3,8 @@ import { useAuth } from '../../context/AuthContext';
 import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Banknote, Download, CheckCircle2, Send, Edit3, X, Save, RefreshCw } from 'lucide-react';
-import { SalaryDisbursement } from '../../types';
+import { SalaryDisbursement, Employee } from '../../types';
+import { isRecordForEmployee, isCeoOrCto } from '../../lib/attendanceEngine';
 
 const monthOptions = (): string[] => {
   const options: string[] = [];
@@ -87,9 +88,9 @@ export const HRPayrollView: React.FC = () => {
     } catch { /* ignore */ }
   };
 
-  const computeDaysWorked = (employeeCode: string, month: string) => {
+  const computeDaysWorked = (emp: Employee, month: string) => {
     return attendance.filter(a =>
-      a.employeeCode === employeeCode &&
+      isRecordForEmployee(a, emp) &&
       a.date.startsWith(month) &&
       ATTENDED_STATUSES.includes(a.status)
     ).length;
@@ -97,13 +98,13 @@ export const HRPayrollView: React.FC = () => {
 
   // Build the disbursement rows: persisted record wins, otherwise compute a draft from attendance
   const rows: SalaryDisbursement[] = useMemo(() => {
-    return employees.map((emp, idx) => {
+    return employees.filter(e => !isCeoOrCto(e)).map((emp, idx) => {
       const id = `sal-${emp.id}-${selectedMonth}`;
       const saved = persisted[id];
       if (saved) return saved;
 
       const baseSalary = 45000 + (idx % 3) * 5000;
-      const daysWorked = computeDaysWorked(emp.employeeId, selectedMonth) || 22 - (idx % 2);
+      const daysWorked = computeDaysWorked(emp, selectedMonth) || 22 - (idx % 2);
       const deductions = Math.max(0, (22 - daysWorked) * 1500);
       const netPay = baseSalary + 2000 - deductions;
 

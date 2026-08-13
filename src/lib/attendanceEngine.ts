@@ -4,6 +4,51 @@ import { CompanySettings, Employee, AttendanceRecord } from '../types';
 export const SHIFT_START_HOUR = 10; // 10:00 AM
 export const SHIFT_END_HOUR = 19;   // 7:00 PM (strict shift end)
 
+// Returns standard local date formatted as YYYY-MM-DD (averts UTC date mismatch on date boundaries)
+export function getLocalDateString(inputDate?: Date | string | number): string {
+  const d = inputDate ? new Date(inputDate) : new Date();
+  if (isNaN(d.getTime())) {
+    const fallback = new Date();
+    return `${fallback.getFullYear()}-${String(fallback.getMonth() + 1).padStart(2, '0')}-${String(fallback.getDate()).padStart(2, '0')}`;
+  }
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Safely matches an attendance record against an employee across all ID representations (id, employeeId, employeeCode)
+export function isRecordForEmployee(
+  rec: Partial<AttendanceRecord> | null | undefined, 
+  emp: Partial<Employee> | null | undefined
+): boolean {
+  if (!rec || !emp) return false;
+  const empId = emp.id?.trim();
+  const empCode = emp.employeeId?.trim();
+  const recEmpId = rec.employeeId?.trim();
+  const recEmpCode = rec.employeeCode?.trim();
+
+  if (empId && (recEmpId === empId || recEmpCode === empId)) return true;
+  if (empCode && (recEmpId === empCode || recEmpCode === empCode)) return true;
+  return false;
+}
+
+// Identifies executive roles (CEO and CTO) so they can be excluded from standard employee attendance tracking & tables
+export function isCeoOrCto(emp: Partial<Employee> | null | undefined): boolean {
+  if (!emp) return false;
+  const id = (emp.employeeId || '').toUpperCase();
+  const name = (emp.fullName || '').toLowerCase();
+  const email = (emp.email || '').toLowerCase();
+  const desig = (emp.designation || '').toLowerCase();
+
+  return (
+    id === 'CEO001' || id === 'CTO001' || id === 'KSS2407001' || id === 'KSS2407002' ||
+    name.includes('akshit') || name.includes('gaurav') ||
+    email.includes('akshit') || email.includes('gaurav') ||
+    desig.includes('ceo') || desig.includes('cto') || desig.includes('chief executive') || desig.includes('chief technology')
+  );
+}
+
 // Local shift-end timestamp for a given date (YYYY-MM-DD)
 export function getShiftEndForDate(dateStr: string): Date {
   const end = new Date(`${dateStr}T${String(SHIFT_END_HOUR).padStart(2, '0')}:00:00`);
@@ -175,7 +220,7 @@ export function evaluateAttendanceScan(
       };
     }
 
-    const shiftEnd = getShiftEndForDate(now.toISOString().split('T')[0]);
+    const shiftEnd = getShiftEndForDate(getLocalDateString(now));
     if (now > shiftEnd) {
       return {
         allowed: false,

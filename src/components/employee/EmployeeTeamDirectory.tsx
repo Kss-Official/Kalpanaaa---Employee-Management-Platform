@@ -3,13 +3,15 @@ import { useAuth } from '../../context/AuthContext';
 import { Mail, Phone, Building2, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 
+import { isCeoOrCto } from '../../lib/attendanceEngine';
+
 export const EmployeeTeamDirectory: React.FC = () => {
   const { employees } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Filter out empty names and apply search
+  // Filter out empty names, executive roles (CEO & CTO), and apply search
   const teamMembers = employees.filter(emp => {
-    if (!emp.fullName || emp.fullName.trim() === '') return false;
+    if (!emp.fullName || emp.fullName.trim() === '' || isCeoOrCto(emp)) return false;
     const matchesSearch = 
       (emp.fullName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
       (emp.designation?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||

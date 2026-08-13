@@ -32,7 +32,7 @@ const TODAY_STR = new Date().toISOString().split('T')[0];
 
 export const INITIAL_EMPLOYEES: Employee[] = [];
 
-// Helper to generate last 7 days attendance history
+// Helper to generate initial attendance history — set to empty for strict real data accuracy
 export function generateInitialAttendance(): AttendanceRecord[] {
   return [];
 }

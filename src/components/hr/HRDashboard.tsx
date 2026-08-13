@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { getLocalDateString, isCeoOrCto } from '../../lib/attendanceEngine';
 import { motion } from 'motion/react';
 import { 
   Users, 
@@ -25,14 +26,20 @@ interface HRDashboardProps {
 export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   const { employees, attendance, leaveRequests } = useAuth();
   
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayAttendance = attendance.filter(a => a.date === todayStr);
+  const todayStr = getLocalDateString();
+  const regularEmployees = employees.filter(e => !isCeoOrCto(e));
+  const todayAttendance = attendance.filter(a => 
+    a.date === todayStr && 
+    !isCeoOrCto(employees.find(e => e.id === a.employeeId || e.employeeId === a.employeeCode)) &&
+    !a.employeeName?.toLowerCase().includes('akshit') &&
+    !a.employeeName?.toLowerCase().includes('gaurav')
+  );
 
-  const totalEmployees = employees.length || 50;
+  const totalEmployees = regularEmployees.length;
   const presentCount = todayAttendance.filter(a => a.status === 'Present' || a.status === 'Late' || a.checkInAt !== null).length;
   const lateCount = todayAttendance.filter(a => a.status === 'Late').length;
   const leaveCount = leaveRequests.filter(r => r.status === 'Approved' && r.type === 'Leave').length;
-  const wfhCount = todayAttendance.filter(a => a.isWfh).length;
+  const wfhCount = 0; // Explicitly set to zero per user directive
   const pendingApprovalsCount = leaveRequests.filter(r => r.status === 'Pending').length;
 
   return (
