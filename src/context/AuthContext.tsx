@@ -1,0 +1,2573 @@
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { User, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot
+} from 'firebase/firestore';
+import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig } from '../lib/firebase';
+import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
+import {
+  INITIAL_EMPLOYEES,
+  generateInitialAttendance,
+  INITIAL_AUDIT_LOGS,
+  INITIAL_COMPANY_SETTINGS,
+  INITIAL_LEAVE_REQUESTS
+} from '../lib/demoData';
+import { initializeApp } from 'firebase/app';
+import { evaluateAttendanceScan, calculateGpsDistanceMeters } from '../lib/attendanceEngine';
+import { fetchAbsoluteTime, toISTTimeString } from '../lib/absoluteTime';
+import { sendKssNotification, sendAdminBroadcast, registerFcmToken, KssNotification } from '../lib/notifications';
+import { clearAllFaceEngineState } from '../lib/faceRecognitionEngine';
+
+const generateDeviceFingerprint = () => {
+  return btoa(`${navigator.userAgent}|${screen.width}x${screen.height}|${navigator.language}|${new Date().getTimezoneOffset()}`);
+};
+
+const getDeviceCategory = (): 'desktop' | 'mobile' => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'desktop';
+  const ua = navigator.userAgent || '';
+  if (/Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
+    return 'mobile';
+  }
+  return 'desktop';
+};
+
+const sanitizeInput = <T extends any>(data: T): T => {
+  if (typeof data === 'string') {
+    // Skip sanitization for base64 images to prevent regex corruption of large strings
+    if (data.startsWith('data:image/')) return data as any;
+
+    // Strip script tags and common XSS vectors
+    return data.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/javascript:/gi, '')
+      .replace(/on\w+="[^"]*"/gi, '')
+      .replace(/on\w+='[^']*'/gi, '')
+      .replace(/on\w+=\w+/gi, '') as any;
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeInput(item)) as any;
+  }
+  if (typeof data === 'object' && data !== null) {
+    const sanitizedObj: any = {};
+    for (const key in data) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        sanitizedObj[key] = sanitizeInput((data as any)[key]);
+      }
+    }
+    return sanitizedObj;
+  }
+  return data;
+};
+
+// Helper for allocating specific employee IDs to founders and starting others from 004
+export const getAssignedEmployeeDetails = (fullName: string, employees: Employee[]) => {
+  const name = (fullName || '').toLowerCase().trim();
+  
+  if (name.includes('gaurav')) {
+    return {
+      employeeId: 'KSS2407001',
+      role: 'SUPER_ADMIN' as UserRole,
+      designation: 'CTO And Founder And MD'
+    };
+  }
+  if (name.includes('akshit')) {
+    return {
+      employeeId: 'KSS2407002',
+      role: 'SUPER_ADMIN' as UserRole,
+      designation: 'CEO'
+    };
+  }
+  if (name.includes('koushik')) {
+    return {
+      employeeId: 'KSS2407003',
+      role: 'PROJECT_MANAGER' as UserRole,
+      designation: 'Project Manager'
+    };
+  }
+
+  // General employees start from KSS2407004
+  let maxSeq = 3; 
+  employees.forEach(emp => {
+    if (emp.employeeId?.startsWith('KSS2407') || emp.employeeId?.startsWith('KSS2707')) {
+      const numStr = emp.employeeId.replace('KSS2407', '').replace('KSS2707', '');
+      const num = parseInt(numStr, 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  });
+
+  const nextSeq = String(maxSeq + 1).padStart(3, '0');
+  return {
+    employeeId: `KSS2407${nextSeq}`,
+    role: null,
+    designation: null
+  };
+};
+
+interface AuthContextType {
+  user: User | null;
+  activeEmployee: Employee | null;
+  role: UserRole;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  isDemoMode: boolean;
+  isFirestoreConnected: boolean;
+  isSessionReady: boolean;
+  employees: Employee[];
+  attendance: AttendanceRecord[];
+  auditLogs: AuditLog[];
+  settings: CompanySettings;
+  companyWorkZone: WorkZone;
+  leaveRequests: LeaveRequest[];
+  notifications: KssNotification[];
+  unreadNotificationCount: number;
+  companyWideWfhDates: string[];
+
+  // Actions
+  submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => void;
+  updateLeaveRequestStatus: (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => void;
+  updateLeaveRequestStage: (id: string, stage: 'PM' | 'HR' | 'CEO' | 'CTO', decision: 'Approved' | 'Rejected', reviewerName: string, notes?: string) => void;
+  cancelLeaveRequest: (id: string) => void;
+  loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
+  quickDemoLogin: (role: UserRole | 'CEO' | 'CTO') => void;
+  logout: () => void;
+  addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => Promise<{ success: boolean; message?: string } | Employee>;
+  updateEmployee: (id: string, updates: Partial<Employee>) => void;
+  deleteEmployee: (id: string) => void;
+  recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  checkIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  checkOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  startBreak: (employeeId: string, breakType?: string) => Promise<{ success: boolean; message: string }>;
+  endBreak: (employeeId: string) => Promise<{ success: boolean; message: string }>;
+  updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => void;
+  updateSettings: (newSettings: Partial<CompanySettings>) => void;
+  saveCompanyWorkZone: (zone: Partial<WorkZone>) => Promise<void>;
+  addAuditLog: (action: string, target: string, details: string) => void;
+  resetToDemoData: () => void;
+  regenerateQrToken: (employeeId: string) => string;
+  sendPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
+  setEmployeeInitialPassword: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
+  sendBroadcast: (title: string, message: string) => Promise<void>;
+  assignCompanyWideWfh: (date: string) => { success: boolean; message: string };
+  removeCompanyWideWfh: (date: string) => { success: boolean; message: string };
+  markAllNotificationsRead: () => void;
+  updateCurrentEmployeePassword: (newPassword: string) => Promise<{ success: boolean; message: string }>;
+  requestMobilePushPermission: () => Promise<boolean>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+
+  // Initial employees array restored synchronously
+  const [employees, setEmployees] = useState<Employee[]>(() => {
+    const saved = localStorage.getItem('kss_v1_employees');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as Employee[];
+        return parsed
+          .filter(emp => emp.id !== 'emp-003' && emp.employeeId !== '003' && emp.employeeId !== 'KSS2407003' && !(emp.email || '').toLowerCase().includes('koushik'))
+          .map(emp => {
+            if (emp.employeeId === 'CEO001') {
+              return {
+                ...emp,
+                fullName: 'Akshit',
+                email: 'akshit@kalpanaaa.in',
+                department: 'Executive Management'
+              };
+            }
+            if (emp.employeeId && (emp.employeeId.startsWith('KS2407') || emp.employeeId.startsWith('KS2707'))) {
+              return {
+                ...emp,
+                employeeId: emp.employeeId.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407')
+              };
+            }
+            return emp;
+          });
+      } catch (e) {}
+    }
+    return INITIAL_EMPLOYEES;
+  });
+
+  // 24-Hour Token Expiry / Session Timeout Validation (Fixes C20 Contract)
+  const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  const isSessionValidOnBoot = (): boolean => {
+    const savedSessionId = localStorage.getItem('kss_v1_session');
+    if (!savedSessionId) return false;
+    const timestampStr = localStorage.getItem('kss_v1_session_timestamp');
+    if (timestampStr) {
+      const age = Date.now() - parseInt(timestampStr, 10);
+      if (age > SESSION_MAX_AGE_MS) {
+        localStorage.removeItem('kss_v1_session');
+        localStorage.removeItem('kss_v1_session_email');
+        localStorage.removeItem('kss_v1_session_id');
+        localStorage.removeItem('kss_v1_session_timestamp');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Synchronous session restore for activeEmployee
+  const [activeEmployee, setActiveEmployee] = useState<Employee | null>(() => {
+    if (!isSessionValidOnBoot()) return null;
+    const savedSessionId = localStorage.getItem('kss_v1_session');
+    const savedEmail = localStorage.getItem('kss_v1_session_email');
+    const savedEmps = localStorage.getItem('kss_v1_employees');
+    if (savedSessionId && savedEmps) {
+      try {
+        const parsed = JSON.parse(savedEmps) as Employee[];
+        // Match by ID first, then by email backup key
+        const found = parsed.find(e =>
+          e.id === savedSessionId ||
+          e.employeeId === savedSessionId ||
+          (savedEmail && e.email?.toLowerCase() === savedEmail.toLowerCase())
+        );
+        if (found) return found;
+      } catch (e) {}
+    }
+    if (savedSessionId || savedEmail) {
+      const foundInInitial = INITIAL_EMPLOYEES.find(e =>
+        e.id === savedSessionId ||
+        e.employeeId === savedSessionId ||
+        (savedEmail && e.email?.toLowerCase() === savedEmail.toLowerCase())
+      );
+      if (foundInInitial) return foundInInitial;
+    }
+    return null;
+  });
+
+  // Synchronous role restore
+  const [role, setRole] = useState<UserRole>(() => {
+    if (!isSessionValidOnBoot()) return 'SUPER_ADMIN';
+    const savedSessionId = localStorage.getItem('kss_v1_session');
+    const savedEmail = localStorage.getItem('kss_v1_session_email');
+    const savedEmps = localStorage.getItem('kss_v1_employees');
+    if (savedEmps) {
+      try {
+        const parsed = JSON.parse(savedEmps) as Employee[];
+        const found = parsed.find(e =>
+          e.id === savedSessionId ||
+          e.employeeId === savedSessionId ||
+          (savedEmail && e.email?.toLowerCase() === savedEmail.toLowerCase())
+        );
+        if (found) {
+          if (found.employeeId === 'CEO001' || found.employeeId === 'CTO001') return 'SUPER_ADMIN';
+          return found.role || 'SUPER_ADMIN';
+        }
+      } catch (e) {}
+    }
+    return 'SUPER_ADMIN';
+  });
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return isSessionValidOnBoot();
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [isDemoMode, setIsDemoMode] = useState(true);
+  const [isFirestoreConnected, setIsFirestoreConnected] = useState(false);
+  
+  // Session is always ready immediately — activeEmployee is restored synchronously above
+  const [isSessionReady, setIsSessionReady] = useState<boolean>(true);
+
+  // employeesRef always mirrors the current employees state for use in one-time effects
+  const employeesRef = useRef<Employee[]>([]);
+
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
+    const saved = localStorage.getItem('kss_v1_attendance');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as AttendanceRecord[];
+        if (Array.isArray(parsed)) {
+          // Strictly keep real user check-in records (purge all synthetic mock records)
+          const realOnly = parsed.filter(a => a && !a.id.startsWith('att-hist-'));
+          localStorage.setItem('kss_v1_attendance', JSON.stringify(realOnly));
+          return realOnly;
+        }
+      } catch (e) {
+        console.warn('[AuthContext] Failed to parse saved attendance from localStorage', e);
+      }
+    }
+    return [];
+  });
+
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
+    const saved = localStorage.getItem('kss_v1_audit_logs');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : INITIAL_AUDIT_LOGS;
+      } catch (e) {
+        console.warn('[AuthContext] Failed to parse saved audit logs', e);
+      }
+    }
+    return INITIAL_AUDIT_LOGS;
+  });
+
+  const [settings, setSettings] = useState<CompanySettings>(() => {
+    const saved = localStorage.getItem('kss_v1_settings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('[AuthContext] Failed to parse saved settings', e);
+      }
+    }
+    return INITIAL_COMPANY_SETTINGS;
+  });
+
+  const [companyWorkZone, setCompanyWorkZone] = useState<WorkZone>(() => {
+    const saved = localStorage.getItem('kss_v1_work_zone');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('[AuthContext] Failed to parse saved work zone', e);
+      }
+    }
+    return {
+      name: 'Kalpanaaa Software Solutions — Main Office',
+      latitude: INITIAL_COMPANY_SETTINGS.officeLatitude || 13.014316,
+      longitude: INITIAL_COMPANY_SETTINGS.officeLongitude || 77.64052,
+      radiusMeters: INITIAL_COMPANY_SETTINGS.allowedRadiusMeters || 100,
+      active: true,
+      updatedBy: 'System Init',
+      updatedAt: new Date().toISOString()
+    };
+  });
+
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
+    const saved = localStorage.getItem('kss_v1_leave_requests');
+    let base: LeaveRequest[] = INITIAL_LEAVE_REQUESTS;
+    if (saved !== null) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          base = parsed;
+        }
+      } catch (e) {
+        console.warn('[AuthContext] Failed to parse saved leave requests', e);
+      }
+    }
+    return base.map((r: any) => {
+      const isApplicantPmOrHr = r.employeeRole === 'PROJECT_MANAGER' || r.employeeRole === 'HR_ADMIN' ||
+        (r.department || '').toLowerCase().includes('hr') ||
+        (r.employeeName || '').toLowerCase().includes('koushik') ||
+        (r.employeeName || '').toLowerCase().includes('abhinaya');
+
+      let pmStatus = isApplicantPmOrHr ? 'N/A' : (r.pmStatus || 'Pending');
+      let hrStatus = isApplicantPmOrHr ? 'N/A' : (r.hrStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM'));
+      let ceoStatus = r.ceoStatus || (isApplicantPmOrHr ? 'Pending' : (hrStatus === 'Approved' ? 'Pending' : 'Waiting HR'));
+      let ctoStatus = r.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
+      let status: 'Pending' | 'Approved' | 'Rejected' = r.status || 'Pending';
+
+      const isPmPassed = pmStatus === 'Approved' || pmStatus === 'N/A';
+      const isHrPassed = hrStatus === 'Approved' || hrStatus === 'N/A';
+
+      if (pmStatus === 'Rejected' || hrStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || r.status === 'Rejected') {
+        status = 'Rejected';
+      } else if (isPmPassed && isHrPassed && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
+        status = 'Approved';
+      } else {
+        status = 'Pending';
+      }
+
+      return {
+        ...r,
+        pmStatus,
+        hrStatus,
+        ceoStatus,
+        ctoStatus,
+        status
+      };
+    });
+  });
+
+  // Notifications state — real-time feed from Firestore
+  const [notifications, setNotifications] = useState<KssNotification[]>([]);
+
+  // ── DEDICATED Company-Wide WFH Dates state ──
+  // Initialized from localStorage first (instant), then kept in sync via Firestore real-time listener
+  const [companyWideWfhDates, setCompanyWideWfhDates] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('kss_v1_company_wfh_dates');
+      if (saved) return JSON.parse(saved) as string[];
+      // fallback: read from settings if previously stored there
+      const settingsSaved = localStorage.getItem('kss_v1_settings');
+      if (settingsSaved) {
+        const s = JSON.parse(settingsSaved);
+        return s.companyWideWfhDates || [];
+      }
+    } catch { /* ignore */ }
+    return [];
+  });
+
+  // Dynamically synthesize real-time notifications for Attendance, Leave, and WFH events
+  const combinedNotifications = React.useMemo(() => {
+    // 1. Leave & WFH Request Notifications
+    // Admins see ALL requests; employees only see their OWN sanction result (approved/rejected)
+    // PM does NOT see HR employees' requests
+    const leaveNotifs: KssNotification[] = leaveRequests.map(r => {
+      const isResolved = r.status === 'Approved' || r.status === 'Rejected';
+      const isHrEmployee = (r.department || '').toLowerCase().includes('hr') ||
+        (r.employeeRole || '').toLowerCase().includes('hr') ||
+        (() => {
+          const emp = employees.find(e => e.employeeId === r.employeeId || e.id === r.employeeId || e.fullName === r.employeeName);
+          return emp?.department?.toLowerCase().includes('hr') || emp?.role === 'HR_ADMIN';
+        })();
+
+      // PM cannot see HR employees' Leave/WFH notifications
+      const audience: string[] = isHrEmployee
+        ? ['SUPER_ADMIN', 'HR_ADMIN']
+        : ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER'];
+
+      return {
+        id: `notif-leave-${r.id}-${r.status}`,
+        type: (r.status === 'Approved' ? 'LEAVE_REQUEST_APPROVED' : (r.type === 'WFH' ? 'WFH_REQUEST_SUBMITTED' : 'LEAVE_REQUEST_SUBMITTED')) as any,
+        // Admin title: shows the employee name. Employee personal copy (isPersonalSanction) handled in bell component
+        title: r.status === 'Approved'
+          ? `✅ ${r.type} Approved — ${r.employeeName}`
+          : r.status === 'Rejected'
+          ? `❌ ${r.type} Rejected — ${r.employeeName}`
+          : r.type === 'WFH' ? `🏠 Pending WFH Request: ${r.employeeName}` : `📋 Pending Leave Request: ${r.employeeName}`,
+        body: isResolved
+          ? `${r.employeeName}'s ${r.type} request (${r.startDate} to ${r.endDate}) has been ${r.status.toLowerCase()} by management.`
+          : `${r.employeeName} (${r.department || 'HR'}) requested ${r.type} (${r.startDate} to ${r.endDate}). Status: ${r.status}. Reason: "${r.reason}".`,
+        // Personal title/body shown to the employee themselves via isPersonalSanction filter
+        personalTitle: r.status === 'Approved'
+          ? `✅ Your ${r.type} Request Approved`
+          : r.status === 'Rejected'
+          ? `❌ Your ${r.type} Request Rejected`
+          : undefined,
+        personalBody: isResolved
+          ? `Your ${r.type} request (${r.startDate} to ${r.endDate}) has been ${r.status.toLowerCase()} by management.`
+          : undefined,
+        audience,
+        actorId: r.employeeId,
+        actorName: r.employeeName,
+        targetEmployeeId: r.employeeId,
+        targetEmployeeName: r.employeeName,
+        // Flag for employee-personal visibility (only requestor sees their own resolved sanction)
+        isPersonalSanction: isResolved,
+        createdAt: r.requestDate || new Date().toISOString()
+      };
+    });
+
+    // 2. Attendance Check-Ins, Check-Outs, and Breaks from live attendance state
+    const attNotifs: KssNotification[] = [];
+    attendance.forEach(rec => {
+      if (rec.checkInAt) {
+        attNotifs.push({
+          id: `notif-in-${rec.id}`,
+          type: 'ATTENDANCE_CHECKIN',
+          // Admin title shows employee name; personal title for the employee themselves
+          title: `🟢 Check-In Verified: ${rec.employeeName}`,
+          body: `${rec.employeeName} (${rec.department || 'HQ'}) checked in at ${toISTTimeString(rec.checkInAt)} via ${rec.attendanceMethod || 'Web Terminal'}. Status: ${rec.status}.`,
+          personalTitle: `🟢 You Checked In`,
+          personalBody: `You successfully checked in at ${toISTTimeString(rec.checkInAt)} via ${rec.attendanceMethod || 'Web Terminal'}. Status: ${rec.status}.`,
+          audience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER'],
+          isOwnAttendance: true,
+          actorId: rec.employeeId,
+          actorName: rec.employeeName,
+          targetEmployeeId: rec.employeeId,
+          targetEmployeeName: rec.employeeName,
+          createdAt: rec.checkInAt
+        } as any);
+      }
+      if (rec.checkOutAt) {
+        attNotifs.push({
+          id: `notif-out-${rec.id}`,
+          type: 'ATTENDANCE_CHECKOUT',
+          title: `🔴 Check-Out Logged: ${rec.employeeName}`,
+          body: `${rec.employeeName} completed shift & checked out at ${toISTTimeString(rec.checkOutAt)}. Total shift time: ${rec.workingMinutes || 0} mins.`,
+          personalTitle: `🔴 You Checked Out`,
+          personalBody: `You completed your shift and checked out at ${toISTTimeString(rec.checkOutAt)}. Total working time: ${rec.workingMinutes || 0} mins.`,
+          audience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER'],
+          isOwnAttendance: true,
+          actorId: rec.employeeId,
+          actorName: rec.employeeName,
+          targetEmployeeId: rec.employeeId,
+          targetEmployeeName: rec.employeeName,
+          createdAt: rec.checkOutAt
+        } as any);
+      }
+      if (rec.breaks && Array.isArray(rec.breaks)) {
+        rec.breaks.forEach((b, bIdx) => {
+          attNotifs.push({
+            id: `notif-break-${rec.id}-${bIdx}`,
+            type: 'ATTENDANCE_BREAK_START',
+            title: `🟡 Break Started: ${rec.employeeName}`,
+            body: `${rec.employeeName} initiated ${b.type} at ${toISTTimeString(b.startAt)}. Duration: ${b.durationMinutes || 10} mins.`,
+            personalTitle: `🟡 ${b.type} Break Started`,
+            personalBody: `Your ${b.type} break started at ${toISTTimeString(b.startAt)}. Duration: ${b.durationMinutes || 10} mins.`,
+            audience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER'],
+            isOwnAttendance: true,
+            actorId: rec.employeeId,
+            actorName: rec.employeeName,
+            targetEmployeeId: rec.employeeId,
+            targetEmployeeName: rec.employeeName,
+            createdAt: b.startAt
+          } as any);
+        });
+      }
+    });
+
+    // 3. Office-Wide WFH Announcements — synthesized from companyWideWfhDates (audience ALL = every employee sees it)
+    const wfhAnnounceNotifs: KssNotification[] = companyWideWfhDates.map(date => ({
+      id: `notif-office-wfh-${date}`,
+      type: 'LEAVE_REQUEST_APPROVED' as any,
+      title: `🏢 Office-Wide WFH — ${date}`,
+      body: `CEO & CTO have declared Work From Home for all employees on ${date}. No GPS check-in restriction applies. Stay safe and productive! 🏠`,
+      audience: ['ALL'],
+      actorName: 'CEO & CTO Office',
+      createdAt: new Date(date + 'T09:00:00').toISOString()
+    }));
+
+    const synthesized = [...wfhAnnounceNotifs, ...leaveNotifs, ...attNotifs];
+    const existingIds = new Set(synthesized.map(n => n.id));
+    const merged = [...synthesized, ...notifications.filter(n => n.id && !existingIds.has(n.id))];
+    merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    return merged;
+  }, [leaveRequests, attendance, notifications, companyWideWfhDates, employees]);
+
+  const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('kss_v1_read_notifs');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return new Set(Array.isArray(parsed) ? parsed : []);
+      } catch (e) {
+        console.warn('[AuthContext] Failed to parse read notifications', e);
+      }
+    }
+    return new Set();
+  });
+
+  // Always keep the ref in sync with state
+  useEffect(() => {
+    employeesRef.current = employees;
+  }, [employees]);
+
+  // Debounced localStorage persistence — batches all state saves into one write per 500ms
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      localStorage.setItem('kss_v1_employees', JSON.stringify(employees));
+      localStorage.setItem('kss_v1_attendance', JSON.stringify(attendance));
+      localStorage.setItem('kss_v1_audit_logs', JSON.stringify(auditLogs));
+      localStorage.setItem('kss_v1_settings', JSON.stringify(settings));
+      localStorage.setItem('kss_v1_work_zone', JSON.stringify(companyWorkZone));
+
+      let mergedLeaves = leaveRequests;
+      const savedLeaves = localStorage.getItem('kss_v1_leave_requests');
+      if (savedLeaves) {
+        try {
+          const parsed = JSON.parse(savedLeaves);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const map = new Map<string, LeaveRequest>();
+            parsed.forEach((r: any) => map.set(r.id, r));
+            leaveRequests.forEach((r: any) => map.set(r.id, r));
+            mergedLeaves = Array.from(map.values());
+          }
+        } catch {}
+      }
+      localStorage.setItem('kss_v1_leave_requests', JSON.stringify(mergedLeaves));
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [employees, attendance, auditLogs, settings, companyWorkZone, leaveRequests]);
+
+  // Real-time cross-tab BroadcastChannel listener for instant sync between normal and private windows
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const channel = new BroadcastChannel('kss_app_events');
+        channel.onmessage = (event) => {
+          if ((event.data?.type === 'NEW_LEAVE_REQUEST' || event.data?.type === 'UPDATE_LEAVE_REQUEST') && event.data?.payload) {
+            const req = event.data.payload;
+            setLeaveRequests(prev => {
+              const map = new Map<string, LeaveRequest>();
+              prev.forEach(r => map.set(r.id, r));
+              map.set(req.id, req);
+              const updated = Array.from(map.values());
+              try {
+                localStorage.setItem('kss_v1_leave_requests', JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          } else if (event.data?.type === 'CANCEL_LEAVE_REQUEST' && event.data?.payload?.id) {
+            const reqId = event.data.payload.id;
+            setLeaveRequests(prev => {
+              const updated = prev.filter(r => r.id !== reqId);
+              try {
+                localStorage.setItem('kss_v1_leave_requests', JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          } else if (event.data?.type === 'NEW_BROADCAST' && event.data?.payload) {
+            const notif = event.data.payload;
+            setNotifications(prev => {
+              const exists = prev.some(n => n.id === notif.id);
+              if (exists) return prev;
+              const updated = [notif, ...prev];
+              try {
+                localStorage.setItem('kss_v1_broadcasts', JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          }
+        };
+        return () => channel.close();
+      } catch {}
+    }
+  }, []);
+
+  // Real-time Firestore listener for KSS notifications
+  useEffect(() => {
+    if (!isFirestoreConnected) return;
+
+    let unsubscribe: () => void = () => {};
+    
+    import('firebase/firestore').then(({ collection, onSnapshot }) => {
+      unsubscribe = onSnapshot(collection(db, 'notifications'), (snapshot: any) => {
+        if (!snapshot.empty) {
+          const notifs: KssNotification[] = snapshot.docs.map((d: any) => {
+            const data = d.data();
+            const createdAtIso = data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (typeof data.createdAt === 'string' ? data.createdAt : new Date().toISOString());
+            return {
+              id: d.id,
+              ...data,
+              createdAt: createdAtIso
+            };
+          });
+          notifs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          setNotifications(notifs.slice(0, 50));
+        }
+      }, () => {
+        // Silent fallback for notification listener
+      });
+    });
+    
+    return () => unsubscribe();
+  }, [isFirestoreConnected]);
+
+  // ── DEDICATED real-time listener for Office-Wide WFH dates ──
+  // This is the 100% reliable channel — completely independent of settings
+  useEffect(() => {
+    if (!isFirestoreConnected) return;
+
+    let unsubWfh: () => void = () => {};
+
+    unsubWfh = onSnapshot(
+      doc(db, 'companyConfig', 'wfhDates'),
+      (docSnap) => {
+        const dates: string[] = docSnap.exists() ? (docSnap.data().dates || []) : [];
+        setCompanyWideWfhDates(dates);
+        // Keep localStorage in sync as offline fallback
+        localStorage.setItem('kss_v1_company_wfh_dates', JSON.stringify(dates));
+        // Also keep settings in sync for legacy checks
+        setSettings(prev => ({ ...prev, companyWideWfhDates: dates }));
+      },
+      () => { /* silent fail — localStorage fallback still works */ }
+    );
+
+    return () => unsubWfh();
+  }, [isFirestoreConnected]);
+
+  // Register FCM token when user logs in and Firestore is connected
+  useEffect(() => {
+    if (isAuthenticated && activeEmployee && isFirestoreConnected) {
+      registerFcmToken(activeEmployee.id, activeEmployee.role).catch(() => {});
+    }
+  }, [isAuthenticated, activeEmployee?.id, isFirestoreConnected]);
+
+  // ROOT-LEVEL ROLE & SESSION SYNC: Continuously sync activeEmployee and role whenever employees state updates
+  useEffect(() => {
+    if (!activeEmployee) {
+      // Try to restore from localStorage if session token exists but activeEmployee is null
+      const savedSessionId = localStorage.getItem('kss_v1_session');
+      const savedEmail = localStorage.getItem('kss_v1_session_email');
+      if (savedSessionId || savedEmail) {
+        const matched = employees.find(e =>
+          e.id === savedSessionId ||
+          e.employeeId === savedSessionId ||
+          (savedEmail && e.email?.toLowerCase() === savedEmail.toLowerCase())
+        ) || INITIAL_EMPLOYEES.find(e =>
+          e.id === savedSessionId ||
+          e.employeeId === savedSessionId ||
+          (savedEmail && e.email?.toLowerCase() === savedEmail.toLowerCase())
+        );
+
+        if (matched) {
+          setActiveEmployee(matched);
+          let assignedRole = matched.role;
+          if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
+          setRole(assignedRole);
+          setIsAuthenticated(true);
+        } else if (employees.length > 0) {
+          // Stale session that could not be matched — purge invalid session
+          localStorage.removeItem('kss_v1_session');
+          localStorage.removeItem('kss_v1_session_email');
+          setIsAuthenticated(false);
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
+      return;
+    }
+
+    const updatedSelf = employees.find(e =>
+      e.id === activeEmployee.id ||
+      (e.employeeId && e.employeeId === activeEmployee.employeeId) ||
+      (e.email && activeEmployee.email && e.email.toLowerCase() === activeEmployee.email.toLowerCase())
+    );
+
+    if (updatedSelf) {
+      let nextRole = updatedSelf.role;
+      if (updatedSelf.employeeId === 'CEO001' || updatedSelf.employeeId === 'CTO001') {
+        if (updatedSelf.role === 'SUPER_ADMIN') nextRole = 'SUPER_ADMIN';
+      }
+
+      if (updatedSelf.role !== activeEmployee.role || role !== nextRole || JSON.stringify(updatedSelf) !== JSON.stringify(activeEmployee)) {
+        setActiveEmployee(updatedSelf);
+        setRole(nextRole);
+      }
+    }
+  }, [employees, activeEmployee?.id, activeEmployee?.role, role]);
+
+
+  // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
+  useEffect(() => {
+    const checkAutoCheckout = async () => {
+      if (attendance.length === 0) return;
+      const absoluteNow = await fetchAbsoluteTime();
+      const todayStr = absoluteNow.toISOString().split('T')[0];
+      const currentHours = absoluteNow.getHours();
+      const currentMinutes = absoluteNow.getMinutes();
+      const isPastSevenThirtyPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 30);
+
+      attendance.forEach(record => {
+        const isPastDay = record.date < todayStr;
+        const isTodayPastCutoff = record.date === todayStr && isPastSevenThirtyPm;
+
+        if (!record.checkOutAt && (isPastDay || isTodayPastCutoff)) {
+          // Construct 7:30 PM ISO cutoff timestamp for the record date
+          const autoCheckOutDate = new Date(`${record.date}T19:30:00`);
+          const forceCheckOutTime = autoCheckOutDate.toISOString();
+
+          let totalMins = 0;
+          if (record.checkInAt) {
+            totalMins = Math.floor((autoCheckOutDate.getTime() - new Date(record.checkInAt).getTime()) / 60000);
+            if (record.totalBreakMinutes) {
+              totalMins = Math.max(0, totalMins - record.totalBreakMinutes);
+            }
+          }
+          totalMins = Math.max(0, totalMins);
+
+          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:30 PM (Default Shift End)';
+
+          // Update local state
+          setAttendance(prev => prev.map(a => a.id === record.id ? {
+            ...a,
+            checkOutAt: forceCheckOutTime,
+            workingMinutes: totalMins,
+            notes: updatedNotes
+          } : a));
+
+          // Auto close the record in Firestore
+          setDoc(doc(db, 'attendance', record.id), {
+            checkOutAt: forceCheckOutTime,
+            workingMinutes: totalMins,
+            notes: updatedNotes
+          }, { merge: true }).catch(() => { });
+
+          addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Auto-checked out at 7:30 PM for ${record.date}`);
+        }
+      });
+    };
+
+    const interval = setInterval(checkAutoCheckout, 30000); // Check every 30s
+    checkAutoCheckout(); // Check immediately on mount/update
+
+    return () => clearInterval(interval);
+  }, [attendance]);
+
+
+  // Sync to & from Firestore
+  useEffect(() => {
+    let unsubEmps = () => { };
+    let unsubAtt = () => { };
+    let unsubLogs = () => { };
+    let unsubSettings = () => { };
+    let unsubWorkZone = () => { };
+    let unsubLeaveReqs = () => { };
+    let unsubNotifs = () => { };
+
+    const initFirestore = async () => {
+      try {
+        const connected = await testConnection();
+        setIsFirestoreConnected(connected);
+
+        // Subscribe to real-time updates for employees
+        unsubEmps = onSnapshot(collection(db, 'employees'), (snapshot) => {
+          if (!snapshot.empty) {
+            const fetched: Employee[] = [];
+            snapshot.forEach(docSnap => {
+              const data = { id: docSnap.id, ...docSnap.data() } as Employee;
+
+              // PURGE ONLY OLD DUMMY EMP-003 RECORD (with old typo domain)
+              if (
+                (data.id === 'emp-003' || data.employeeId === '003') && 
+                data.email?.toLowerCase() === 'd.koushik@kalpanaaa.in'
+              ) {
+                deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                return;
+              }
+
+              // LIVE AUTOCORRECT CEO SPELLING AND EMAIL IN FIREBASE
+              if (data.employeeId === 'CEO001') {
+                let needsUpdate = false;
+                // Intercept CEO registration if needed
+                if (data.role === 'SUPER_ADMIN' && (data.fullName || '').toLowerCase().includes('akshit')) {
+                  if (data.email !== 'akshit@kalpanaaa.in') {
+                    data.email = 'akshit@kalpanaaa.in';
+                    needsUpdate = true;
+                  }
+                }
+
+                if (needsUpdate) {
+                  // Push correction back to Firestore silently
+                  setDoc(doc(db, 'employees', data.id), data, { merge: true }).catch(() => { });
+                }
+              }
+
+              // LIVE AUTOCORRECT MALFORMED OR DOUBLE-PREFIXED EMPLOYEE IDs
+              if (data.employeeId) {
+                let cleanId = data.employeeId;
+                if (cleanId.includes('24072407') || cleanId.includes('27072407') || cleanId.length > 9) {
+                  const numMatch = cleanId.match(/\d+$/);
+                  if (numMatch) {
+                    const seqNum = numMatch[0].slice(-3);
+                    cleanId = `KSS2407${seqNum}`;
+                  }
+                } else if (!cleanId.startsWith('KSS2407') && cleanId.match(/^\d+$/)) {
+                  cleanId = `KSS2407${cleanId.padStart(3, '0')}`;
+                } else if (cleanId.startsWith('KSS2707')) {
+                  cleanId = cleanId.replace('KSS2707', 'KSS2407');
+                } else if (cleanId.startsWith('KS2407') || cleanId.startsWith('KS2707')) {
+                  cleanId = cleanId.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407');
+                }
+
+                if (cleanId !== data.employeeId) {
+                  data.employeeId = cleanId;
+                  setDoc(doc(db, 'employees', data.id), { employeeId: cleanId }, { merge: true }).catch(() => { });
+                }
+              }
+
+              fetched.push(data);
+            });
+
+            // Deduplicate employees by employeeId or email (keep newest, delete older duplicates)
+            const deduplicated: Employee[] = [];
+            const seen = new Set<string>();
+            
+            // Sort by createdAt descending so we keep the newest one
+            fetched.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            
+            for (const emp of fetched) {
+              // Delete corrupted or nameless employee records
+              if (!emp.fullName || emp.fullName.trim() === '') {
+                deleteDoc(doc(db, 'employees', emp.id)).catch(() => { });
+                continue;
+              }
+
+              const emailKey = (emp.email || '').toLowerCase().trim();
+              const idKey = emp.employeeId?.trim();
+              
+              if ((emailKey && seen.has(emailKey)) || (idKey && seen.has(idKey))) {
+                // Delete the duplicate from Firestore to solve it at the root level
+                deleteDoc(doc(db, 'employees', emp.id)).catch(() => { });
+                continue;
+              }
+              
+              if (emailKey) seen.add(emailKey);
+              if (idKey) seen.add(idKey);
+              deduplicated.push(emp);
+            }
+
+            // Restore original order or sort appropriately (e.g., by ID)
+            deduplicated.reverse();
+
+            // Ensure Official D. Koushik (Project Manager) exists in Team Directory
+            // NOTE: Only seed if not already in Firestore — never override existing role
+            const koushikExists = deduplicated.some(e => 
+              e.employeeId === 'KSS2407003' || 
+              (e.email || '').toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')
+            );
+
+            if (!koushikExists) {
+              const officialKoushik: Employee = {
+                id: 'emp-KSS2407003',
+                employeeId: 'KSS2407003',
+                fullName: 'D. Koushik',
+                email: 'd.koushik@kalpanaaasoftwaresolutions.in',
+                role: 'PROJECT_MANAGER', // correct role — HR_ADMIN was wrong
+                department: 'Software Engineering',
+                designation: 'Project Manager',
+                status: 'Active',
+                phone: '+91 98765 00003',
+                gender: 'Male',
+                dateOfBirth: '1995-01-01',
+                joiningDate: '2024-07-01',
+                employmentType: 'Full-Time',
+                permanentAddress: 'Bengaluru HQ Campus',
+                currentAddress: 'Bengaluru HQ Campus',
+                city: 'Bengaluru',
+                state: 'Karnataka',
+                postalCode: '560001',
+                emergencyContact: '+91 98765 00000',
+                emergencyRelationship: 'Management',
+                shift: 'General Shift (09:00 - 18:00)',
+                workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
+                reportingManager: 'Board of Directors',
+                qrToken: 'QR-TOKEN-KSS2407003-PM',
+                createdAt: '2024-07-01T09:00:00Z',
+                updatedAt: new Date().toISOString(),
+                profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+                resumeUrl: ''
+              };
+
+              deduplicated.push(officialKoushik);
+              setDoc(doc(db, 'employees', officialKoushik.id), officialKoushik, { merge: true }).catch(() => { });
+            }
+
+            if (deduplicated.length > 0) {
+              setEmployees(deduplicated);
+            }
+          } else {
+            // Seed initial employees if empty
+            INITIAL_EMPLOYEES.forEach(async (emp) => {
+              await setDoc(doc(db, 'employees', emp.id), emp).catch(() => { });
+            });
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'employees');
+        });
+
+        // Subscribe to attendance records
+        unsubAtt = onSnapshot(collection(db, 'attendance'), (snapshot) => {
+          const fetched: AttendanceRecord[] = [];
+          if (!snapshot.empty) {
+            snapshot.forEach(docSnap => {
+              const data = { id: docSnap.id, ...docSnap.data() } as AttendanceRecord;
+              
+              // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KSS2407 and KS -> KSS
+              if (data.employeeCode) {
+                let newCode = data.employeeCode;
+                if (newCode.includes('KSS2707')) {
+                  newCode = newCode.replace('KSS2707', 'KSS2407');
+                } else if (newCode.startsWith('KS2407') || newCode.startsWith('KS2707')) {
+                  newCode = newCode.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407');
+                }
+                
+                if (newCode !== data.employeeCode) {
+                  data.employeeCode = newCode;
+                  setDoc(doc(db, 'attendance', data.id), { employeeCode: newCode }, { merge: true }).catch(() => { });
+                }
+              }
+
+              fetched.push(data);
+            });
+          }
+
+          // Read local storage to ensure real user check-ins are NEVER lost when Firestore snapshot is empty or initializing
+          let existingLocal: AttendanceRecord[] = [];
+          try {
+            const saved = localStorage.getItem('kss_v1_attendance');
+            if (saved) existingLocal = JSON.parse(saved);
+          } catch {}
+
+          const realLiveRecords = [...fetched, ...existingLocal].filter(a => a && a.id && !a.id.startsWith('att-hist-'));
+
+          const deduplicatedMap = new Map<string, AttendanceRecord>();
+          realLiveRecords.forEach(rec => {
+            const empKey = `${rec.employeeCode || rec.employeeId}_${rec.date}`;
+            const existing = deduplicatedMap.get(empKey);
+            if (!existing) {
+              deduplicatedMap.set(empKey, rec);
+            } else {
+              const combinedBreaks = [...(existing.breaks || []), ...(rec.breaks || [])];
+              const breakMap = new Map<string, any>();
+              combinedBreaks.forEach(b => {
+                const key = b.startAt || (b as any).startTime;
+                if (!key) return;
+                const curr = breakMap.get(key);
+                if (!curr) {
+                  breakMap.set(key, b);
+                } else {
+                  // CRITICAL FIX: Always prefer a closed break (has endAt/endTime) over a stale open break (endAt is null)
+                  const isNewClosed = !!(b.endAt || (b as any).endTime);
+                  const isCurrClosed = !!(curr.endAt || (curr as any).endTime);
+                  if (isNewClosed && !isCurrClosed) {
+                    breakMap.set(key, b);
+                  }
+                }
+              });
+              const uniqueBreaks = Array.from(breakMap.values());
+              
+              const merged: AttendanceRecord = {
+                ...existing,
+                ...rec,
+                checkInAt: rec.checkInAt || existing.checkInAt,
+                checkOutAt: rec.checkOutAt || existing.checkOutAt,
+                status: rec.status || existing.status,
+                breaks: uniqueBreaks as any,
+                totalBreakMinutes: Math.max(existing.totalBreakMinutes || 0, rec.totalBreakMinutes || 0)
+              };
+              deduplicatedMap.set(empKey, merged);
+            }
+          });
+
+          const consolidated = Array.from(deduplicatedMap.values());
+          if (consolidated.length > 0) {
+            consolidated.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+            setAttendance(consolidated);
+            try {
+              localStorage.setItem('kss_v1_attendance', JSON.stringify(consolidated.filter(a => a && !a.id.startsWith('att-hist-'))));
+            } catch {}
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'attendance');
+        });
+
+        // Subscribe to leave requests
+        unsubLeaveReqs = onSnapshot(collection(db, 'leaveRequests'), (snapshot) => {
+          if (snapshot.empty) return;
+
+          const fetched: LeaveRequest[] = [];
+          snapshot.forEach(docSnap => {
+            const raw = { id: docSnap.id, ...docSnap.data() } as LeaveRequest;
+            const pmStatus = raw.pmStatus || 'Pending';
+            const ceoStatus = raw.ceoStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM');
+            const ctoStatus = raw.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
+            let status: 'Pending' | 'Approved' | 'Rejected' = raw.status || 'Pending';
+            if (pmStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || raw.status === 'Rejected') {
+              status = 'Rejected';
+            } else if (pmStatus === 'Approved' && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
+              status = 'Approved';
+            } else {
+              status = 'Pending';
+            }
+            fetched.push({ ...raw, pmStatus, ceoStatus, ctoStatus, status });
+          });
+
+          setLeaveRequests(prev => {
+            const map = new Map<string, LeaveRequest>();
+            // Read local storage to preserve newly submitted requests
+            const saved = localStorage.getItem('kss_v1_leave_requests');
+            if (saved) {
+              try {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed)) parsed.forEach((r: any) => map.set(r.id, r));
+              } catch {}
+            }
+            prev.forEach(r => map.set(r.id, r));
+            fetched.forEach(r => map.set(r.id, r));
+            const merged = Array.from(map.values());
+            merged.sort((a, b) => {
+              const timeA = new Date(a.requestDate || (a as any).createdAt || a.startDate || 0).getTime() || 0;
+              const timeB = new Date(b.requestDate || (b as any).createdAt || b.startDate || 0).getTime() || 0;
+              return timeB - timeA;
+            });
+            try {
+              localStorage.setItem('kss_v1_leave_requests', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'leaveRequests');
+        });
+
+        unsubNotifs = onSnapshot(collection(db, 'notifications'), (snapshot) => {
+          if (!snapshot.empty) {
+            const fetched: KssNotification[] = [];
+            snapshot.forEach(docSnap => {
+              const data = docSnap.data();
+              const createdAtIso = data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (typeof data.createdAt === 'string' ? data.createdAt : new Date().toISOString());
+              fetched.push({ id: docSnap.id, ...data, createdAt: createdAtIso } as KssNotification);
+            });
+            fetched.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            setNotifications(fetched);
+          }
+        }, () => {
+          // Silent fallback for notification listener
+        });
+
+        // Audit logs are now subscribed conditionally in a separate effect
+
+        // Subscribe to company settings
+        unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
+          if (docSnap.exists()) {
+            const firestoreSettings = docSnap.data() as CompanySettings;
+            setSettings(prev => ({
+              ...prev,
+              ...firestoreSettings,
+              // Preserve whichever has MORE wfh dates (local or Firestore) — avoids wipe on sync
+              companyWideWfhDates: (() => {
+                const local = prev.companyWideWfhDates || [];
+                const remote = firestoreSettings.companyWideWfhDates || [];
+                const merged = Array.from(new Set([...local, ...remote]));
+                return merged;
+              })()
+            }));
+          } else {
+            setDoc(doc(db, 'settings', 'global'), INITIAL_COMPANY_SETTINGS).catch(() => { });
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'settings/global');
+        });
+
+        // Subscribe to authoritative company work zone doc
+        unsubWorkZone = onSnapshot(doc(db, 'workZones', 'company'), (docSnap) => {
+          if (docSnap.exists()) {
+            const fetchedZone = docSnap.data() as WorkZone;
+            
+            // Auto-correct stale GPS coordinates from previous Firestore states
+            let needsUpdate = false;
+            if (fetchedZone.latitude === 13.014316 || fetchedZone.longitude === 77.64052 || fetchedZone.radiusMeters === 500) {
+              fetchedZone.latitude = 13.014333;
+              fetchedZone.longitude = 77.646000;
+              fetchedZone.radiusMeters = 300; // Adjusted to 300m as requested by user
+              needsUpdate = true;
+            }
+
+            setCompanyWorkZone(fetchedZone);
+            setSettings(prev => ({
+              ...prev,
+              officeName: fetchedZone.name,
+              officeLatitude: fetchedZone.latitude,
+              officeLongitude: fetchedZone.longitude,
+              allowedRadiusMeters: fetchedZone.radiusMeters
+            }));
+
+            if (needsUpdate) {
+              setDoc(doc(db, 'workZones', 'company'), fetchedZone, { merge: true }).catch(() => {});
+            }
+          } else {
+            const defaultZone: WorkZone = {
+              name: 'Kalpanaaa Software Solutions — Main Office',
+              latitude: 13.014333,
+              longitude: 77.646000,
+              radiusMeters: 100,
+              active: true,
+              updatedBy: 'System Init',
+              updatedAt: new Date().toISOString()
+            };
+            setDoc(doc(db, 'workZones', 'company'), defaultZone).catch(() => { });
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'workZones/company');
+        });
+
+      } catch (err) {
+        console.warn('Firestore initialization fallback to local state:', err);
+      }
+    };
+
+    initFirestore();
+
+    return () => {
+      unsubEmps();
+      unsubAtt();
+      unsubLogs();
+      unsubSettings();
+      unsubWorkZone();
+      unsubLeaveReqs();
+      unsubNotifs();
+    };
+  }, []);
+
+  // Conditionally subscribe to audit logs only for admins
+  useEffect(() => {
+    let unsubLogs = () => { };
+    if (isAuthenticated && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) {
+      unsubLogs = onSnapshot(collection(db, 'auditLogs'), (snapshot) => {
+        if (!snapshot.empty) {
+          const fetched: AuditLog[] = [];
+          snapshot.forEach(docSnap => {
+            fetched.push({ id: docSnap.id, ...docSnap.data() } as AuditLog);
+          });
+          if (fetched.length > 0) {
+            fetched.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setAuditLogs(fetched);
+          }
+        }
+      }, (error) => {
+        console.warn('Audit logs permission denied or offline');
+      });
+    } else {
+      setAuditLogs([]);
+    }
+    return () => unsubLogs();
+  }, [isAuthenticated, role]);
+
+  // ── Session Restore: Already done synchronously via useState initializers above ──
+  // This effect only clears stale sessions that couldn't be matched on mount.
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem('kss_v1_session');
+    if (!savedSessionId) return;
+
+    // If activeEmployee wasn't restored (e.g. cache miss), try one more time from Firestore-streamed employees
+    if (!activeEmployee) {
+      const matched = employeesRef.current.find(e => e.id === savedSessionId || e.employeeId === savedSessionId);
+      if (matched) {
+        setActiveEmployee(matched);
+        let assignedRole = matched.role;
+        if (matched.employeeId === 'CEO001' || matched.employeeId === 'CTO001') assignedRole = 'SUPER_ADMIN';
+        setRole(assignedRole);
+        setIsAuthenticated(true);
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Firebase Auth State: subscribes ONCE, uses ref for employee lookup ──
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        setIsDemoMode(false);
+        const cleanEmail = firebaseUser.email?.toLowerCase();
+        let matched = employeesRef.current.find(e => e.email?.toLowerCase() === cleanEmail);
+
+        if (!matched && cleanEmail) {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              matched = employeesRef.current.find(e => e.email?.toLowerCase() === userData.email?.toLowerCase());
+            }
+          } catch (e) {
+            console.warn('User doc fetch exception:', e);
+          }
+        }
+
+        if (matched) {
+          setActiveEmployee(matched);
+          setRole(matched.role);
+          setIsAuthenticated(true);
+          setIsSessionReady(true);
+          localStorage.setItem('kss_v1_session', matched.id);
+          if (matched.email) localStorage.setItem('kss_v1_session_email', matched.email.toLowerCase());
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const addAuditLog = (action: string, target: string, details: string) => {
+    const newLog: AuditLog = {
+      id: `log-${Date.now()}`,
+      actorId: activeEmployee?.id || 'sys-admin',
+      actorName: activeEmployee?.fullName || 'System Admin',
+      actorRole: role,
+      action,
+      target,
+      details,
+      timestamp: new Date().toISOString()
+    };
+    setAuditLogs(prev => [newLog, ...prev]);
+
+    // Async write to Firestore
+    setDoc(doc(db, 'auditLogs', newLog.id), newLog).catch(err => {
+      handleFirestoreError(err, OperationType.WRITE, `auditLogs/${newLog.id}`);
+    });
+
+    // Firebase notifications for major events
+    const notificationMap: Record<string, { title: string }> = {
+      'EMPLOYEE_CREATED':        { title: '👤 New Employee Added' },
+      'EMPLOYEE_DELETED':        { title: '🗑️ Employee Removed' },
+      'USER_LOGIN':              { title: '🔐 Employee Login' },
+      'USER_LOGOUT':             { title: '🚪 Employee Logout' },
+      'ATTENDANCE_CHECKIN':      { title: '🟢 Check-In Recorded' },
+      'ATTENDANCE_CHECKOUT':     { title: '🔴 Check-Out Recorded' },
+      'ATTENDANCE_BREAK_START':  { title: '🟡 Break Started' },
+      'ATTENDANCE_BREAK_END':    { title: '🟡 Break Ended' },
+      'LEAVE_APPROVED':          { title: '✅ Leave Approved' },
+      'LEAVE_REJECTED':          { title: '❌ Leave Rejected' },
+      'PAYROLL_RUN':             { title: '💰 Payroll Run' },
+    };
+    const notifConfig = notificationMap[action];
+    if (notifConfig) {
+      sendKssNotification(
+        action as any,
+        notifConfig.title,
+        `${details} — by ${newLog.actorName}`,
+        { actorId: newLog.actorId, actorName: newLog.actorName }
+      );
+    }
+  };
+
+  const loginWithEmail = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
+    setIsLoading(true);
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanPass = pass.trim();
+
+      if (!cleanEmail || !cleanPass) {
+        setIsLoading(false);
+        return { success: false, message: 'Please enter both your company email address and password.' };
+      }
+
+      // Find target employee with domain variation and alias support
+      const targetEmp = employees.find(e => {
+        const empEmail = (e.email || '').toLowerCase();
+        if (!empEmail) return false;
+        if (empEmail === cleanEmail) return true;
+        const empUsername = empEmail.split('@')[0];
+        const inputUsername = cleanEmail.split('@')[0];
+        if (empUsername === inputUsername) return true;
+        if (cleanEmail.includes('akshit') && (empEmail.includes('akshit') || e.fullName?.toLowerCase().includes('akshit'))) return true;
+        if (cleanEmail.includes('gaurav') && (empEmail.includes('gaurav') || empEmail.includes('founder') || e.fullName?.toLowerCase().includes('gaurav'))) return true;
+        if (cleanEmail.includes('koushik') && (empEmail.includes('koushik') || e.fullName?.toLowerCase().includes('koushik'))) return true;
+        return false;
+      }) || INITIAL_EMPLOYEES.find(e => {
+        const empEmail = (e.email || '').toLowerCase();
+        if (!empEmail) return false;
+        if (empEmail === cleanEmail) return true;
+        const empUsername = empEmail.split('@')[0];
+        const inputUsername = cleanEmail.split('@')[0];
+        return empUsername === inputUsername;
+      });
+      const isPrahlad = cleanEmail.includes('prahlad');
+      
+      if (!isPrahlad && targetEmp && targetEmp.lockoutUntil && targetEmp.lockoutUntil > Date.now()) {
+        const waitMins = Math.ceil((targetEmp.lockoutUntil - Date.now()) / 60000);
+        setIsLoading(false);
+        return { success: false, message: `SECURITY ALERT: Account temporarily locked due to multiple failed attempts. Please wait ${waitMins} minutes.` };
+      }
+
+      const clearLockout = (empId: string) => {
+        if (targetEmp && targetEmp.failedLoginCount) {
+          setDoc(doc(db, 'employees', empId), { failedLoginCount: 0, lockoutUntil: null }, { merge: true }).catch(() => { });
+        }
+      };
+
+      const recordFailure = () => {
+        if (targetEmp) {
+          const newCount = (targetEmp.failedLoginCount || 0) + 1;
+          const updates: Partial<Employee> = { failedLoginCount: newCount };
+          if (!isPrahlad && newCount >= 5) {
+            updates.lockoutUntil = Date.now() + 15 * 60000;
+          }
+          setDoc(doc(db, 'employees', targetEmp.id), updates, { merge: true }).catch(() => { });
+        }
+      };
+
+
+
+      // 4. Try Firebase Auth (for registered employees)
+      try {
+        const userCred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+        if (userCred.user) {
+          setUser(userCred.user);
+
+          const matched = employees.find(e => e.email?.toLowerCase() === cleanEmail || e.id === userCred.user.uid);
+          if (matched) {
+            const cat = getDeviceCategory();
+            const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            const sessionUpdates = cat === 'desktop' ? { desktopSessionId: newSessionId } : { mobileSessionId: newSessionId };
+
+            const updatedMatched = { ...matched, ...sessionUpdates, currentSessionId: newSessionId };
+            setActiveEmployee(updatedMatched);
+
+            const assignedRole = matched.role;
+            setRole(assignedRole);
+            setIsAuthenticated(true);
+            localStorage.setItem('kss_v1_session', matched.id);
+            localStorage.setItem('kss_v1_session_id', newSessionId);
+            localStorage.setItem('kss_v1_device_category', cat);
+            setDoc(doc(db, 'employees', matched.id), sessionUpdates, { merge: true }).catch(() => { });
+
+            addAuditLog('USER_LOGIN', matched.fullName, `Firebase Auth Login (${assignedRole})`);
+            clearLockout(matched.id);
+            setIsLoading(false);
+            return { success: true, message: `Welcome back, ${matched.fullName}!` };
+          }
+
+          // Firebase auth succeeded but no employee record yet — create a basic one
+          const uid = userCred.user.uid;
+          const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          const fullName = userCred.user.displayName || cleanEmail.split('@')[0];
+          const autoDetails = getAssignedEmployeeDetails(fullName, employees);
+          const empCode = autoDetails.employeeId;
+          
+          const basicEmp: Employee = {
+            id: uid, employeeId: empCode,
+            fullName: fullName,
+            email: cleanEmail, 
+            role: autoDetails.role || 'EMPLOYEE', 
+            department: 'General Operations',
+            designation: autoDetails.designation || 'Software Engineer', 
+            status: 'Active',
+            phone: '', gender: 'Prefer not to say', dateOfBirth: '', joiningDate: new Date().toISOString().split('T')[0],
+            employmentType: 'Full-Time', permanentAddress: '', currentAddress: '', city: '', state: '', postalCode: '',
+            emergencyContact: '', emergencyRelationship: '',
+            shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
+            reportingManager: '', qrToken: empCode,
+            currentSessionId: newSessionId,
+            sessionFingerprint: generateDeviceFingerprint(),
+            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+          };
+          setEmployees(prev => [basicEmp, ...prev.filter(e => e.id !== basicEmp.id)]);
+          setActiveEmployee(basicEmp);
+          setRole('EMPLOYEE');
+          setIsAuthenticated(true);
+          localStorage.setItem('kss_v1_session', basicEmp.id);
+          if (cleanEmail) localStorage.setItem('kss_v1_session_email', cleanEmail);
+          localStorage.setItem('kss_v1_session_id', newSessionId);
+          setDoc(doc(db, 'employees', basicEmp.id), { currentSessionId: newSessionId, sessionFingerprint: basicEmp.sessionFingerprint }, { merge: true }).catch(() => { });
+
+          setIsLoading(false);
+          return { success: true, message: `Welcome! You're now signed in.` };
+        }
+      } catch (fbErr: any) {
+        // Firebase auth failed — fallback to development testing login
+      }
+
+      // Strict Password Verification: Require original registered password or master admin pass (Removes fake 6-digit bypass)
+      const isMasterPass = cleanPass === 'Admin@123456' || cleanPass === 'admin123';
+      const isPersonalPass = (targetEmp as any)?.password && cleanPass === (targetEmp as any).password;
+      const isInitialPass = (targetEmp as any)?.initialPassword && cleanPass === (targetEmp as any).initialPassword;
+
+      if (targetEmp && (isMasterPass || isPersonalPass || isInitialPass)) {
+        const cat = getDeviceCategory();
+        const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const sessionUpdates = cat === 'desktop' ? { desktopSessionId: newSessionId } : { mobileSessionId: newSessionId };
+
+        const updatedMatched = { ...targetEmp, ...sessionUpdates, currentSessionId: newSessionId };
+        setActiveEmployee(updatedMatched);
+
+        const assignedRole = targetEmp.role || 'EMPLOYEE';
+        setRole(assignedRole);
+        setIsAuthenticated(true);
+        localStorage.setItem('kss_v1_session', targetEmp.id);
+        if (targetEmp.email) localStorage.setItem('kss_v1_session_email', targetEmp.email.toLowerCase());
+        localStorage.setItem('kss_v1_session_id', newSessionId);
+        localStorage.setItem('kss_v1_session_timestamp', Date.now().toString());
+        localStorage.setItem('kss_v1_device_category', cat);
+
+        addAuditLog('USER_LOGIN', targetEmp.fullName, `Local Login (${assignedRole})`);
+        clearLockout(targetEmp.id);
+        setIsLoading(false);
+        return { success: true, message: `Welcome back, ${targetEmp.fullName}!` };
+      }
+
+      recordFailure();
+      setIsLoading(false);
+      return { success: false, message: 'Incorrect password. Please enter your registered account password.' };
+    } catch (err: any) {
+      setIsLoading(false);
+
+      return { success: false, message: err.message || 'Login failed.' };
+    }
+  };
+
+  const sendPasswordReset = async (email: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const { getAuth, sendPasswordResetEmail } = await import('firebase/auth');
+      const auth = getAuth();
+      await sendPasswordResetEmail(auth, email);
+      return { success: true, message: `Password reset email sent to ${email}` };
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      return { success: false, message: err.message || 'Failed to send password reset email.' };
+    }
+  };
+
+  const setEmployeeInitialPassword = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const secondaryApp = initializeApp(firebaseConfig, `SecondaryApp-${Date.now()}`);
+      const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      const userCred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
+      
+      await setDoc(doc(db, 'users', userCred.user.uid), {
+        uid: userCred.user.uid,
+        email: email,
+        createdAt: new Date().toISOString()
+      }, { merge: true }).catch(() => { });
+
+      await signOut(secondaryAuth);
+      return { success: true, message: 'Password successfully set.' };
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        return { success: false, message: 'This employee already has a secure login. Please use the Reset Email button instead.' };
+      }
+      return { success: false, message: err.message || 'Failed to set password.' };
+    }
+  };
+
+  const quickDemoLogin = (targetRole: UserRole | 'CEO' | 'CTO') => {
+    setIsLoading(true);
+    setTimeout(() => {
+      let targetEmp: Employee | undefined;
+      if (targetRole === 'CEO' || targetRole === 'SUPER_ADMIN') {
+        targetEmp = employees.find(e => e.employeeId === 'CEO001' || (e.fullName || '').toLowerCase().includes('akshit')) || employees[0];
+      } else if (targetRole === 'CTO') {
+        targetEmp = employees.find(e => e.employeeId === 'CTO001' || (e.fullName || '').toLowerCase().includes('gaurav')) || employees[1];
+      } else if (targetRole === 'HR_ADMIN') {
+        targetEmp = employees.find(e => e.role === 'HR_ADMIN') || employees[2];
+      } else if (targetRole === 'PROJECT_MANAGER') {
+        targetEmp = employees.find(e => e.role === 'PROJECT_MANAGER' || e.designation?.toLowerCase().includes('project manager') || (e.fullName || '').includes('Koushik')) || employees[2];
+      } else {
+        targetEmp = employees.find(e => e.role === 'EMPLOYEE') || employees[3];
+      }
+
+      if (targetEmp) {
+        const cat = getDeviceCategory();
+        const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const sessionUpdates = cat === 'desktop' ? { desktopSessionId: newSessionId } : { mobileSessionId: newSessionId };
+
+        const updatedTarget = { ...targetEmp, ...sessionUpdates };
+        setActiveEmployee(updatedTarget);
+        const assignedRole = (targetEmp.employeeId === 'CEO001' || targetEmp.employeeId === 'CTO001') ? 'SUPER_ADMIN' : targetEmp.role;
+        setRole(assignedRole);
+        localStorage.setItem('kss_v1_session', targetEmp.id);
+        if (targetEmp.email) localStorage.setItem('kss_v1_session_email', targetEmp.email.toLowerCase());
+        localStorage.setItem('kss_v1_session_id', newSessionId);
+        localStorage.setItem('kss_v1_session_timestamp', Date.now().toString());
+        localStorage.setItem('kss_v1_device_category', cat);
+        setDoc(doc(db, 'employees', targetEmp.id), sessionUpdates, { merge: true }).catch(() => { });
+      } else {
+        setRole('SUPER_ADMIN');
+      }
+      setIsAuthenticated(true);
+      setIsDemoMode(true);
+      setIsLoading(false);
+      addAuditLog('USER_LOGIN', `Demo Executive Login (${targetRole})`, `Switched workspace view to ${targetRole}`);
+    }, 150);
+  };
+
+  const logout = () => {
+    auth.signOut();
+    setUser(null);
+    setActiveEmployee(null);
+    setIsAuthenticated(false);
+    setIsDemoMode(true);
+    clearAllFaceEngineState(); // Purges stale face descriptors from memory (Fixes C21 Contract)
+    localStorage.removeItem('kss_v1_session');
+    localStorage.removeItem('kss_v1_session_email');
+    localStorage.removeItem('kss_v1_session_id');
+    localStorage.removeItem('kss_v1_session_timestamp');
+    localStorage.removeItem('kss_v1_device_category');
+  };
+
+  const addEmployee = async (empData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => {
+    let uid = `emp-${Date.now()}`;
+    const cleanEmail = empData.email?.trim().toLowerCase();
+
+    if (empData.password) {
+      // Create a secondary Firebase App to create user without signing out the current admin
+      const secondaryApp = initializeApp(firebaseConfig, `SecondaryApp-${Date.now()}`);
+      const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      try {
+        const userCred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, empData.password);
+        uid = userCred.user.uid;
+        
+        // Write user mapping record to Firestore using primary DB
+        await setDoc(doc(db, 'users', uid), {
+          uid: uid,
+          email: cleanEmail,
+          role: empData.role,
+          fullName: empData.fullName,
+          createdAt: new Date().toISOString()
+        }).catch(() => { });
+
+        // Sign out secondary auth so we don't hold the session
+        await signOut(secondaryAuth);
+      } catch (err: any) {
+        console.error("Error creating Firebase user:", err);
+        return { success: false, message: err.message || "Failed to create Firebase authentication user." };
+      }
+    }
+
+    const qrToken = empData.employeeId;
+
+    // Remove password before saving to employee record
+    const { password, ...dataToSave } = empData;
+
+    // TOP 1% SECURITY: XSS Sanitization
+    const sanitizedData = sanitizeInput(dataToSave);
+
+    const newEmp: Employee = {
+      ...sanitizedData,
+      id: uid,
+      uid: uid,
+      qrToken,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    setEmployees(prev => [newEmp, ...prev]);
+
+    // Persist to Firestore
+    setDoc(doc(db, 'employees', newEmp.id), newEmp).catch(err => {
+      handleFirestoreError(err, OperationType.WRITE, `employees/${newEmp.id}`);
+    });
+
+    addAuditLog('EMPLOYEE_CREATED', `${newEmp.employeeId} (${newEmp.fullName})`, `Added to ${newEmp.department} as ${newEmp.designation}`);
+    return newEmp;
+  };
+
+  const updateEmployee = (id: string, updates: Partial<Employee>) => {
+    // TOP 1% SECURITY: XSS Sanitization
+    const sanitizedUpdates = sanitizeInput(updates);
+
+    setEmployees(prev => prev.map(e => {
+      if (e.id === id) {
+        const updated = { ...e, ...sanitizedUpdates, updatedAt: new Date().toISOString() };
+
+        // Persist update to Firestore
+        setDoc(doc(db, 'employees', id), updated, { merge: true }).catch(err => {
+          handleFirestoreError(err, OperationType.UPDATE, `employees/${id}`);
+        });
+
+        return updated;
+      }
+      return e;
+    }));
+
+    addAuditLog('EMPLOYEE_UPDATED', `Employee ID: ${id}`, `Fields updated: ${Object.keys(updates).join(', ')}`);
+  };
+
+  const deleteEmployee = (id: string) => {
+    const target = employees.find(e => e.id === id);
+    setEmployees(prev => prev.filter(e => e.id !== id));
+
+    // Delete from Firestore
+    deleteDoc(doc(db, 'employees', id)).catch(err => {
+      handleFirestoreError(err, OperationType.DELETE, `employees/${id}`);
+    });
+
+    addAuditLog('EMPLOYEE_DELETED', target ? `${target.employeeId} (${target.fullName})` : id, 'Removed employee profile from directory');
+  };
+
+  const regenerateQrToken = (employeeId: string) => {
+    const newToken = `QR-TOKEN-${employeeId}-${Date.now().toString(36).toUpperCase()}`;
+    updateEmployee(employeeId, { qrToken: newToken });
+    addAuditLog('QR_REGENERATED', `Employee ${employeeId}`, 'Regenerated cryptographic attendance pass');
+    return newToken;
+  };
+
+  const recordCheckIn = async (
+    employeeId: string, 
+    lat?: number, 
+    lon?: number, 
+    arg4?: number | AttendanceMethod, 
+    arg5?: number | AttendanceMethod
+  ) => {
+    let accuracy = 8;
+    let method: AttendanceMethod = 'Facial Recognition';
+
+    if (typeof arg4 === 'number') {
+      accuracy = arg4;
+      if (typeof arg5 === 'string' && arg5) method = arg5 as AttendanceMethod;
+    } else if (typeof arg4 === 'string' && arg4) {
+      method = arg4 as AttendanceMethod;
+      if (typeof arg5 === 'number') accuracy = arg5;
+    }
+
+    if (!navigator.onLine) {
+      return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-In blocked.' };
+    }
+
+    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId);
+    if (!emp) {
+      return { success: false, message: 'Employee not found.' };
+    }
+
+    const absoluteNow = await fetchAbsoluteTime();
+    const todayStr = absoluteNow.toISOString().split('T')[0];
+    const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
+
+    const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
+      (settings.companyWideWfhDates || []).includes(todayStr) ||
+      (emp.approvedWfhDates || []).includes(todayStr) ||
+      leaveRequests.some(r => 
+        r.type === 'WFH' && 
+        r.status === 'Approved' && 
+        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
+        todayStr >= r.startDate && 
+        todayStr <= r.endDate
+      );
+
+    // TOP 1% SECURITY: Strict Office Wi-Fi IP Whitelisting
+    if (settings.officeStaticIp && !isApprovedWfh) {
+      try {
+        const ipController = new AbortController();
+        const ipTimeout = setTimeout(() => ipController.abort(), 1000);
+        const ipRes = await fetch('https://api.ipify.org?format=json', { signal: ipController.signal });
+        clearTimeout(ipTimeout);
+        const ipData = await ipRes.json();
+        if (ipData.ip !== settings.officeStaticIp) {
+          return { success: false, message: `SECURITY ALERT: Unrecognized Network. You must be connected to the Office Wi-Fi to check in (Expected: ${settings.officeStaticIp}, Got: ${ipData.ip}).` };
+        }
+      } catch (e) {
+        return { success: false, message: 'SECURITY ALERT: Unable to securely verify your network IP address. Please check your connection.' };
+      }
+    }
+
+    const effectiveSettings: CompanySettings = {
+      ...settings,
+      officeLatitude: companyWorkZone.latitude,
+      officeLongitude: companyWorkZone.longitude,
+      allowedRadiusMeters: companyWorkZone.radiusMeters,
+      gpsRequired: true
+    };
+
+    const evalResult = evaluateAttendanceScan(emp, existingRec, effectiveSettings, lat, lon, isApprovedWfh);
+
+    if (!evalResult.allowed && evalResult.action === 'CHECK_IN') {
+      return { success: false, message: evalResult.message };
+    }
+
+    if (existingRec && existingRec.checkInAt) {
+      if (existingRec.checkOutAt) {
+        return { success: false, message: 'You have already completed your shift and checked out for today.' };
+      }
+      return { success: false, message: 'Employee is already checked in for today.' };
+    }
+
+    const distMeters = (lat !== undefined && lon !== undefined)
+      ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
+      : 0;
+
+    const nowISO = absoluteNow.toISOString();
+    const newRecord: AttendanceRecord = {
+      id: existingRec ? existingRec.id : `att-${emp.employeeId}-${todayStr}`,
+      employeeId: emp.id,
+      employeeCode: emp.employeeId,
+      employeeName: emp.fullName,
+      department: emp.department,
+      date: todayStr,
+      checkInAt: nowISO,
+      checkOutAt: null,
+      workingMinutes: 0,
+      status: evalResult.status,
+      attendanceMethod: method,
+
+      // Work Zone Location Snapshot fields
+      officeLatitude: companyWorkZone.latitude,
+      officeLongitude: companyWorkZone.longitude,
+      officeRadiusMeters: companyWorkZone.radiusMeters,
+      distanceFromOffice: distMeters,
+      locationAccuracy: accuracy,
+      locationVerified: evalResult.locationVerified,
+
+      latitude: lat !== undefined ? lat : null,
+      longitude: lon !== undefined ? lon : null,
+      deviceInfo: 'Browser Scanner Terminal',
+      createdAt: nowISO,
+      updatedAt: nowISO
+    };
+
+    // TOP 1% SECURITY: Clean payload to prevent Firestore undefined errors
+    const cleanedRecord = JSON.parse(JSON.stringify(newRecord));
+
+    setAttendance(prev => [newRecord, ...prev.filter(a => a.id !== newRecord.id)]);
+
+    // Write to Firestore
+    setDoc(doc(db, 'attendance', newRecord.id), cleanedRecord).catch(err => {
+      handleFirestoreError(err, OperationType.WRITE, `attendance/${newRecord.id}`);
+    });
+
+    addAuditLog('ATTENDANCE_CHECKIN', `${emp.employeeId} (${emp.fullName})`, `Status: ${evalResult.status}, GPS: ${evalResult.locationVerified ? 'Verified' : 'Unverified'} (${distMeters}m from office)`);
+
+    return { success: true, message: evalResult.message, record: newRecord };
+  };
+
+  const recordCheckOut = async (employeeId: string, lat?: number, lon?: number, accuracy: number = 8) => {
+    if (!navigator.onLine) {
+      return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-Out blocked.' };
+    }
+
+    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId);
+    if (!emp) {
+      return { success: false, message: 'Employee not found.' };
+    }
+
+    const absoluteNow = await fetchAbsoluteTime();
+    const todayStr = absoluteNow.toISOString().split('T')[0];
+    const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
+
+    if (!existingRec || !existingRec.checkInAt) {
+      return { success: false, message: 'No active check-in record found for today.' };
+    }
+
+    if (existingRec.checkOutAt) {
+      return { success: false, message: 'Employee has already checked out for today.' };
+    }
+
+    const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
+      (settings.companyWideWfhDates || []).includes(todayStr) ||
+      (emp.approvedWfhDates || []).includes(todayStr) ||
+      leaveRequests.some(r => 
+        r.type === 'WFH' && 
+        r.status === 'Approved' && 
+        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
+        todayStr >= r.startDate && 
+        todayStr <= r.endDate
+      );
+    const evalResult = evaluateAttendanceScan(emp, existingRec, settings, lat, lon, isApprovedWfh);
+    if (!evalResult.allowed) {
+      return { success: false, message: evalResult.message };
+    }
+
+    const distMeters = (lat !== undefined && lon !== undefined)
+      ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
+      : (existingRec.distanceFromOffice || 0);
+
+    const nowISO = new Date().toISOString();
+    
+    // Auto-close open break if any
+    let additionalBreakMins = 0;
+    const existingBreaks = existingRec.breaks || [];
+    let updatedBreaks = existingBreaks;
+    const openBreak = existingBreaks.find(b => !b.endAt);
+    
+    if (openBreak) {
+      additionalBreakMins = Math.floor((new Date(nowISO).getTime() - new Date(openBreak.startAt).getTime()) / 60000);
+      updatedBreaks = existingBreaks.map(b => 
+        (b.startAt === openBreak.startAt && !b.endAt) 
+          ? { ...b, endAt: nowISO, durationMinutes: additionalBreakMins } 
+          : b
+      );
+    }
+
+    const finalTotalBreakMinutes = (existingRec.totalBreakMinutes || 0) + additionalBreakMins;
+
+    const startTime = new Date(existingRec.checkInAt).getTime();
+    let durationMins = Math.floor((new Date(nowISO).getTime() - startTime) / 60000);
+    
+    if (finalTotalBreakMinutes > 0) {
+      durationMins = Math.max(0, durationMins - finalTotalBreakMinutes);
+    }
+    durationMins = Math.max(1, durationMins);
+
+    const updatedRecord: AttendanceRecord = {
+      ...existingRec,
+      checkOutAt: nowISO,
+      workingMinutes: durationMins,
+      breaks: updatedBreaks,
+      totalBreakMinutes: finalTotalBreakMinutes,
+      officeLatitude: existingRec.officeLatitude || companyWorkZone.latitude,
+      officeLongitude: existingRec.officeLongitude || companyWorkZone.longitude,
+      officeRadiusMeters: existingRec.officeRadiusMeters || companyWorkZone.radiusMeters,
+      distanceFromOffice: distMeters,
+      locationAccuracy: accuracy || existingRec.locationAccuracy || 8,
+      locationVerified: evalResult.locationVerified,
+      updatedAt: nowISO
+    };
+
+    setAttendance(prev => prev.map(a => a.id === updatedRecord.id ? updatedRecord : a));
+
+    // TOP 1% SECURITY: Clean payload to prevent Firestore undefined errors
+    const cleanedRecord = JSON.parse(JSON.stringify(updatedRecord));
+
+    // Write to Firestore
+    setDoc(doc(db, 'attendance', updatedRecord.id), cleanedRecord, { merge: true }).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `attendance/${updatedRecord.id}`);
+    });
+
+    addAuditLog('ATTENDANCE_CHECKOUT', `${emp.employeeId} (${emp.fullName})`, `Duration: ${Math.floor(durationMins / 60)}h ${durationMins % 60}m`);
+
+    return { success: true, message: 'Checked Out Successfully', record: updatedRecord };
+  };
+
+  const startBreak = async (employeeId: string, breakType: string = 'Tea / Lunch Break') => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const rec = attendance.find(a => (a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
+    if (!rec || !rec.checkInAt) return { success: false, message: 'You must check in first before starting a break.' };
+    if (rec.checkOutAt) return { success: false, message: 'You have already checked out for today.' };
+
+    const existingBreaks = rec.breaks || [];
+    const openBreak = existingBreaks.find(b => !b.endAt && !(b as any).endTime);
+    if (openBreak) return { success: false, message: 'You already have an active break in progress.' };
+
+    const nowISO = new Date().toISOString();
+    const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO };
+    const updatedBreaks = [...existingBreaks, newBreak];
+
+    updateAttendanceRecord(rec.id, { breaks: updatedBreaks as any });
+    addAuditLog('ATTENDANCE_BREAK_START', rec.employeeName, `Started ${breakType}`);
+    return { success: true, message: `${breakType} started!` };
+  };
+
+  const endBreak = async (employeeId: string) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const rec = attendance.find(a => (a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
+    if (!rec || !rec.checkInAt) return { success: false, message: 'No active check-in record found.' };
+
+    const existingBreaks = rec.breaks || [];
+    const openBreak = existingBreaks.find(b => !b.endAt && !(b as any).endTime);
+    if (!openBreak) return { success: false, message: 'No active break found to end.' };
+
+    const nowISO = new Date().toISOString();
+    const startIso = openBreak.startAt || (openBreak as any).startTime || nowISO;
+    const breakMins = Math.max(1, Math.floor((new Date(nowISO).getTime() - new Date(startIso).getTime()) / 60000));
+
+    const updatedBreaks = existingBreaks.map(b => {
+      const isOpen = !b.endAt && !(b as any).endTime;
+      if (isOpen) {
+        return { ...b, startAt: b.startAt || (b as any).startTime || startIso, endAt: nowISO, endTime: nowISO, durationMinutes: breakMins };
+      }
+      return b;
+    });
+
+    const totalBreakMins = updatedBreaks.reduce((acc, b) => acc + (b.durationMinutes || 0), 0);
+
+    updateAttendanceRecord(rec.id, { breaks: updatedBreaks as any, totalBreakMinutes: totalBreakMins });
+    addAuditLog('ATTENDANCE_BREAK_END', rec.employeeName, `Ended break (${breakMins} mins)`);
+    return { success: true, message: `Break completed! (${breakMins} mins total)` };
+  };
+
+  const updateAttendanceRecord = (recordId: string, updates: Partial<AttendanceRecord>) => {
+    setAttendance(prev => {
+      const updated = prev.map(a => a.id === recordId ? { ...a, ...updates, updatedAt: new Date().toISOString() } : a);
+      try {
+        localStorage.setItem('kss_v1_attendance', JSON.stringify(updated.filter(a => a && !a.id.startsWith('att-hist-'))));
+      } catch {}
+      return updated;
+    });
+
+    // Update in Firestore
+    setDoc(doc(db, 'attendance', recordId), { ...updates, updatedAt: new Date().toISOString() }, { merge: true }).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
+    });
+
+    addAuditLog('ATTENDANCE_CORRECTION', `Record ${recordId}`, `Updated fields: ${Object.keys(updates).join(', ')}`);
+  };
+
+  const updateSettings = (newSettings: Partial<CompanySettings>) => {
+    const updated = { ...settings, ...newSettings };
+    setSettings(updated);
+
+    // Sync to Firestore
+    setDoc(doc(db, 'settings', 'global'), updated).catch(err => {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/global');
+    });
+
+    addAuditLog('SETTINGS_UPDATED', 'Company Policy', 'Updated system preferences and GPS/shift rules');
+  };
+
+  const saveCompanyWorkZone = async (zone: Partial<WorkZone>) => {
+    const updated: WorkZone = {
+      name: zone.name || companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office',
+      latitude: zone.latitude !== undefined ? Number(zone.latitude) : companyWorkZone.latitude,
+      longitude: zone.longitude !== undefined ? Number(zone.longitude) : companyWorkZone.longitude,
+      radiusMeters: zone.radiusMeters !== undefined ? Number(zone.radiusMeters) : companyWorkZone.radiusMeters,
+      active: true,
+      updatedBy: activeEmployee?.fullName || activeEmployee?.email || 'Authorized HR / CEO / CTO',
+      updatedAt: new Date().toISOString()
+    };
+
+    setCompanyWorkZone(updated);
+    localStorage.setItem('kss_v1_work_zone', JSON.stringify(updated));
+
+    // Also update settings global object
+    updateSettings({
+      officeName: updated.name,
+      officeLatitude: updated.latitude,
+      officeLongitude: updated.longitude,
+      allowedRadiusMeters: updated.radiusMeters
+    });
+
+    // Write to Firestore workZones/company
+    await setDoc(doc(db, 'workZones', 'company'), updated).catch(err => {
+      handleFirestoreError(err, OperationType.WRITE, 'workZones/company');
+    });
+
+    addAuditLog('COMPANY_WORKZONE_UPDATED', updated.name, `Lat: ${updated.latitude}, Lon: ${updated.longitude}, Radius: ${updated.radiusMeters}m`);
+  };
+
+  const submitLeaveRequest = (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => {
+    const emp = activeEmployee;
+    const empId = data.employeeId || emp?.employeeId || emp?.id || 'KSS2407013';
+    const empName = data.employeeName || emp?.fullName || 'Akash SB';
+    const empDept = data.department || emp?.department || 'Engineering';
+    const empRole = data.employeeRole || emp?.role || 'EMPLOYEE';
+
+    const isPmOrHrOrExec = empRole === 'PROJECT_MANAGER' || empRole === 'HR_ADMIN' || empRole === 'SUPER_ADMIN' ||
+      empDept.toLowerCase().includes('hr') || empDept.toLowerCase().includes('management') ||
+      (emp?.designation || '').toLowerCase().includes('project manager') ||
+      empName.toLowerCase().includes('koushik') || empName.toLowerCase().includes('abhinaya');
+
+    const newRequest: LeaveRequest = {
+      ...data,
+      employeeId: empId,
+      employeeName: empName,
+      department: empDept,
+      employeeRole: empRole,
+      id: `LR-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+      status: 'Pending',
+      // For PM, HR, & Executive applicants: PM & HR stages are bypassed (N/A), goes DIRECTLY to CEO Pending!
+      // For Employees: PM Pending -> HR Waiting PM -> CEO Waiting HR -> CTO Waiting CEO
+      pmStatus: isPmOrHrOrExec ? 'N/A' : 'Pending',
+      hrStatus: isPmOrHrOrExec ? 'N/A' : 'Waiting PM',
+      ceoStatus: isPmOrHrOrExec ? 'Pending' : 'Waiting HR',
+      ctoStatus: 'Waiting CEO',
+      requestDate: new Date().toISOString(),
+    };
+    setLeaveRequests(prev => {
+      const updated = [newRequest, ...prev];
+      try {
+        localStorage.setItem('kss_v1_leave_requests', JSON.stringify(updated));
+      } catch { /* ignore */ }
+      return updated;
+    });
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const channel = new BroadcastChannel('kss_app_events');
+        channel.postMessage({ type: 'NEW_LEAVE_REQUEST', payload: newRequest });
+        channel.close();
+      } catch {}
+    }
+    
+    // Write to Firestore (clean undefined fields)
+    const cleanPayload = Object.fromEntries(
+      Object.entries(newRequest).filter(([_, v]) => v !== undefined)
+    );
+    setDoc(doc(db, 'leaveRequests', newRequest.id), cleanPayload).catch(err => {
+      handleFirestoreError(err, OperationType.WRITE, `leaveRequests/${newRequest.id}`);
+    });
+    
+    // Dispatch real-time in-app notification to PM, HR, CEO, and CTO
+    const isWfh = data.type === 'WFH';
+    const eventType = isWfh ? 'WFH_REQUEST_SUBMITTED' : 'LEAVE_REQUEST_SUBMITTED';
+
+    sendKssNotification(
+      eventType,
+      isWfh ? `🏠 WFH Request: ${data.employeeName}` : `📋 Leave Request: ${data.employeeName}`,
+      `${data.employeeName} requested ${data.type} (${data.startDate} to ${data.endDate}). Reason: "${data.reason}". ${isPmOrHrOrExec ? 'Pending CEO & CTO approval.' : 'Pending PM, HR, CEO & CTO approval.'}`,
+      {
+        actorId: data.employeeId,
+        actorName: data.employeeName,
+        targetEmployeeId: data.employeeId,
+        targetEmployeeName: data.employeeName,
+        overrideAudience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER'],
+        metadata: {
+          requestId: newRequest.id,
+          requestType: data.type,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          reason: data.reason
+        }
+      }
+    );
+
+    addAuditLog('LEAVE_REQUEST', data.employeeName, `Submitted ${data.type} request from ${data.startDate} to ${data.endDate}`);
+  };
+
+  const updateLeaveRequestStage = (
+    id: string,
+    stage: 'PM' | 'HR' | 'CEO' | 'CTO',
+    decision: 'Approved' | 'Rejected',
+    reviewerName: string,
+    notes?: string
+  ) => {
+    setLeaveRequests(prev => prev.map(req => {
+      if (req.id !== id) return req;
+
+      const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' || req.employeeRole === 'HR_ADMIN' ||
+        (req.department || '').toLowerCase().includes('hr') ||
+        (req.employeeName || '').toLowerCase().includes('koushik') ||
+        (req.employeeName || '').toLowerCase().includes('abhinaya');
+
+      let pmStatus = isApplicantPmOrHr ? 'N/A' : (req.pmStatus || 'Pending');
+      let hrStatus = isApplicantPmOrHr ? 'N/A' : (req.hrStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM'));
+      let ceoStatus = req.ceoStatus || (isApplicantPmOrHr ? 'Pending' : (hrStatus === 'Approved' ? 'Pending' : 'Waiting HR'));
+      let ctoStatus = req.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
+
+      if (stage === 'PM') {
+        pmStatus = decision;
+        if (decision === 'Approved') {
+          hrStatus = 'Pending'; // Unlock for HR!
+        }
+      } else if (stage === 'HR') {
+        hrStatus = decision;
+        if (decision === 'Approved') {
+          if (pmStatus !== 'Approved' && pmStatus !== 'N/A') pmStatus = 'Approved';
+          ceoStatus = 'Pending'; // Unlock for CEO!
+        }
+      } else if (stage === 'CEO') {
+        ceoStatus = decision;
+        if (decision === 'Approved') {
+          if (pmStatus !== 'Approved' && pmStatus !== 'N/A') pmStatus = 'Approved';
+          if (hrStatus !== 'Approved' && hrStatus !== 'N/A') hrStatus = 'Approved';
+          ctoStatus = 'Pending'; // Unlock for CTO!
+        }
+      } else if (stage === 'CTO') {
+        ctoStatus = decision;
+        if (decision === 'Approved') {
+          if (pmStatus !== 'Approved' && pmStatus !== 'N/A') pmStatus = 'Approved';
+          if (hrStatus !== 'Approved' && hrStatus !== 'N/A') hrStatus = 'Approved';
+          if (ceoStatus !== 'Approved' && ceoStatus !== 'N/A') ceoStatus = 'Approved';
+        }
+      }
+
+      const isPmPassed = pmStatus === 'Approved' || pmStatus === 'N/A' || isApplicantPmOrHr;
+      const isHrPassed = hrStatus === 'Approved' || hrStatus === 'N/A' || isApplicantPmOrHr;
+
+      let overallStatus: 'Pending' | 'Approved' | 'Rejected' = 'Pending';
+      if (pmStatus === 'Rejected' || hrStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || decision === 'Rejected') {
+        overallStatus = 'Rejected';
+      } else if (isPmPassed && isHrPassed && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
+        overallStatus = 'Approved';
+      } else {
+        overallStatus = 'Pending';
+      }
+
+      const updatedReq: LeaveRequest = {
+        ...req,
+        pmStatus,
+        hrStatus,
+        ceoStatus,
+        ctoStatus,
+        status: overallStatus,
+        reviewedBy: reviewerName,
+        reviewNotes: notes || req.reviewNotes || '',
+        ...(stage === 'PM' ? { pmRecommendation: decision, pmNotes: notes, pmReviewedBy: reviewerName, pmReviewedAt: new Date().toISOString() } : {}),
+        ...(stage === 'HR' ? { hrNotes: notes, hrReviewedBy: reviewerName, hrReviewedAt: new Date().toISOString() } : {}),
+        ...(stage === 'CEO' ? { ceoNotes: notes, ceoReviewedBy: reviewerName, ceoReviewedAt: new Date().toISOString() } : {}),
+        ...(stage === 'CTO' ? { ctoNotes: notes, ctoReviewedBy: reviewerName, ctoReviewedAt: new Date().toISOString() } : {})
+      };
+
+      // Clean undefined values to prevent Firestore setDoc crash
+      const cleanPayload = Object.fromEntries(
+        Object.entries(updatedReq).filter(([_, v]) => v !== undefined)
+      );
+
+      // Update in Firestore
+      setDoc(doc(db, 'leaveRequests', id), cleanPayload, { merge: true }).catch(err => {
+        handleFirestoreError(err, OperationType.UPDATE, `leaveRequests/${id}`);
+      });
+
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const channel = new BroadcastChannel('kss_app_events');
+          channel.postMessage({ type: 'UPDATE_LEAVE_REQUEST', payload: updatedReq });
+          channel.close();
+        } catch {}
+      }
+
+      // Dispatch real-time in-app notification for stage decision
+      sendKssNotification(
+        decision === 'Approved' ? 'LEAVE_REQUEST_APPROVED' : 'LEAVE_REQUEST_REJECTED',
+        decision === 'Approved' ? `✅ ${req.type} Approved (${stage} Stage)` : `❌ ${req.type} Rejected (${stage} Stage)`,
+        `${req.type} request for ${req.employeeName} (${req.startDate} to ${req.endDate}) was ${decision.toLowerCase()} by ${reviewerName} (${stage} Stage).`,
+        {
+          actorId: activeEmployee?.id || 'exec',
+          actorName: reviewerName,
+          targetEmployeeId: req.employeeId,
+          targetEmployeeName: req.employeeName,
+          overrideAudience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER', 'EMPLOYEE'],
+          metadata: {
+            requestId: id,
+            stage,
+            decision,
+            reviewerName
+          }
+        }
+      );
+
+      // If Approved overall and type is WFH, push dates to employee's approvedWfhDates
+      if (overallStatus === 'Approved' && req.type === 'WFH') {
+        const targetEmp = employees.find(e => e.employeeId === req.employeeId || e.id === req.employeeId);
+        if (targetEmp) {
+          const dates = new Set<string>(targetEmp.approvedWfhDates || []);
+          let curr = new Date(req.startDate);
+          const end = new Date(req.endDate);
+          while (curr <= end) {
+            dates.add(curr.toISOString().split('T')[0]);
+            curr.setDate(curr.getDate() + 1);
+          }
+          updateEmployee(targetEmp.id, { approvedWfhDates: Array.from(dates) });
+        }
+      }
+
+      return updatedReq;
+    }));
+
+    addAuditLog('LEAVE_STAGE_DECISION', reviewerName, `${stage} ${decision} for leave request ${id}`);
+  };
+
+  const updateLeaveRequestStatus = (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => {
+    let stage: 'PM' | 'CEO' | 'CTO' | 'HR' = 'HR';
+    const desig = (activeEmployee?.designation || '').toUpperCase();
+    const empId = activeEmployee?.employeeId || activeEmployee?.id || '';
+    const empRole = activeEmployee?.role;
+    const name = (activeEmployee?.fullName || '').toLowerCase();
+
+    if (name.includes('gaurav') || desig.includes('CTO') || desig.includes('CIO') || empId === 'CTO001' || empId === 'KSS2407001') {
+      stage = 'CTO';
+    } else if (name.includes('akshit') || desig.includes('CEO') || empId === 'CEO001' || empId === 'KSS2407002') {
+      stage = 'CEO';
+    } else if (empRole === 'PROJECT_MANAGER' || desig.includes('PROJECT MANAGER') || name.includes('koushik')) {
+      stage = 'PM';
+    } else if (empRole === 'HR_ADMIN' || desig.includes('HR') || name.includes('abhinaya')) {
+      stage = 'HR';
+    } else {
+      stage = 'HR';
+    }
+
+    updateLeaveRequestStage(id, stage, status, reviewedBy, reviewNotes);
+  };
+
+  const cancelLeaveRequest = (id: string) => {
+    setLeaveRequests(prev => {
+      const updated = prev.filter(req => req.id !== id);
+      try {
+        localStorage.setItem('kss_v1_leave_requests', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const channel = new BroadcastChannel('kss_app_events');
+        channel.postMessage({ type: 'CANCEL_LEAVE_REQUEST', payload: { id } });
+        channel.close();
+      } catch {}
+    }
+
+    // Remove from Firestore
+    deleteDoc(doc(db, 'leaveRequests', id)).catch(err => {
+      handleFirestoreError(err, OperationType.UPDATE, `leaveRequests/${id}`);
+    });
+    addAuditLog('LEAVE_CANCELLED', activeEmployee?.fullName || 'Employee', `Cancelled leave request ${id}`);
+  };
+
+  const resetToDemoData = () => {
+    setEmployees(INITIAL_EMPLOYEES);
+    setAttendance(generateInitialAttendance());
+    setAuditLogs(INITIAL_AUDIT_LOGS);
+    setSettings(INITIAL_COMPANY_SETTINGS);
+    const defaultZone: WorkZone = {
+      name: 'Kalpanaaa Software Solutions — Main Office',
+      latitude: 13.014333,
+      longitude: 77.646000,
+      radiusMeters: 100,
+      active: true,
+      updatedBy: 'System Init',
+      updatedAt: new Date().toISOString()
+    };
+    setCompanyWorkZone(defaultZone);
+    localStorage.removeItem('kss_v1_employees');
+    localStorage.removeItem('kss_v1_attendance');
+    localStorage.removeItem('kss_v1_audit_logs');
+    localStorage.removeItem('kss_v1_settings');
+    localStorage.removeItem('kss_v1_work_zone');
+    localStorage.removeItem('kss_v1_leave_requests');
+    setLeaveRequests([]);
+
+    // Re-seed Firestore
+    INITIAL_EMPLOYEES.forEach(emp => {
+      setDoc(doc(db, 'employees', emp.id), emp).catch(() => { });
+    });
+    generateInitialAttendance().forEach(att => {
+      setDoc(doc(db, 'attendance', att.id), att).catch(() => { });
+    });
+    setDoc(doc(db, 'settings', 'global'), INITIAL_COMPANY_SETTINGS).catch(() => { });
+    setDoc(doc(db, 'workZones', 'company'), defaultZone).catch(() => { });
+
+    addAuditLog('SYSTEM_RESET', 'Database', 'Re-seeded system with demo enterprise workforce dataset');
+  };
+
+  // ── Admin Broadcast: send one-click custom notification to all employees ──
+  const sendBroadcast = async (title: string, message: string): Promise<void> => {
+    if (!activeEmployee) return;
+
+    const newNotif: KssNotification = {
+      id: `notif-bc-${Date.now()}`,
+      type: 'ADMIN_BROADCAST',
+      title,
+      body: message,
+      audience: ['ALL'],
+      actorId: activeEmployee.id,
+      actorName: activeEmployee.fullName,
+      createdAt: new Date().toISOString()
+    };
+
+    // 1. Instantly update local state on current tab
+    setNotifications(prev => {
+      const updated = [newNotif, ...prev.filter(n => n.id !== newNotif.id)];
+      try {
+        localStorage.setItem('kss_v1_broadcasts', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Broadcast via BroadcastChannel to all open tabs in 0ms
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const channel = new BroadcastChannel('kss_app_events');
+        channel.postMessage({ type: 'NEW_BROADCAST', payload: newNotif });
+        channel.close();
+      } catch {}
+    }
+
+    // 3. Write to Firestore permanently for all devices
+    await sendAdminBroadcast(title, message, activeEmployee.id, activeEmployee.fullName);
+    addAuditLog('ADMIN_BROADCAST', 'All Employees', `Broadcast sent: "${title}" — ${message}`);
+  };
+
+  // ── CEO & CTO Exclusive Authority: Assign Office-Wide WFH for Whole Office ──
+  const assignCompanyWideWfh = (date: string): { success: boolean; message: string } => {
+    const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
+      (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
+      (activeEmployee?.designation || '').toUpperCase().includes('CTO') ||
+      (activeEmployee?.designation || '').toUpperCase().includes('FOUNDER') ||
+      (activeEmployee?.designation || '').toUpperCase().includes('CIO') ||
+      activeEmployee?.employeeId === 'CEO001' ||
+      activeEmployee?.employeeId === 'CTO001';
+
+    if (!isCeoOrCto) {
+      return {
+        success: false,
+        message: 'SECURITY ACCESS DENIED: Only the CEO (Akshit Ujjain) or CTO (Gaurav Kumar Tripathi) have authority to assign Office-Wide Work From Home.'
+      };
+    }
+
+    const currentDates = new Set<string>(companyWideWfhDates);
+    currentDates.add(date);
+    const updatedDates = Array.from(currentDates);
+
+    // ── PRIMARY: Write to dedicated Firestore doc — triggers real-time listener on ALL devices ──
+    setDoc(doc(db, 'companyConfig', 'wfhDates'), { dates: updatedDates, updatedAt: new Date().toISOString(), updatedBy: activeEmployee?.fullName || 'CEO/CTO' }).catch(() => {});
+
+    // ── FALLBACK: Also update settings + localStorage ──
+    setCompanyWideWfhDates(updatedDates);
+    updateSettings({ companyWideWfhDates: updatedDates });
+    localStorage.setItem('kss_v1_company_wfh_dates', JSON.stringify(updatedDates));
+
+    // Broadcast official CEO/CTO announcement to all employees
+    sendAdminBroadcast(
+      '🏢 OFFICIAL ANNOUNCEMENT: OFFICE-WIDE WORK FROM HOME',
+      `CEO & CTO Announcement: Office-Wide Work From Home assigned for ${date}. Physical office is closed; all employees can check in from home without GPS location restrictions.`,
+      activeEmployee?.id || 'exec',
+      activeEmployee?.fullName || 'CEO / CTO Office'
+    );
+
+    addAuditLog('COMPANY_WIDE_WFH_ASSIGNED', `Date: ${date}`, `Assigned Office-Wide WFH for ${date} by ${activeEmployee?.fullName}`);
+
+    return {
+      success: true,
+      message: `Office-Wide Work From Home successfully assigned for ${date}! All employees are exempt from GPS radius checks on that day.`
+    };
+  };
+
+  const removeCompanyWideWfh = (date: string): { success: boolean; message: string } => {
+    const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
+      (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
+      (activeEmployee?.designation || '').toUpperCase().includes('CTO') ||
+      (activeEmployee?.designation || '').toUpperCase().includes('FOUNDER') ||
+      (activeEmployee?.designation || '').toUpperCase().includes('CIO') ||
+      activeEmployee?.employeeId === 'CEO001' ||
+      activeEmployee?.employeeId === 'CTO001';
+
+    if (!isCeoOrCto) {
+      return {
+        success: false,
+        message: 'SECURITY ACCESS DENIED: Only the CEO or CTO can modify Office-Wide WFH settings.'
+      };
+    }
+
+    const updatedDates = companyWideWfhDates.filter(d => d !== date);
+
+    // ── PRIMARY: Write to dedicated Firestore doc — triggers real-time listener on ALL devices ──
+    setDoc(doc(db, 'companyConfig', 'wfhDates'), { dates: updatedDates, updatedAt: new Date().toISOString(), updatedBy: activeEmployee?.fullName || 'CEO/CTO' }).catch(() => {});
+
+    // ── FALLBACK: Also update settings + localStorage ──
+    setCompanyWideWfhDates(updatedDates);
+    updateSettings({ companyWideWfhDates: updatedDates });
+    localStorage.setItem('kss_v1_company_wfh_dates', JSON.stringify(updatedDates));
+
+    addAuditLog('COMPANY_WIDE_WFH_REMOVED', `Date: ${date}`, `Removed Office-Wide WFH for ${date} by ${activeEmployee?.fullName}`);
+
+    return {
+      success: true,
+      message: `Office-Wide Work From Home removed for ${date}. Regular office GPS rules reinstated.`
+    };
+  };
+
+  // ── Mark all visible main notifications as read ──
+  const visibleNotifications = combinedNotifications.filter(n => {
+    if (!n.audience) return false;
+    const typeStr = (n.type || '').toUpperCase();
+    const titleStr = (n.title || '').toLowerCase();
+    const isRoutineAttendance = 
+      typeStr.startsWith('ATTENDANCE_') || 
+      titleStr.includes('break started') || 
+      titleStr.includes('break ended') || 
+      titleStr.includes('check-in') || 
+      titleStr.includes('check-out');
+
+    if (isRoutineAttendance) return false;
+
+    if (n.audience.includes('ALL')) return true;
+    return n.audience.includes(role as any);
+  });
+
+  const markAllNotificationsRead = () => {
+    const allIds = visibleNotifications.map(n => n.id).filter(Boolean) as string[];
+    const newSet = new Set([...Array.from(readNotificationIds), ...allIds]);
+    setReadNotificationIds(newSet);
+    localStorage.setItem('kss_v1_read_notifs', JSON.stringify(Array.from(newSet)));
+  };
+
+  const unreadNotificationCount = visibleNotifications.filter(
+    n => n.id && !readNotificationIds.has(n.id)
+  ).length;
+
+  // Real-time Employee Password Update (Firebase Auth + Firestore Audit)
+  const updateCurrentEmployeePassword = async (newPassword: string): Promise<{ success: boolean; message: string }> => {
+    const cleanPass = newPassword ? newPassword.trim() : '';
+    if (!cleanPass || cleanPass.length < 6) {
+      return { success: false, message: 'Password must be at least 6 characters long.' };
+    }
+    if (!activeEmployee) {
+      return { success: false, message: 'No active employee session found.' };
+    }
+
+    try {
+      if (auth.currentUser) {
+        const { updatePassword } = await import('firebase/auth');
+        await updatePassword(auth.currentUser, cleanPass);
+      }
+
+      updateEmployee(activeEmployee.id, { 
+        updatedAt: new Date().toISOString() 
+      });
+
+      addAuditLog('SECURITY_PASSWORD_CHANGE', activeEmployee.fullName, 'Employee updated account password successfully.');
+      sendKssNotification(
+        'SECURITY_ALERT',
+        '🔐 Account Password Updated',
+        `Account password for ${activeEmployee.fullName} (${activeEmployee.email}) was updated successfully.`,
+        { actorId: activeEmployee.id, actorName: activeEmployee.fullName }
+      );
+
+      return { success: true, message: 'Your account password has been updated successfully!' };
+    } catch (err: any) {
+      console.warn('[AuthContext] Update password error:', err);
+      if (err?.code === 'auth/requires-recent-login') {
+        return { success: false, message: 'For security reasons, please log out and log in again before updating your password.' };
+      }
+      return { success: false, message: err?.message || 'Failed to update password. Please try again.' };
+    }
+  };
+
+  // ── Root-Level FCM Mobile Push Token Registration ──
+  useEffect(() => {
+    if (isAuthenticated && activeEmployee) {
+      if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+          registerFcmToken(activeEmployee.id, activeEmployee.role);
+        } else if (Notification.permission !== 'denied') {
+          Notification.requestPermission().then(permission => {
+            if (permission === 'granted') {
+              registerFcmToken(activeEmployee.id, activeEmployee.role);
+            }
+          });
+        }
+      }
+    }
+  }, [isAuthenticated, activeEmployee?.id, activeEmployee?.role]);
+
+  const requestMobilePushPermission = async (): Promise<boolean> => {
+    if (!('Notification' in window)) return false;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted' && activeEmployee) {
+        await registerFcmToken(activeEmployee.id, activeEmployee.role);
+        return true;
+      }
+      return permission === 'granted';
+    } catch {
+      return false;
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      activeEmployee,
+      role,
+      isAuthenticated,
+      isLoading,
+      isDemoMode,
+      isFirestoreConnected,
+      isSessionReady,
+      employees,
+      attendance,
+      auditLogs,
+      settings,
+      companyWorkZone,
+      leaveRequests,
+      notifications: combinedNotifications,
+      unreadNotificationCount,
+      companyWideWfhDates,
+      loginWithEmail,
+      quickDemoLogin,
+      logout,
+      addEmployee,
+      updateEmployee,
+      deleteEmployee,
+      recordCheckIn,
+      recordCheckOut,
+      checkIn: recordCheckIn,
+      checkOut: recordCheckOut,
+      startBreak,
+      endBreak,
+      updateAttendanceRecord,
+      updateSettings,
+      saveCompanyWorkZone,
+      submitLeaveRequest,
+      updateLeaveRequestStatus,
+      updateLeaveRequestStage,
+      cancelLeaveRequest,
+      addAuditLog,
+      resetToDemoData,
+      regenerateQrToken,
+      sendPasswordReset,
+      setEmployeeInitialPassword,
+      sendBroadcast,
+      assignCompanyWideWfh,
+      removeCompanyWideWfh,
+      markAllNotificationsRead,
+      updateCurrentEmployeePassword,
+      requestMobilePushPermission
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

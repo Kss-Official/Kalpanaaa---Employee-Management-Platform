@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" href="/favicon.png?v=3" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#020617">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Kalpanaaa Software Solutions-Employees MGMNT</title>
+  <style>
+    html, body, #root {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      min-height: 100vh;
+      background: #020617 !important;
+      overscroll-behavior: none !important;
+      overscroll-behavior-x: none !important;
+      overscroll-behavior-y: none !important;
+      overflow-x: hidden !important;
+    }
+    #splash-screen {
+      position: fixed; inset: 0;
+      background: #020617;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px;
+      z-index: 99999;
+      transition: opacity 0.5s ease-in-out;
+    }
+    #splash-screen .splash-logo {
+      width: min(300px, 75vw);
+      border-radius: 28px;
+      box-shadow: 0 0 60px rgba(59,130,246,0.35), 0 0 120px rgba(59,130,246,0.12);
+    }
+    #splash-screen .splash-footer {
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+    }
+    /* Clean CSS spinner — no blinking */
+    #splash-screen .splash-spinner {
+      width: 32px; height: 32px;
+      border: 2.5px solid rgba(255,255,255,0.1);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    #splash-screen .splash-tagline {
+      font-family: -apple-system, system-ui, sans-serif;
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.2em; text-transform: uppercase;
+      color: rgba(255,255,255,0.35);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+
+<body>
+  <div id="splash-screen">
+    <img src="/pwa-512x512.png" class="splash-logo" alt="Kalpanaaa Software Solutions" onerror="this.src='/pwa-192x192.png'">
+    <div class="splash-footer">
+      <div class="splash-spinner"></div>
+      <div class="splash-tagline">Kalpanaaa Software Solutions</div>
+    </div>
+  </div>
+  <div id="root"></div>
+  <script>
+    // Remove HTML splash once React has fully mounted and rendered
+    document.addEventListener('DOMContentLoaded', function() {
+      // React will call hideSplash() when it's ready
+      window.__hideSplash = function() {
+        var splash = document.getElementById('splash-screen');
+        if (splash) {
+          splash.style.opacity = '0';
+          setTimeout(function() {
+            if (splash.parentNode) splash.parentNode.removeChild(splash);
+          }, 500);
+        }
+      };
+      // Fast safety net: remove splash after 150ms
+      setTimeout(window.__hideSplash, 150);
+    });
+  </script>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>
