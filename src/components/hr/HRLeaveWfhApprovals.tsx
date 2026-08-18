@@ -230,10 +230,11 @@ export const HRLeaveWfhApprovals: React.FC = () => {
             </div>
           ) : (
             filteredRequests.map(req => {
-              const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' || req.employeeRole === 'HR_ADMIN' ||
+              const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' || 
+                req.employeeRole === 'HR_ADMIN' ||
+                req.employeeRole === 'SUPER_ADMIN' ||
                 (req.department || '').toLowerCase().includes('hr') ||
-                (req.employeeName || '').toLowerCase().includes('koushik') ||
-                (req.employeeName || '').toLowerCase().includes('abhinaya');
+                (req.department || '').toLowerCase().includes('management');
 
               const pmState = isApplicantPmOrHr ? 'N/A' : (req.pmStatus || 'Pending');
               const hrState = isApplicantPmOrHr ? 'N/A' : (req.hrStatus || (pmState === 'Approved' ? 'Pending' : 'Waiting PM'));
@@ -352,10 +353,11 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                 </tr>
               ) : (
                 filteredRequests.map(req => {
-                  const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' || req.employeeRole === 'HR_ADMIN' ||
+                  const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' || 
+                    req.employeeRole === 'HR_ADMIN' ||
+                    req.employeeRole === 'SUPER_ADMIN' ||
                     (req.department || '').toLowerCase().includes('hr') ||
-                    (req.employeeName || '').toLowerCase().includes('koushik') ||
-                    (req.employeeName || '').toLowerCase().includes('abhinaya');
+                    (req.department || '').toLowerCase().includes('management');
 
                   const pmState = isApplicantPmOrHr ? 'N/A' : (req.pmStatus || 'Pending');
                   const hrState = isApplicantPmOrHr ? 'N/A' : (req.hrStatus || (pmState === 'Approved' ? 'Pending' : 'Waiting PM'));

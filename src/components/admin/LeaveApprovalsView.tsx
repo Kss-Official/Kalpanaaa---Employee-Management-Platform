@@ -36,6 +36,28 @@ export const LeaveApprovalsView: React.FC = () => {
     setTimeout(() => setWfhFeedback(null), 5000);
   };
 
+  const getActivePendingStage = (req: LeaveRequest): 'PM' | 'HR' | 'CEO' | 'CTO' => {
+    const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' ||
+      req.employeeRole === 'HR_ADMIN' ||
+      req.employeeRole === 'SUPER_ADMIN' ||
+      (req.department || '').toLowerCase().includes('hr') ||
+      (req.department || '').toLowerCase().includes('management') ||
+      (req.employeeName || '').toLowerCase().includes('koushik') ||
+      (req.employeeName || '').toLowerCase().includes('abhinaya');
+
+    if (isApplicantPmOrHr) {
+      if (req.ceoStatus === 'Pending' || !req.ceoStatus) return 'CEO';
+      if (req.ctoStatus === 'Pending') return 'CTO';
+      return 'CEO';
+    }
+
+    if (req.pmStatus === 'Pending' || !req.pmStatus) return 'PM';
+    if (req.hrStatus === 'Pending' || req.hrStatus === 'Waiting PM') return 'HR';
+    if (req.ceoStatus === 'Pending' || req.ceoStatus === 'Waiting HR') return 'CEO';
+    if (req.ctoStatus === 'Pending' || req.ctoStatus === 'Waiting CEO') return 'CTO';
+    return 'CEO';
+  };
+
   const canPerformStageAction = (req: LeaveRequest) => {
     if (req.status !== 'Pending') return false;
 
@@ -45,7 +67,7 @@ export const LeaveApprovalsView: React.FC = () => {
       req.employeeName === activeEmployee?.fullName;
     if (isSelfRequest) return false;
 
-    const role = activeEmployee?.role || effectiveRole;
+    const userRole = activeEmployee?.role || effectiveRole;
     const desig = (activeEmployee?.designation || '').toUpperCase();
     const empId = activeEmployee?.employeeId || activeEmployee?.id || '';
     const name = (activeEmployee?.fullName || '').toLowerCase();
@@ -59,47 +81,61 @@ export const LeaveApprovalsView: React.FC = () => {
       (req.employeeName || '').toLowerCase().includes('koushik') ||
       (req.employeeName || '').toLowerCase().includes('abhinaya');
 
-    // 1. PM Stage: Can action standard employee requests at PM stage (pmStatus === 'Pending')
-    if (role === 'PROJECT_MANAGER' || desig.includes('PROJECT MANAGER') || name.includes('koushik')) {
-      if (isApplicantPmOrHr) return false; // PM/HR requests bypass PM and go directly to CEO!
-      return req.pmStatus === 'Pending';
+    const isCto = name.includes('gaurav') || desig.includes('CTO') || desig.includes('CIO') || empId === 'CTO001' || empId === 'KSS2407001';
+    const isCeo = name.includes('akshit') || desig.includes('CEO') || empId === 'CEO001' || empId === 'KSS2407002';
+    const isPmUser = userRole === 'PROJECT_MANAGER' || desig.includes('PROJECT MANAGER') || name.includes('koushik');
+    const isHrUser = userRole === 'HR_ADMIN' || desig.includes('HR') || name.includes('abhinaya');
+    const isSuperAdmin = userRole === 'SUPER_ADMIN';
+
+    // 1. PM Stage:
+    if (isPmUser) {
+      if (isApplicantPmOrHr) return false;
+      return req.pmStatus === 'Pending' || !req.pmStatus;
     }
 
-    // 2. HR Stage (Abhinaya V / HR Admin):
-    // Standard employees: PM must approve first (pmStatus === 'Approved' && hrStatus === 'Pending')
-    if (role === 'HR_ADMIN' || desig.includes('HR') || name.includes('abhinaya')) {
-      if (isApplicantPmOrHr) return false; // Self/PM/HR requests bypass HR stage
+    // 2. HR Stage:
+    if (isHrUser) {
+      if (isApplicantPmOrHr) return false;
       return req.pmStatus === 'Approved' && (req.hrStatus === 'Pending' || req.hrStatus === 'Waiting PM');
     }
 
-    // 3. CEO Stage (Akshit Ujjain):
-    // Standard employees: HR must approve first (hrStatus === 'Approved' && ceoStatus === 'Pending')
-    // PM & HR employees: DIRECTLY GOES TO CEO (ceoStatus === 'Pending')
-    if (name.includes('akshit') || desig.includes('CEO') || empId === 'CEO001' || empId === 'KSS2407002') {
+    // 3. CTO Stage:
+    if (isCto) {
+      return req.ceoStatus === 'Approved' && (req.ctoStatus === 'Pending' || req.ctoStatus === 'Waiting CEO');
+    }
+
+    // 4. CEO Stage:
+    if (isCeo) {
       if (isApplicantPmOrHr) {
-        return req.ceoStatus === 'Pending';
+        return req.ceoStatus === 'Pending' || !req.ceoStatus;
       }
       const isHrPassed = req.hrStatus === 'Approved' || req.hrStatus === 'N/A';
       return isHrPassed && (req.ceoStatus === 'Pending' || req.ceoStatus === 'Waiting HR' || req.ceoStatus === 'Waiting PM');
     }
 
-    // 4. CTO Stage (Gaurav Kumar Tripathi):
-    // Requires CEO approval first (ceoStatus === 'Approved' && ctoStatus === 'Pending')
-    if (name.includes('gaurav') || desig.includes('CTO') || desig.includes('CIO') || empId === 'CTO001' || empId === 'KSS2407001') {
-      return req.ceoStatus === 'Approved' && (req.ctoStatus === 'Pending' || req.ctoStatus === 'Waiting CEO');
+    // 5. Generic Super Admin (Executive clearance for whichever stage is pending):
+    if (isSuperAdmin) {
+      if (isApplicantPmOrHr) {
+        return req.ceoStatus === 'Pending' || req.ctoStatus === 'Pending';
+      }
+      return req.pmStatus === 'Pending' || req.hrStatus === 'Pending' || req.ceoStatus === 'Pending' || req.ctoStatus === 'Pending';
     }
 
     return false;
   };
 
-  const handleApprove = (id: string) => {
+  const handleApprove = (id: string, stage?: 'PM' | 'HR' | 'CEO' | 'CTO') => {
     triggerHaptic('success');
-    updateLeaveRequestStatus(id, 'Approved', activeEmployee?.fullName || 'Executive');
+    const req = leaveRequests.find(r => r.id === id);
+    const target = stage || (req ? getActivePendingStage(req) : undefined);
+    updateLeaveRequestStatus(id, 'Approved', activeEmployee?.fullName || 'Executive', undefined, target);
   };
 
-  const handleReject = (id: string) => {
+  const handleReject = (id: string, stage?: 'PM' | 'HR' | 'CEO' | 'CTO') => {
     triggerHaptic('error');
-    updateLeaveRequestStatus(id, 'Rejected', activeEmployee?.fullName || 'Executive');
+    const req = leaveRequests.find(r => r.id === id);
+    const target = stage || (req ? getActivePendingStage(req) : undefined);
+    updateLeaveRequestStatus(id, 'Rejected', activeEmployee?.fullName || 'Executive', undefined, target);
   };
 
   const [filterType, setFilterType] = useState<'All' | 'Leave' | 'WFH'>('All');
@@ -563,16 +599,16 @@ export const LeaveApprovalsView: React.FC = () => {
                   {canPerformStageAction(req) ? (
                     <div className="flex items-center gap-3 mt-2">
                       <button
-                        onClick={() => handleReject(req.id)}
+                        onClick={() => handleReject(req.id, getActivePendingStage(req))}
                         className="flex-1 py-3 bg-[var(--accent-rose)]/10 text-[var(--accent-rose)] border border-[var(--accent-rose)]/20 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-[var(--accent-rose)]/20 cursor-pointer"
                       >
-                        <X className="w-4 h-4" /> Reject
+                        <X className="w-4 h-4" /> Reject ({getActivePendingStage(req)} Stage)
                       </button>
                       <button
-                        onClick={() => handleApprove(req.id)}
+                        onClick={() => handleApprove(req.id, getActivePendingStage(req))}
                         className="flex-1 py-3 bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] border border-[var(--accent-emerald)]/20 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-[var(--accent-emerald)]/20 cursor-pointer"
                       >
-                        <Check className="w-4 h-4" /> Approve
+                        <Check className="w-4 h-4" /> Approve ({getActivePendingStage(req)} Stage)
                       </button>
                     </div>
                   ) : isRequestFullyApproved(req) ? (

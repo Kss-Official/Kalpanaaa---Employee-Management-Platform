@@ -132,7 +132,7 @@ interface AuthContextType {
 
   // Actions
   submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => void;
-  updateLeaveRequestStatus: (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => void;
+  updateLeaveRequestStatus: (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string, targetStage?: 'PM' | 'HR' | 'CEO' | 'CTO') => void;
   updateLeaveRequestStage: (id: string, stage: 'PM' | 'HR' | 'CEO' | 'CTO', decision: 'Approved' | 'Rejected', reviewerName: string, notes?: string) => void;
   cancelLeaveRequest: (id: string) => void;
   loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
@@ -432,7 +432,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return {
         id: `notif-leave-${r.id}-${r.status}`,
-        type: (r.status === 'Approved' ? 'LEAVE_REQUEST_APPROVED' : (r.type === 'WFH' ? 'WFH_REQUEST_SUBMITTED' : 'LEAVE_REQUEST_SUBMITTED')) as any,
+        type: (r.status === 'Approved' ? 'LEAVE_REQUEST_APPROVED' : r.status === 'Rejected' ? 'LEAVE_REQUEST_REJECTED' : (r.type === 'WFH' ? 'WFH_REQUEST_SUBMITTED' : 'LEAVE_REQUEST_SUBMITTED')) as any,
         // Admin title: shows the employee name. Employee personal copy (isPersonalSanction) handled in bell component
         title: r.status === 'Approved'
           ? `✅ ${r.type} Approved — ${r.employeeName}`
@@ -1047,27 +1047,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const fetched: LeaveRequest[] = [];
           if (!snapshot.empty) {
             snapshot.forEach(docSnap => {
-              const raw = { id: docSnap.id, ...docSnap.data() } as LeaveRequest;
-              const pmStatus = raw.pmStatus || 'Pending';
-              const ceoStatus = raw.ceoStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM');
+              const data = docSnap.data();
+              const raw = { id: docSnap.id, ...data } as LeaveRequest;
+              
+              const isApplicantPmOrHr = raw.employeeRole === 'PROJECT_MANAGER' ||
+                raw.employeeRole === 'HR_ADMIN' ||
+                raw.employeeRole === 'SUPER_ADMIN' ||
+                (raw.department || '').toLowerCase().includes('hr') ||
+                (raw.department || '').toLowerCase().includes('management') ||
+                (raw.employeeName || '').toLowerCase().includes('koushik') ||
+                (raw.employeeName || '').toLowerCase().includes('abhinaya');
+
+              const pmStatus = isApplicantPmOrHr ? 'N/A' : (raw.pmStatus || 'Pending');
+              const hrStatus = isApplicantPmOrHr ? 'N/A' : (raw.hrStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM'));
+              const ceoStatus = raw.ceoStatus || (isApplicantPmOrHr ? 'Pending' : (hrStatus === 'Approved' ? 'Pending' : 'Waiting HR'));
               const ctoStatus = raw.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
+
+              const isPmPassed = pmStatus === 'Approved' || pmStatus === 'N/A' || pmStatus === 'Bypassed';
+              const isHrPassed = hrStatus === 'Approved' || hrStatus === 'N/A' || hrStatus === 'Bypassed';
+              const isCeoPassed = ceoStatus === 'Approved' || ceoStatus === 'N/A' || ceoStatus === 'Bypassed';
+              const isCtoPassed = ctoStatus === 'Approved' || ctoStatus === 'N/A' || ctoStatus === 'Bypassed';
+
               let status: 'Pending' | 'Approved' | 'Rejected' = raw.status || 'Pending';
-              if (pmStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || raw.status === 'Rejected') {
+              if (
+                pmStatus === 'Rejected' || 
+                hrStatus === 'Rejected' || 
+                ceoStatus === 'Rejected' || 
+                ctoStatus === 'Rejected' || 
+                raw.status === 'Rejected'
+              ) {
                 status = 'Rejected';
-              } else if (pmStatus === 'Approved' && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
+              } else if (isPmPassed && isHrPassed && isCeoPassed && isCtoPassed) {
                 status = 'Approved';
               } else {
                 status = 'Pending';
               }
-              fetched.push({ ...raw, pmStatus, ceoStatus, ctoStatus, status });
+
+              fetched.push({
+                ...raw,
+                pmStatus,
+                hrStatus,
+                ceoStatus,
+                ctoStatus,
+                status
+              });
             });
           }
 
-          setLeaveRequests(() => {
+          setLeaveRequests(prev => {
             const map = new Map<string, LeaveRequest>();
-            // 1. Initial / default leaves
+            // 1. Initial / default demo leaves
             INITIAL_LEAVE_REQUESTS.forEach(r => map.set(r.id, r));
-            // 2. Authoritative real-time Firestore submissions
+            // 2. Local cache fallback
+            const saved = localStorage.getItem('kss_v1_leave_requests');
+            if (saved) {
+              try {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed)) parsed.forEach((r: any) => map.set(r.id, r));
+              } catch {}
+            }
+            // 3. Current active state
+            prev.forEach(r => map.set(r.id, r));
+            // 4. Authoritative real-time Firestore submissions (overwrites stale local data)
             fetched.forEach(r => map.set(r.id, r));
 
             const merged = Array.from(map.values());
@@ -2226,23 +2267,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addAuditLog('LEAVE_STAGE_DECISION', reviewerName, `${stage} ${decision} for leave request ${id}`);
   };
 
-  const updateLeaveRequestStatus = (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string) => {
-    let stage: 'PM' | 'CEO' | 'CTO' | 'HR' = 'HR';
-    const desig = (activeEmployee?.designation || '').toUpperCase();
-    const empId = activeEmployee?.employeeId || activeEmployee?.id || '';
-    const empRole = activeEmployee?.role;
-    const name = (activeEmployee?.fullName || '').toLowerCase();
+  const updateLeaveRequestStatus = (
+    id: string, 
+    status: 'Approved' | 'Rejected', 
+    reviewedBy: string, 
+    reviewNotes?: string,
+    targetStage?: 'PM' | 'HR' | 'CEO' | 'CTO'
+  ) => {
+    let stage: 'PM' | 'CEO' | 'CTO' | 'HR' = targetStage || 'HR';
 
-    if (name.includes('gaurav') || desig.includes('CTO') || desig.includes('CIO') || empId === 'CTO001' || empId === 'KSS2407001') {
-      stage = 'CTO';
-    } else if (name.includes('akshit') || desig.includes('CEO') || empId === 'CEO001' || empId === 'KSS2407002') {
-      stage = 'CEO';
-    } else if (empRole === 'PROJECT_MANAGER' || desig.includes('PROJECT MANAGER') || name.includes('koushik')) {
-      stage = 'PM';
-    } else if (empRole === 'HR_ADMIN' || desig.includes('HR') || name.includes('abhinaya')) {
-      stage = 'HR';
-    } else {
-      stage = 'HR';
+    if (!targetStage) {
+      const desig = (activeEmployee?.designation || '').toUpperCase();
+      const empId = activeEmployee?.employeeId || activeEmployee?.id || '';
+      const empRole = activeEmployee?.role || role;
+      const name = (activeEmployee?.fullName || '').toLowerCase();
+
+      const req = leaveRequests.find(r => r.id === id);
+
+      if (name.includes('gaurav') || desig.includes('CTO') || desig.includes('CIO') || empId === 'CTO001' || empId === 'KSS2407001') {
+        stage = 'CTO';
+      } else if (name.includes('akshit') || desig.includes('CEO') || empId === 'CEO001' || empId === 'KSS2407002') {
+        stage = 'CEO';
+      } else if (empRole === 'PROJECT_MANAGER' || desig.includes('PROJECT MANAGER') || name.includes('koushik')) {
+        stage = 'PM';
+      } else if (empRole === 'HR_ADMIN' || desig.includes('HR') || name.includes('abhinaya')) {
+        stage = 'HR';
+      } else if (empRole === 'SUPER_ADMIN') {
+        // Executive Super Admin acting on request: determine what stage is currently awaiting approval!
+        if (req) {
+          if (req.ctoStatus === 'Pending') stage = 'CTO';
+          else if (req.ceoStatus === 'Pending') stage = 'CEO';
+          else if (req.hrStatus === 'Pending') stage = 'HR';
+          else if (req.pmStatus === 'Pending') stage = 'PM';
+          else stage = 'CEO';
+        } else {
+          stage = 'CEO';
+        }
+      }
     }
 
     updateLeaveRequestStage(id, stage, status, reviewedBy, reviewNotes);

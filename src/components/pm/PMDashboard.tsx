@@ -164,13 +164,12 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
     // Exclude HR employees and PM/Executive applicants from PM leave approval pipeline
     const isHrOrPmEmployee = (r.department || '').toLowerCase().includes('hr') ||
-      (r.employeeRole || '').toLowerCase().includes('hr') ||
-      r.employeeRole === 'PROJECT_MANAGER' || r.employeeRole === 'SUPER_ADMIN' ||
-      (r.employeeName || '').toLowerCase().includes('koushik') ||
-      (r.employeeName || '').toLowerCase().includes('abhinaya') ||
+      r.employeeRole === 'HR_ADMIN' ||
+      r.employeeRole === 'PROJECT_MANAGER' ||
+      r.employeeRole === 'SUPER_ADMIN' ||
       (() => {
         const emp = employees.find(e => e.id === r.employeeId || e.employeeId === r.employeeId || e.fullName === r.employeeName);
-        return emp?.department?.toLowerCase().includes('hr') || emp?.role === 'HR_ADMIN' || emp?.role === 'PROJECT_MANAGER';
+        return emp?.department?.toLowerCase().includes('hr') || emp?.role === 'HR_ADMIN' || emp?.role === 'PROJECT_MANAGER' || emp?.role === 'SUPER_ADMIN';
       })();
 
     if (isHrOrPmEmployee) return false;

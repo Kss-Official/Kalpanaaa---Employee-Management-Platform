@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "kalpanaaa-employees-website"
+    "default": "kalpana-emp-app-12345",
+    "production": "kalpanaaa-employees-website"
   }
 }

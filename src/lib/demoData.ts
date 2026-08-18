@@ -471,8 +471,9 @@ export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
     reason: 'health issue',
     status: 'Approved',
     pmStatus: 'Approved',
-    ctoStatus: 'Approved',
+    hrStatus: 'Approved',
     ceoStatus: 'Approved',
+    ctoStatus: 'Approved',
     reviewedBy: 'Gaurav Kumar Tripathi (CTO)',
     requestDate: '2026-08-13T10:00:00.000Z'
   }
