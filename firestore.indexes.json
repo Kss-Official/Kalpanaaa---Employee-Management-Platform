@@ -1,0 +1,62 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "leaveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pmUid", "order": "ASCENDING" },
+        { "fieldPath": "pmStatus", "order": "ASCENDING" },
+        { "fieldPath": "requestDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leaveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "employeeUid", "order": "ASCENDING" },
+        { "fieldPath": "requestDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leaveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hrStatus", "order": "ASCENDING" },
+        { "fieldPath": "requestDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leaveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ceoStatus", "order": "ASCENDING" },
+        { "fieldPath": "requestDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leaveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ctoStatus", "order": "ASCENDING" },
+        { "fieldPath": "requestDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "attendance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "employeeUid", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "projectTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

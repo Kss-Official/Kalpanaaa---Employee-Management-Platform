@@ -37,18 +37,22 @@ export interface BreakEntry {
 
 export interface LeaveRequest {
   id: string;
-  employeeId: string;
+  employeeUid?: string; // Canonical Firebase Auth UID anchor
+  employeeId: string;   // Corporate identifier (e.g. KSS2407004)
   employeeName: string;
   department?: string;
   employeeRole?: UserRole | string;
+  pmUid?: string;       // Assigned Project Manager Auth UID for scoped routing
   type: 'Leave' | 'WFH';
-  startDate: string;
-  endDate: string;
+  startDate: string;    // YYYY-MM-DD
+  endDate: string;      // YYYY-MM-DD
   reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
   requestDate: string;
   reviewedBy?: string;
   reviewNotes?: string;
+  createdAt?: string;
+  updatedAt?: string;
   
   // Multi-tier Approval Cycle fields (PM -> HR -> CEO -> CTO)
   pmStatus?: 'Pending' | 'Approved' | 'Rejected' | 'N/A' | 'Bypassed';
@@ -62,15 +66,41 @@ export interface LeaveRequest {
   hrReviewedBy?: string;
   hrReviewedAt?: string;
 
-  ceoStatus?: 'Pending' | 'Approved' | 'Rejected' | 'Waiting PM' | 'Waiting HR' | 'Bypassed';
+  ceoStatus?: 'Pending' | 'Approved' | 'Rejected' | 'Waiting PM' | 'Waiting HR' | 'N/A' | 'Bypassed';
   ceoNotes?: string;
   ceoReviewedBy?: string;
   ceoReviewedAt?: string;
 
-  ctoStatus?: 'Pending' | 'Approved' | 'Rejected' | 'Waiting CEO';
+  ctoStatus?: 'Pending' | 'Approved' | 'Rejected' | 'Waiting CEO' | 'N/A' | 'Bypassed';
   ctoNotes?: string;
   ctoReviewedBy?: string;
   ctoReviewedAt?: string;
+
+  // Audited Emergency SuperAdmin Override fields
+  isEmergencyOverride?: boolean;
+  overrideBy?: string;
+  overrideReason?: string;
+}
+
+export interface LeaveLockEntry {
+  id: string; // YYYY-MM-DD
+  requestId: string;
+  employeeUid: string;
+  employeeId: string;
+  type: 'Leave' | 'WFH';
+  active: boolean;
+  reservedAt: string;
+}
+
+export interface AppUser {
+  uid: string;
+  email: string;
+  role: UserRole;
+  executiveRole?: 'CEO' | 'CTO';
+  fullName: string;
+  employeeId: string;
+  department?: string;
+  createdAt?: string;
 }
 
 export type AttendanceMethod = 'QR Code' | 'Manual Admin' | 'Self Portal' | 'Biometric' | 'Facial Recognition';
@@ -93,6 +123,9 @@ export interface Employee {
   joiningDate: string;
   employmentType: EmploymentType;
   reportingManager: string;
+  reportingManagerUid?: string; // Linked PM / Manager Auth UID
+  pmUid?: string;
+  executiveRole?: 'CEO' | 'CTO';
   workLocation: string;
   status: EmployeeStatus;
   shift: string; // e.g., 'Day Shift (09:00 - 18:00)'
@@ -142,10 +175,12 @@ export interface WorkZone {
 
 export interface AttendanceRecord {
   id: string;
+  employeeUid?: string; // Linked Firebase Auth UID
   employeeId: string;
   employeeCode: string;
   employeeName: string;
   department: string;
+  pmUid?: string; // Reporting PM Auth UID
   date: string; // YYYY-MM-DD
   checkInAt: string | null; // ISO timestamp
   checkOutAt: string | null; // ISO timestamp

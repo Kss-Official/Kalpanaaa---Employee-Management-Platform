@@ -24,6 +24,7 @@ import { evaluateAttendanceScan, calculateGpsDistanceMeters } from '../lib/atten
 import { fetchAbsoluteTime, toISTTimeString } from '../lib/absoluteTime';
 import { sendKssNotification, sendAdminBroadcast, registerFcmToken, KssNotification } from '../lib/notifications';
 import { clearAllFaceEngineState } from '../lib/faceRecognitionEngine';
+import { LeaveService } from '../lib/leaveService';
 
 const generateDeviceFingerprint = () => {
   return btoa(`${navigator.userAgent}|${screen.width}x${screen.height}|${navigator.language}|${new Date().getTimezoneOffset()}`);
@@ -131,10 +132,10 @@ interface AuthContextType {
   companyWideWfhDates: string[];
 
   // Actions
-  submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => void;
+  submitLeaveRequest: (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate' | 'createdAt' | 'updatedAt'>) => Promise<{ success: boolean; id: string; message: string }>;
   updateLeaveRequestStatus: (id: string, status: 'Approved' | 'Rejected', reviewedBy: string, reviewNotes?: string, targetStage?: 'PM' | 'HR' | 'CEO' | 'CTO') => void;
-  updateLeaveRequestStage: (id: string, stage: 'PM' | 'HR' | 'CEO' | 'CTO', decision: 'Approved' | 'Rejected', reviewerName: string, notes?: string) => void;
-  cancelLeaveRequest: (id: string) => void;
+  updateLeaveRequestStage: (id: string, stage: 'PM' | 'HR' | 'CEO' | 'CTO', decision: 'Approved' | 'Rejected', reviewerName: string, notes?: string, employeeId?: string, startDate?: string, endDate?: string) => Promise<void>;
+  cancelLeaveRequest: (id: string, employeeId?: string, startDate?: string, endDate?: string) => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
   quickDemoLogin: (role: UserRole | 'CEO' | 'CTO') => void;
   logout: () => void;
@@ -1068,8 +1069,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const isCeoPassed = ceoStatus === 'Approved' || ceoStatus === 'N/A' || ceoStatus === 'Bypassed';
               const isCtoPassed = ctoStatus === 'Approved' || ctoStatus === 'N/A' || ctoStatus === 'Bypassed';
 
-              let status: 'Pending' | 'Approved' | 'Rejected' = raw.status || 'Pending';
-              if (
+              let status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled' = raw.status || 'Pending';
+              if (raw.status === 'Cancelled') {
+                status = 'Cancelled';
+              } else if (
                 pmStatus === 'Rejected' || 
                 hrStatus === 'Rejected' || 
                 ceoStatus === 'Rejected' || 
@@ -1083,8 +1086,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 status = 'Pending';
               }
 
+              // Dynamic fallback for legacy records missing pmUid or employeeUid
+              const matchedEmp = employees.find(e => e.id === raw.employeeId || e.employeeId === raw.employeeId);
+              const employeeUid = raw.employeeUid || matchedEmp?.uid || '';
+              const pmUid = raw.pmUid || matchedEmp?.pmUid || matchedEmp?.reportingManagerUid || 'uid-KSS2407003';
+
               fetched.push({
                 ...raw,
+                employeeUid,
+                pmUid,
                 pmStatus,
                 hrStatus,
                 ceoStatus,
@@ -1094,34 +1104,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
 
-          setLeaveRequests(prev => {
-            const map = new Map<string, LeaveRequest>();
-            // 1. Initial / default demo leaves
-            INITIAL_LEAVE_REQUESTS.forEach(r => map.set(r.id, r));
-            // 2. Local cache fallback
-            const saved = localStorage.getItem('kss_v1_leave_requests');
-            if (saved) {
-              try {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed)) parsed.forEach((r: any) => map.set(r.id, r));
-              } catch {}
-            }
-            // 3. Current active state
-            prev.forEach(r => map.set(r.id, r));
-            // 4. Authoritative real-time Firestore submissions (overwrites stale local data)
-            fetched.forEach(r => map.set(r.id, r));
-
-            const merged = Array.from(map.values());
-            merged.sort((a, b) => {
-              const timeA = new Date(a.requestDate || (a as any).createdAt || a.startDate || 0).getTime() || 0;
-              const timeB = new Date(b.requestDate || (b as any).createdAt || b.startDate || 0).getTime() || 0;
-              return timeB - timeA;
-            });
-            try {
-              localStorage.setItem('kss_v1_leave_requests', JSON.stringify(merged));
-            } catch {}
-            return merged;
+          const authoritativeList = fetched.length > 0 ? fetched : INITIAL_LEAVE_REQUESTS;
+          authoritativeList.sort((a, b) => {
+            const timeA = new Date(a.requestDate || (a as any).createdAt || a.startDate || 0).getTime() || 0;
+            const timeB = new Date(b.requestDate || (b as any).createdAt || b.startDate || 0).getTime() || 0;
+            return timeB - timeA;
           });
+
+          setLeaveRequests(authoritativeList);
+          try {
+            localStorage.setItem('kss_v1_leave_requests', JSON.stringify(authoritativeList));
+          } catch {}
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'leaveRequests');
         });
@@ -2057,72 +2050,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addAuditLog('COMPANY_WORKZONE_UPDATED', updated.name, `Lat: ${updated.latitude}, Lon: ${updated.longitude}, Radius: ${updated.radiusMeters}m`);
   };
 
-  const submitLeaveRequest = (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => {
+  const submitLeaveRequest = async (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate' | 'createdAt' | 'updatedAt'>) => {
     const emp = activeEmployee;
     const empId = data.employeeId || emp?.employeeId || emp?.id || `EMP-${Date.now().toString().slice(-6)}`;
     const empName = data.employeeName || emp?.fullName || 'Employee';
     const empDept = data.department || emp?.department || 'Engineering';
     const empRole = data.employeeRole || emp?.role || 'EMPLOYEE';
+    const empUid = data.employeeUid || emp?.uid || user?.uid || '';
+    const pmUid = data.pmUid || emp?.pmUid || emp?.reportingManagerUid || 'uid-KSS2407003';
 
     const isPmOrHrOrExec = empRole === 'PROJECT_MANAGER' || empRole === 'HR_ADMIN' || empRole === 'SUPER_ADMIN' ||
       empDept.toLowerCase().includes('hr') || empDept.toLowerCase().includes('management') ||
       (emp?.designation || '').toLowerCase().includes('project manager') ||
       empName.toLowerCase().includes('koushik') || empName.toLowerCase().includes('abhinaya');
 
-    const newRequest: LeaveRequest = {
+    const result = await LeaveService.submitLeaveRequest({
       ...data,
+      employeeUid: empUid,
       employeeId: empId,
       employeeName: empName,
       department: empDept,
       employeeRole: empRole,
-      id: `LR-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-      status: 'Pending',
-      // For PM, HR, & Executive applicants: PM & HR stages are bypassed (N/A), goes DIRECTLY to CEO Pending!
-      // For Employees: PM Pending -> HR Waiting PM -> CEO Waiting HR -> CTO Waiting CEO
+      pmUid: pmUid,
       pmStatus: isPmOrHrOrExec ? 'N/A' : 'Pending',
       hrStatus: isPmOrHrOrExec ? 'N/A' : 'Waiting PM',
       ceoStatus: isPmOrHrOrExec ? 'Pending' : 'Waiting HR',
       ctoStatus: 'Waiting CEO',
-      requestDate: new Date().toISOString(),
-    };
-    setLeaveRequests(prev => {
-      const updated = [newRequest, ...prev];
-      try {
-        localStorage.setItem('kss_v1_leave_requests', JSON.stringify(updated));
-      } catch { /* ignore */ }
-      return updated;
     });
 
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        const channel = new BroadcastChannel('kss_app_events');
-        channel.postMessage({ type: 'NEW_LEAVE_REQUEST', payload: newRequest });
-        channel.close();
-      } catch {}
-    }
-    
-    // Write to Firestore (clean undefined/NaN fields recursively)
-    const cleanPayload = cleanFirestorePayload(newRequest);
-    setDoc(doc(db, 'leaveRequests', newRequest.id), cleanPayload).catch(err => {
-      handleFirestoreError(err, OperationType.WRITE, `leaveRequests/${newRequest.id}`);
-    });
-    
-    // Dispatch real-time in-app notification to PM, HR, CEO, and CTO
     const isWfh = data.type === 'WFH';
     const eventType = isWfh ? 'WFH_REQUEST_SUBMITTED' : 'LEAVE_REQUEST_SUBMITTED';
 
     sendKssNotification(
       eventType,
-      isWfh ? `🏠 WFH Request: ${data.employeeName}` : `📋 Leave Request: ${data.employeeName}`,
-      `${data.employeeName} requested ${data.type} (${data.startDate} to ${data.endDate}). Reason: "${data.reason}". ${isPmOrHrOrExec ? 'Pending CEO & CTO approval.' : 'Pending PM, HR, CEO & CTO approval.'}`,
+      isWfh ? `🏠 WFH Request: ${empName}` : `📋 Leave Request: ${empName}`,
+      `${empName} requested ${data.type} (${data.startDate} to ${data.endDate}). Reason: "${data.reason}". ${isPmOrHrOrExec ? 'Pending CEO & CTO approval.' : 'Pending PM, HR, CEO & CTO approval.'}`,
       {
-        actorId: data.employeeId,
-        actorName: data.employeeName,
-        targetEmployeeId: data.employeeId,
-        targetEmployeeName: data.employeeName,
+        actorId: empId,
+        actorName: empName,
+        targetEmployeeId: empId,
+        targetEmployeeName: empName,
         overrideAudience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER'],
         metadata: {
-          requestId: newRequest.id,
+          requestId: result.id,
           requestType: data.type,
           startDate: data.startDate,
           endDate: data.endDate,
@@ -2131,138 +2101,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
-    addAuditLog('LEAVE_REQUEST', data.employeeName, `Submitted ${data.type} request from ${data.startDate} to ${data.endDate}`);
+    addAuditLog('LEAVE_REQUEST', empName, `Submitted ${data.type} request from ${data.startDate} to ${data.endDate}`);
+    return result;
   };
 
-  const updateLeaveRequestStage = (
+  const updateLeaveRequestStage = async (
     id: string,
     stage: 'PM' | 'HR' | 'CEO' | 'CTO',
     decision: 'Approved' | 'Rejected',
     reviewerName: string,
-    notes?: string
+    notes?: string,
+    employeeId?: string,
+    startDate?: string,
+    endDate?: string
   ) => {
-    setLeaveRequests(prev => prev.map(req => {
-      if (req.id !== id) return req;
+    const targetReq = leaveRequests.find(r => r.id === id);
+    const empId = employeeId || targetReq?.employeeId || '';
+    const sDate = startDate || targetReq?.startDate || '';
+    const eDate = endDate || targetReq?.endDate || '';
+    const revUid = user?.uid || activeEmployee?.uid || 'uid-exec';
 
-      const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' || req.employeeRole === 'HR_ADMIN' ||
-        (req.department || '').toLowerCase().includes('hr') ||
-        (req.employeeName || '').toLowerCase().includes('koushik') ||
-        (req.employeeName || '').toLowerCase().includes('abhinaya');
+    if (stage === 'PM') {
+      await LeaveService.reviewPmStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+    } else if (stage === 'HR') {
+      await LeaveService.reviewHrStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+    } else if (stage === 'CEO') {
+      await LeaveService.reviewCeoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+    } else if (stage === 'CTO') {
+      await LeaveService.reviewCtoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+    }
 
-      let pmStatus = isApplicantPmOrHr ? 'N/A' : (req.pmStatus || 'Pending');
-      let hrStatus = isApplicantPmOrHr ? 'N/A' : (req.hrStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM'));
-      let ceoStatus = req.ceoStatus || (isApplicantPmOrHr ? 'Pending' : (hrStatus === 'Approved' ? 'Pending' : 'Waiting HR'));
-      let ctoStatus = req.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
-
-      if (stage === 'PM') {
-        pmStatus = decision;
-        if (decision === 'Approved') {
-          hrStatus = 'Pending'; // Unlock for HR!
-        }
-      } else if (stage === 'HR') {
-        hrStatus = decision;
-        if (decision === 'Approved') {
-          if (pmStatus !== 'Approved' && pmStatus !== 'N/A') pmStatus = 'Approved';
-          ceoStatus = 'Pending'; // Unlock for CEO!
-        }
-      } else if (stage === 'CEO') {
-        ceoStatus = decision;
-        if (decision === 'Approved') {
-          if (pmStatus !== 'Approved' && pmStatus !== 'N/A') pmStatus = 'Approved';
-          if (hrStatus !== 'Approved' && hrStatus !== 'N/A') hrStatus = 'Approved';
-          ctoStatus = 'Pending'; // Unlock for CTO!
-        }
-      } else if (stage === 'CTO') {
-        ctoStatus = decision;
-        if (decision === 'Approved') {
-          if (pmStatus !== 'Approved' && pmStatus !== 'N/A') pmStatus = 'Approved';
-          if (hrStatus !== 'Approved' && hrStatus !== 'N/A') hrStatus = 'Approved';
-          if (ceoStatus !== 'Approved' && ceoStatus !== 'N/A') ceoStatus = 'Approved';
+    // Dispatch real-time in-app notification for stage decision
+    sendKssNotification(
+      decision === 'Approved' ? 'LEAVE_REQUEST_APPROVED' : 'LEAVE_REQUEST_REJECTED',
+      decision === 'Approved' ? `✅ ${targetReq?.type || 'Request'} Approved (${stage} Stage)` : `❌ ${targetReq?.type || 'Request'} Rejected (${stage} Stage)`,
+      `${targetReq?.type || 'Request'} for ${targetReq?.employeeName || 'Employee'} (${sDate} to ${eDate}) was ${decision.toLowerCase()} by ${reviewerName} (${stage} Stage).`,
+      {
+        actorId: activeEmployee?.id || 'exec',
+        actorName: reviewerName,
+        targetEmployeeId: targetReq?.employeeId || '',
+        targetEmployeeName: targetReq?.employeeName || '',
+        overrideAudience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER', 'EMPLOYEE'],
+        metadata: {
+          requestId: id,
+          stage,
+          decision,
+          reviewerName
         }
       }
+    );
 
-      const isPmPassed = pmStatus === 'Approved' || pmStatus === 'N/A' || isApplicantPmOrHr;
-      const isHrPassed = hrStatus === 'Approved' || hrStatus === 'N/A' || isApplicantPmOrHr;
-
-      let overallStatus: 'Pending' | 'Approved' | 'Rejected' = 'Pending';
-      if (pmStatus === 'Rejected' || hrStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || decision === 'Rejected') {
-        overallStatus = 'Rejected';
-      } else if (isPmPassed && isHrPassed && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
-        overallStatus = 'Approved';
-      } else {
-        overallStatus = 'Pending';
-      }
-
-      const updatedReq: LeaveRequest = {
-        ...req,
-        pmStatus,
-        hrStatus,
-        ceoStatus,
-        ctoStatus,
-        status: overallStatus,
-        reviewedBy: reviewerName,
-        reviewNotes: notes || req.reviewNotes || '',
-        ...(stage === 'PM' ? { pmRecommendation: decision, pmNotes: notes, pmReviewedBy: reviewerName, pmReviewedAt: new Date().toISOString() } : {}),
-        ...(stage === 'HR' ? { hrNotes: notes, hrReviewedBy: reviewerName, hrReviewedAt: new Date().toISOString() } : {}),
-        ...(stage === 'CEO' ? { ceoNotes: notes, ceoReviewedBy: reviewerName, ceoReviewedAt: new Date().toISOString() } : {}),
-        ...(stage === 'CTO' ? { ctoNotes: notes, ctoReviewedBy: reviewerName, ctoReviewedAt: new Date().toISOString() } : {})
-      };
-
-      // Clean undefined values to prevent Firestore setDoc crash
-      const cleanPayload = Object.fromEntries(
-        Object.entries(updatedReq).filter(([_, v]) => v !== undefined)
-      );
-
-      // Update in Firestore
-      setDoc(doc(db, 'leaveRequests', id), cleanPayload, { merge: true }).catch(err => {
-        handleFirestoreError(err, OperationType.UPDATE, `leaveRequests/${id}`);
-      });
-
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        try {
-          const channel = new BroadcastChannel('kss_app_events');
-          channel.postMessage({ type: 'UPDATE_LEAVE_REQUEST', payload: updatedReq });
-          channel.close();
-        } catch {}
-      }
-
-      // Dispatch real-time in-app notification for stage decision
-      sendKssNotification(
-        decision === 'Approved' ? 'LEAVE_REQUEST_APPROVED' : 'LEAVE_REQUEST_REJECTED',
-        decision === 'Approved' ? `✅ ${req.type} Approved (${stage} Stage)` : `❌ ${req.type} Rejected (${stage} Stage)`,
-        `${req.type} request for ${req.employeeName} (${req.startDate} to ${req.endDate}) was ${decision.toLowerCase()} by ${reviewerName} (${stage} Stage).`,
-        {
-          actorId: activeEmployee?.id || 'exec',
-          actorName: reviewerName,
-          targetEmployeeId: req.employeeId,
-          targetEmployeeName: req.employeeName,
-          overrideAudience: ['SUPER_ADMIN', 'HR_ADMIN', 'PROJECT_MANAGER', 'EMPLOYEE'],
-          metadata: {
-            requestId: id,
-            stage,
-            decision,
-            reviewerName
-          }
+    // If final CTO approval and WFH, add to approvedWfhDates
+    if (stage === 'CTO' && decision === 'Approved' && targetReq?.type === 'WFH') {
+      const targetEmp = employees.find(e => e.employeeId === targetReq.employeeId || e.id === targetReq.employeeId);
+      if (targetEmp) {
+        const dates = new Set<string>(targetEmp.approvedWfhDates || []);
+        let curr = new Date(sDate);
+        const end = new Date(eDate);
+        while (curr <= end) {
+          dates.add(curr.toISOString().split('T')[0]);
+          curr.setDate(curr.getDate() + 1);
         }
-      );
-
-      // If Approved overall and type is WFH, push dates to employee's approvedWfhDates
-      if (overallStatus === 'Approved' && req.type === 'WFH') {
-        const targetEmp = employees.find(e => e.employeeId === req.employeeId || e.id === req.employeeId);
-        if (targetEmp) {
-          const dates = new Set<string>(targetEmp.approvedWfhDates || []);
-          let curr = new Date(req.startDate);
-          const end = new Date(req.endDate);
-          while (curr <= end) {
-            dates.add(curr.toISOString().split('T')[0]);
-            curr.setDate(curr.getDate() + 1);
-          }
-          updateEmployee(targetEmp.id, { approvedWfhDates: Array.from(dates) });
-        }
+        updateEmployee(targetEmp.id, { approvedWfhDates: Array.from(dates) });
       }
-
-      return updatedReq;
-    }));
+    }
 
     addAuditLog('LEAVE_STAGE_DECISION', reviewerName, `${stage} ${decision} for leave request ${id}`);
   };
@@ -2293,7 +2195,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else if (empRole === 'HR_ADMIN' || desig.includes('HR') || name.includes('abhinaya')) {
         stage = 'HR';
       } else if (empRole === 'SUPER_ADMIN') {
-        // Executive Super Admin acting on request: determine what stage is currently awaiting approval!
         if (req) {
           if (req.ctoStatus === 'Pending') stage = 'CTO';
           else if (req.ceoStatus === 'Pending') stage = 'CEO';
@@ -2306,31 +2207,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    updateLeaveRequestStage(id, stage, status, reviewedBy, reviewNotes);
+    const targetReq = leaveRequests.find(r => r.id === id);
+    updateLeaveRequestStage(id, stage, status, reviewedBy, reviewNotes, targetReq?.employeeId, targetReq?.startDate, targetReq?.endDate);
   };
 
-  const cancelLeaveRequest = (id: string) => {
-    setLeaveRequests(prev => {
-      const updated = prev.filter(req => req.id !== id);
-      try {
-        localStorage.setItem('kss_v1_leave_requests', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
+  const cancelLeaveRequest = async (id: string, employeeId?: string, startDate?: string, endDate?: string) => {
+    const targetReq = leaveRequests.find(r => r.id === id);
+    const empId = employeeId || targetReq?.employeeId || activeEmployee?.employeeId || '';
+    const sDate = startDate || targetReq?.startDate || '';
+    const eDate = endDate || targetReq?.endDate || '';
 
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        const channel = new BroadcastChannel('kss_app_events');
-        channel.postMessage({ type: 'CANCEL_LEAVE_REQUEST', payload: { id } });
-        channel.close();
-      } catch {}
-    }
-
-    // Remove from Firestore
-    deleteDoc(doc(db, 'leaveRequests', id)).catch(err => {
-      handleFirestoreError(err, OperationType.UPDATE, `leaveRequests/${id}`);
-    });
-    addAuditLog('LEAVE_CANCELLED', activeEmployee?.fullName || 'Employee', `Cancelled leave request ${id}`);
+    await LeaveService.cancelRequest(id, empId, sDate, eDate);
+    addAuditLog('LEAVE_CANCELLED', activeEmployee?.fullName || 'Employee', `Cancelled leave/WFH request ${id}`);
   };
 
   const resetToDemoData = () => {

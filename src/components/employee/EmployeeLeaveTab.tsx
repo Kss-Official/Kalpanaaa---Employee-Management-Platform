@@ -14,6 +14,7 @@ export const EmployeeLeaveTab: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{success: boolean; message: string} | null>(null);
 
   const [filterType, setFilterType] = useState<'All' | 'Leave' | 'WFH'>('All');
@@ -21,6 +22,7 @@ export const EmployeeLeaveTab: React.FC = () => {
   const todayStr = new Date().toISOString().split('T')[0];
 
   const myRequests = leaveRequests.filter(r => 
+    (r.employeeUid && activeEmployee?.uid && r.employeeUid === activeEmployee.uid) ||
     isEmployeeMatch(activeEmployee, r.employeeId) || 
     r.employeeId === activeEmployee?.id || 
     r.employeeId === activeEmployee?.employeeId || 
@@ -51,8 +53,10 @@ export const EmployeeLeaveTab: React.FC = () => {
     return true;
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!startDate || !endDate || !reason) {
       setFeedback({ success: false, message: 'Please fill out all fields.' });
       return;
@@ -62,22 +66,33 @@ export const EmployeeLeaveTab: React.FC = () => {
       return;
     }
 
-    submitLeaveRequest({
-      employeeId: activeEmployee?.employeeId || activeEmployee?.id || '',
-      employeeName: activeEmployee?.fullName || 'Employee',
-      department: activeEmployee?.department || 'Engineering',
-      employeeRole: activeEmployee?.role || 'EMPLOYEE',
-      type,
-      startDate,
-      endDate,
-      reason
-    });
+    setIsSubmitting(true);
+    setFeedback(null);
 
-    setFeedback({ success: true, message: `${type} request submitted successfully.` });
-    setStartDate('');
-    setEndDate('');
-    setReason('');
-    setShowForm(false);
+    try {
+      await submitLeaveRequest({
+        employeeUid: activeEmployee?.uid,
+        employeeId: activeEmployee?.employeeId || activeEmployee?.id || '',
+        employeeName: activeEmployee?.fullName || 'Employee',
+        department: activeEmployee?.department || 'Engineering',
+        employeeRole: activeEmployee?.role || 'EMPLOYEE',
+        pmUid: activeEmployee?.pmUid || activeEmployee?.reportingManagerUid || 'uid-KSS2407003',
+        type,
+        startDate,
+        endDate,
+        reason
+      });
+
+      setFeedback({ success: true, message: `${type} request submitted successfully.` });
+      setStartDate('');
+      setEndDate('');
+      setReason('');
+      setShowForm(false);
+    } catch (err: any) {
+      setFeedback({ success: false, message: err?.message || 'Failed to submit request' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -160,10 +175,11 @@ export const EmployeeLeaveTab: React.FC = () => {
           <div className="flex justify-end">
             <button
               type="submit"
-              className="flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-colors shadow-lg shadow-blue-900/20 w-full sm:w-auto cursor-pointer"
+              disabled={isSubmitting}
+              className="flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl transition-colors shadow-lg shadow-blue-900/20 w-full sm:w-auto cursor-pointer"
             >
               <Send className="w-4 h-4" />
-              <span>Submit Request</span>
+              <span>{isSubmitting ? 'Submitting...' : 'Submit Request'}</span>
             </button>
           </div>
         </form>

@@ -35,6 +35,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: 'emp-KSS2407001',
     employeeId: 'KSS2407001',
+    uid: 'uid-KSS2407001',
     fullName: 'Gaurav Kumar Tripathi',
     email: 'founder@kalpanaaasoftwaresolutions.in',
     phone: '+91 74390 67376',
@@ -45,6 +46,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     joiningDate: '2024-01-01',
     employmentType: 'Full-Time',
     reportingManager: 'Executive Board',
+    executiveRole: 'CTO',
     workLocation: 'Main Office HQ',
     status: 'Active',
     shift: 'Day Shift (10:00 - 19:30)',
@@ -64,6 +66,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: 'emp-KSS2407002',
     employeeId: 'KSS2407002',
+    uid: 'uid-KSS2407002',
     fullName: 'Akshit Ujjain',
     email: 'akshit.ujjain@kalpanaaasoftwaresolutions.in',
     phone: '+919790733700',
@@ -74,6 +77,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     joiningDate: '2024-01-01',
     employmentType: 'Full-Time',
     reportingManager: 'Executive Board',
+    executiveRole: 'CEO',
     workLocation: 'Main Office HQ',
     status: 'Active',
     shift: 'Day Shift (10:00 - 19:30)',
@@ -93,6 +97,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: 'emp-KSS2407003',
     employeeId: 'KSS2407003',
+    uid: 'uid-KSS2407003',
     fullName: 'D. Koushik',
     email: 'd.koushik@kalpanaaasoftwaresolutions.in',
     phone: '+91 98765 00003',
@@ -103,6 +108,8 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     joiningDate: '2024-02-15',
     employmentType: 'Full-Time',
     reportingManager: 'Akshit Ujjain',
+    reportingManagerUid: 'uid-KSS2407002',
+    pmUid: 'uid-KSS2407003',
     workLocation: 'Main Office HQ',
     status: 'Active',
     shift: 'Day Shift (10:00 - 19:30)',
@@ -122,6 +129,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: 'emp-KSS2407004',
     employeeId: 'KSS2407004',
+    uid: 'uid-KSS2407004',
     fullName: 'Asbin T S',
     email: 'asbin.ts@kalpanaaa.in',
     phone: '7603872359',
@@ -132,6 +140,8 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     joiningDate: '2024-03-01',
     employmentType: 'Full-Time',
     reportingManager: 'D. Koushik',
+    reportingManagerUid: 'uid-KSS2407003',
+    pmUid: 'uid-KSS2407003',
     workLocation: 'Main Office HQ',
     status: 'Active',
     shift: 'Day Shift (10:00 - 19:30)',
@@ -151,6 +161,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: 'emp-KSS2407005',
     employeeId: 'KSS2407005',
+    uid: 'uid-KSS2407005',
     fullName: 'Thabeethal Asnath I',
     email: 'i.thabeethal.asnath@kalpanaaa.in',
     phone: '9080841727',
@@ -161,6 +172,8 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     joiningDate: '2024-03-01',
     employmentType: 'Full-Time',
     reportingManager: 'D. Koushik',
+    reportingManagerUid: 'uid-KSS2407003',
+    pmUid: 'uid-KSS2407003',
     workLocation: 'Main Office HQ',
     status: 'Active',
     shift: 'Day Shift (10:00 - 19:30)',
@@ -462,7 +475,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
 export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
   {
     id: 'LR-ABHINAYA-001',
-    employeeId: 'emp-KSS2407011',
+    employeeUid: 'uid-KSS2407011',
+    employeeId: 'KSS2407011',
     employeeName: 'Abhinaya V',
     department: 'HR Department',
     type: 'WFH',

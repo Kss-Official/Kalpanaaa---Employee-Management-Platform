@@ -53,14 +53,11 @@ export const HRLeaveWfhApprovals: React.FC = () => {
   };
 
   const filteredRequests = leaveRequests.filter(req => {
-    // Before PM approval, hide standard employee requests from HR inbox (must be Approved or N/A)
-    const isPmStagePassed = req.pmStatus === 'Approved' || req.pmStatus === 'N/A' || req.pmStatus === 'Bypassed';
-    if (!isPmStagePassed) return false;
-
     const matchesType = filterType === 'All' || req.type === filterType;
     const matchesStatus = filterStatus === 'All' || req.status === filterStatus;
     const matchesSearch = (req.employeeName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (req.reason || '').toLowerCase().includes(searchTerm.toLowerCase());
+                          (req.reason || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (req.employeeId || '').toLowerCase().includes(searchTerm.toLowerCase());
     return matchesType && matchesStatus && matchesSearch;
   });
 
@@ -292,7 +289,11 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                       ● {isFullyApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending'}
                     </span>
 
-                    {(hrState === 'Pending' || hrState === 'Waiting PM') && !isFullyApproved && !isRejected ? (
+                    {pmState === 'Pending' && !isFullyApproved && !isRejected ? (
+                      <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold">
+                        🔒 Awaiting PM Review
+                      </span>
+                    ) : hrState === 'Pending' && !isFullyApproved && !isRejected ? (
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -447,7 +448,11 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        {(hrState === 'Pending' || hrState === 'Waiting PM') && !isFullyApproved && !isRejected ? (
+                        {pmState === 'Pending' && !isFullyApproved && !isRejected ? (
+                          <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold">
+                            🔒 Awaiting PM Review
+                          </span>
+                        ) : hrState === 'Pending' && !isFullyApproved && !isRejected ? (
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"

@@ -102,32 +102,24 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     return () => unsub();
   }, []);
 
-  // Persisted PM Recommendations (Fixes P15)
-  const [recommendations, setRecommendations] = useState<Record<string, 'Approved' | 'Flagged'>>(() => {
-    const saved = localStorage.getItem('kss_pm_recommendations');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    localStorage.setItem('kss_pm_recommendations', JSON.stringify(recommendations));
-  }, [recommendations]);
-
-  // Modal State for PM Custom Sprint Conflict / Rejection Reason (Fixes P16)
+  // Modal State for PM Custom Sprint Conflict / Rejection Reason
   const [rejectModalReq, setRejectModalReq] = useState<LeaveRequest | null>(null);
   const [customRejectReason, setCustomRejectReason] = useState('Sprint 14 Deadline Conflict — Key deliverable scheduled during request dates');
 
   const handleRecommend = (reqId: string, type: 'Approved' | 'Flagged', customReason?: string) => {
-    setRecommendations(prev => ({ ...prev, [reqId]: type }));
     const reasonText = customReason || (type === 'Approved' ? 'PM Recommended Approval' : 'Sprint 14 Deadline Conflict');
+    const targetReq = leaveRequests.find(r => r.id === reqId);
 
-    if (type === 'Approved') {
-      updateLeaveRequestStage(reqId, 'PM', 'Approved', activeEmployee?.fullName || 'Project Manager', reasonText);
-    } else {
-      updateLeaveRequestStage(reqId, 'PM', 'Rejected', activeEmployee?.fullName || 'Project Manager', reasonText);
-    }
+    updateLeaveRequestStage(
+      reqId,
+      'PM',
+      type === 'Approved' ? 'Approved' : 'Rejected',
+      activeEmployee?.fullName || 'Project Manager',
+      reasonText,
+      targetReq?.employeeId,
+      targetReq?.startDate,
+      targetReq?.endDate
+    );
   };
 
   // Calculate current week's Monday through Friday dates
@@ -153,12 +145,16 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
   const pendingTeamRequests = leaveRequests.filter(r => {
     if (r.status !== 'Pending') return false;
-
-    // PM stage must be pending for PM to review
+    if (r.pmStatus !== 'Pending' && r.pmStatus !== undefined) return false;
     if (r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') return false;
 
     // Self-request check: PM cannot approve/reject their own request!
-    if (r.employeeId === activeEmployee?.id || r.employeeId === activeEmployee?.employeeId || r.employeeName === activeEmployee?.fullName) {
+    if (
+      r.employeeUid === activeEmployee?.uid ||
+      r.employeeId === activeEmployee?.id ||
+      r.employeeId === activeEmployee?.employeeId ||
+      (r.employeeName && activeEmployee?.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())
+    ) {
       return false;
     }
 
@@ -166,15 +162,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     const isHrOrPmEmployee = (r.department || '').toLowerCase().includes('hr') ||
       r.employeeRole === 'HR_ADMIN' ||
       r.employeeRole === 'PROJECT_MANAGER' ||
-      r.employeeRole === 'SUPER_ADMIN' ||
-      (() => {
-        const emp = employees.find(e => e.id === r.employeeId || e.employeeId === r.employeeId || e.fullName === r.employeeName);
-        return emp?.department?.toLowerCase().includes('hr') || emp?.role === 'HR_ADMIN' || emp?.role === 'PROJECT_MANAGER' || emp?.role === 'SUPER_ADMIN';
-      })();
+      r.employeeRole === 'SUPER_ADMIN';
 
-    if (isHrOrPmEmployee) return false;
-
-    return r.pmStatus === 'Pending' || !r.pmStatus;
+    return !isHrOrPmEmployee;
   });
 
   return (
@@ -234,7 +224,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
             </div>
           ) : (
             pendingTeamRequests.map(req => {
-              const recStatus = recommendations[req.id] || req.pmStatus;
+              const recStatus = req.pmRecommendation || req.pmStatus;
 
               return (
                 <div key={req.id} className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:border-slate-700">

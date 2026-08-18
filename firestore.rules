@@ -2,83 +2,157 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Safety Helper Functions
+    // ── Global RBAC Helpers ──
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128;
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Default Deny Catch-All
+    function getRole() {
+      return getUserDoc().role;
+    }
+
+    function getEmployeeId() {
+      return getUserDoc().employeeId;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && getRole() == 'SUPER_ADMIN';
+    }
+
+    function isCeo() {
+      return isSignedIn() && (getRole() == 'CEO' || (isSuperAdmin() && getUserDoc().executiveRole == 'CEO'));
+    }
+
+    function isCto() {
+      return isSignedIn() && (getRole() == 'CTO' || (isSuperAdmin() && getUserDoc().executiveRole == 'CTO'));
+    }
+
+    function isHrAdmin() {
+      return isSignedIn() && (getRole() == 'HR_ADMIN' || isSuperAdmin());
+    }
+
+    function isProjectManager() {
+      return isSignedIn() && (getRole() == 'PROJECT_MANAGER' || isSuperAdmin());
+    }
+
+    // Default Deny All
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Users collection
+    // ── 1. Users Collection ──
     match /users/{userId} {
-      allow read: if true; // Temporarily allow public read
-      allow create, update: if isSignedIn() && isValidId(userId);
-      allow delete: if isSignedIn();
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId || isHrAdmin() || isSuperAdmin()
+      );
+      // Self-creation locks role strictly to 'EMPLOYEE'. Only SuperAdmin can provision privileged roles.
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && request.resource.data.role == 'EMPLOYEE') ||
+        isSuperAdmin()
+      );
+      // Self-update cannot modify role, uid, or employeeId
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (
+          request.auth.uid == userId &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'executiveRole', 'uid', 'employeeId'])
+        )
+      );
+      allow delete: if isSuperAdmin();
     }
 
-    // Employees collection
+    // ── 2. Employees Directory ──
     match /employees/{employeeId} {
-      allow read: if true; 
-      allow create, update: if isValidId(employeeId);
-      allow delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isHrAdmin() || isSuperAdmin();
+      allow update: if isHrAdmin() || isSuperAdmin() || (
+        isSignedIn() && request.auth.uid == resource.data.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio', 'skills', 'currentAddress', 'phone', 'preferredShift', 'linkedinUrl', 'updatedAt'])
+      );
+      allow delete: if isSuperAdmin();
+
+      // Date lock subcollection for overlapping leave prevention
+      match /leaveLocks/{lockDate} {
+        allow read: if isSignedIn();
+        allow write, delete: if isSignedIn();
+      }
     }
 
-    // Attendance records collection
+    // ── 3. Attendance Records ──
     match /attendance/{recordId} {
-      allow read: if true; 
-      allow create, update: if isValidId(recordId);
-      allow delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSuperAdmin();
     }
 
-    // Audit logs collection
-    match /auditLogs/{logId} {
-      allow read: if true; 
-      allow create: if isValidId(logId);
-      allow update, delete: if false;
-    }
-
-    // Leave requests collection
+    // ── 4. Leave & WFH Requests Collection ──
     match /leaveRequests/{requestId} {
-      allow read, create, update, delete: if true;
+      
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+        request.resource.data.status == 'Pending' &&
+        request.resource.data.startDate is string &&
+        request.resource.data.endDate is string &&
+        request.resource.data.type in ['Leave', 'WFH'];
+
+      allow update: if isSignedIn();
+      allow delete: if isSuperAdmin();
     }
 
-    // Notifications collection
+    // ── 5. Notifications Collection ──
     match /notifications/{notifId} {
-      allow read, create, update, delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isHrAdmin() || isSuperAdmin();
     }
 
-    // Settings collection
+    // ── 6. FCM Tokens Collection ──
+    match /fcmTokens/{tokenId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // ── 7. Settings & Configuration ──
     match /settings/{settingId} {
-      allow read: if true; 
-      allow create, update: if true;
-      allow delete: if false;
+      allow read: if isSignedIn();
+      allow update, create: if isSignedIn();
+      allow delete: if isSuperAdmin();
     }
 
-    // WorkZones collection
-    match /workZones/{zoneId} {
-      allow read, create, update, delete: if true;
-    }
-
-    // Projects collection
-    match /projects/{projectId} {
-      allow read, create, update, delete: if true;
-    }
-
-    // Tasks collection
-    match /tasks/{taskId} {
-      allow read, create, update, delete: if true;
-    }
-
-    // Company configuration collection
     match /companyConfig/{configId} {
-      allow read, create, update, delete: if true;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // ── 8. Workplace Rules ──
+    match /companyRules/{ruleId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // ── 9. PM Projects & Kanban Tasks ──
+    match /projects/{projectId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /projectTasks/{taskId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // ── 10. Audit Logs (Immutable Append-Only) ──
+    match /auditLogs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false; // Append-only audit trail
     }
   }
 }
