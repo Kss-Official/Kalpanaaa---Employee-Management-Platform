@@ -190,10 +190,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     (a.employeeId === activeEmployee?.id || a.employeeId === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.id) && 
     a.date === todayStr
   );
-  // Prioritize record with active ongoing break, then checked-in record, then latest
-  const todayRecord = todayRecords.find(r => r.breaks?.some(b => !b.endAt && !(b as any).endTime)) || 
-                      todayRecords.find(r => r.checkInAt) || 
-                      todayRecords[0];
+  // Sort by latest updated record first
+  const sortedTodayRecords = [...todayRecords].sort((a, b) => {
+    const timeA = new Date((a as any).updatedAt || a.checkInAt || (a as any).createdAt || 0).getTime();
+    const timeB = new Date((b as any).updatedAt || b.checkInAt || (b as any).createdAt || 0).getTime();
+    return timeB - timeA;
+  });
+  const todayRecord = sortedTodayRecords[0];
 
   const rawHistory = attendance.filter(a => 
     a.employeeId === activeEmployee?.id || 
@@ -216,11 +219,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Sync activeBreak from today's record (Fixes E36 Break Type Aliasing & Latest Break Selection)
   useEffect(() => {
     if (todayRecord?.breaks && todayRecord.breaks.length > 0) {
-      // Find the LATEST active ongoing break
-      const ongoing = todayRecord.breaks.slice().reverse().find(b => !b.endAt && !(b as any).endTime);
-      if (ongoing) {
-        const normalizedType = normalizeBreakType(ongoing.type);
-        setActiveBreak({ type: normalizedType, startAt: ongoing.startAt || (ongoing as any).startTime });
+      // Sort breaks by start time ascending to find the most recent chronological entry
+      const sortedBreaks = [...todayRecord.breaks].sort((a, b) => 
+        new Date(a.startAt || (a as any).startTime || 0).getTime() - new Date(b.startAt || (b as any).startTime || 0).getTime()
+      );
+      const lastBreak = sortedBreaks[sortedBreaks.length - 1];
+      if (lastBreak && !lastBreak.endAt && !(lastBreak as any).endTime) {
+        const normalizedType = normalizeBreakType(lastBreak.type);
+        setActiveBreak({ type: normalizedType, startAt: lastBreak.startAt || (lastBreak as any).startTime });
         return;
       }
     }
@@ -659,7 +665,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const handleStartBreak = (type: BreakType) => {
     triggerHaptic('medium');
-    if (!todayRecord || activeBreak) return;
+    if (!todayRecord) return;
 
     const startAt = new Date().toISOString();
     const existingBreaks = (todayRecord.breaks || []).map(b => {

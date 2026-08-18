@@ -205,7 +205,7 @@ const MainLayout: React.FC = () => {
           />
 
           <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto overscroll-y-contain h-full bg-slate-950">
-            {!currentTab.startsWith('emp_') && currentTab !== 'notifications' && (role === 'EMPLOYEE' || activeEmployee?.role === 'EMPLOYEE') ? (
+            {!currentTab.startsWith('emp_') && currentTab !== 'notifications' && currentTab !== 'company_rules' && (role === 'EMPLOYEE' || activeEmployee?.role === 'EMPLOYEE') ? (
               <div className="bg-slate-900 border border-rose-900/50 rounded-3xl p-8 max-w-2xl mx-auto my-12 text-center space-y-5 shadow-2xl">
                 <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
                   <ShieldCheck className="w-8 h-8" />

@@ -1095,16 +1095,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         unsubNotifs = onSnapshot(collection(db, 'notifications'), (snapshot) => {
+          const fetched: KssNotification[] = [];
           if (!snapshot.empty) {
-            const fetched: KssNotification[] = [];
             snapshot.forEach(docSnap => {
               const data = docSnap.data();
               const createdAtIso = data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (typeof data.createdAt === 'string' ? data.createdAt : new Date().toISOString());
               fetched.push({ id: docSnap.id, ...data, createdAt: createdAtIso } as KssNotification);
             });
             fetched.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-            setNotifications(fetched);
           }
+          setNotifications(fetched);
         }, () => {
           // Silent fallback for notification listener
         });
