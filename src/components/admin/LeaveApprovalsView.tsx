@@ -11,6 +11,7 @@ export const LeaveApprovalsView: React.FC = () => {
 
   const effectiveRole = activeEmployee?.role || role || 'SUPER_ADMIN';
   const isPm = effectiveRole === 'PROJECT_MANAGER';
+  const isHr = effectiveRole === 'HR_ADMIN';
   const todayStr = new Date().toISOString().split('T')[0];
   const [wfhDateInput, setWfhDateInput] = useState(todayStr);
   const [wfhFeedback, setWfhFeedback] = useState<{ success: boolean; message: string } | null>(null);
