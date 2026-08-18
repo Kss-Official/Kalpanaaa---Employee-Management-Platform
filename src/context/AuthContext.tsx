@@ -1062,21 +1062,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
 
-          setLeaveRequests(prev => {
+          setLeaveRequests(() => {
             const map = new Map<string, LeaveRequest>();
             // 1. Initial / default leaves
             INITIAL_LEAVE_REQUESTS.forEach(r => map.set(r.id, r));
-            // 2. Previously cached local leaves
-            const saved = localStorage.getItem('kss_v1_leave_requests');
-            if (saved) {
-              try {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed)) parsed.forEach((r: any) => map.set(r.id, r));
-              } catch {}
-            }
-            // 3. Current active state
-            prev.forEach(r => map.set(r.id, r));
-            // 4. Authoritative real-time Firestore submissions (overwrites stale local data)
+            // 2. Authoritative real-time Firestore submissions
             fetched.forEach(r => map.set(r.id, r));
 
             const merged = Array.from(map.values());
