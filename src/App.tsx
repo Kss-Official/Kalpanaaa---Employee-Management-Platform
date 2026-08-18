@@ -146,7 +146,7 @@ const MainLayout: React.FC = () => {
         return 'emp_dashboard';
       }
     } else if (roleToUse === 'PROJECT_MANAGER') {
-      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals'];
+      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees'];
       if (!allowedPMTabs.includes(tab) || tab.startsWith('emp_')) {
         return 'pm_dashboard';
       }
@@ -267,7 +267,18 @@ const MainLayout: React.FC = () => {
                   </div>
                 )}
 
-                {currentTab === 'employees' && <EmployeeTeamDirectory />}
+                {currentTab === 'employees' && (
+                  (effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'HR_ADMIN') ? (
+                    <EmployeeDirectory
+                      onSelectEmployee={emp => setSelectedEmpProfile(emp)}
+                      onOpenAddModal={() => setIsAddModalOpen(true)}
+                      onOpenEditModal={emp => setEditingEmployee(emp)}
+                      onOpenIdCardModal={emp => setIdCardEmployee(emp)}
+                    />
+                  ) : (
+                    <EmployeeTeamDirectory />
+                  )
+                )}
 
                 {currentTab === 'attendance' && (
                   <AttendanceManagement 

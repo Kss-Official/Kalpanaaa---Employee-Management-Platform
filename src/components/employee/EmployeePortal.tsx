@@ -656,6 +656,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const startAt = new Date().toISOString();
     const newBreak: BreakEntry = { type, startAt, endAt: null, durationMinutes: 0 };
     const existingBreaks = todayRecord.breaks || [];
+
+    // Immediately set active break locally for 0ms visual feedback
+    setActiveBreak({ type, startAt });
+
     updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, newBreak] });
     
     if (activeEmployee) {
@@ -663,7 +667,18 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     }
     
     if (type !== 'Geo-Fence Auto Break') {
-      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ☕` });
+      const emojiMap: Record<string, string> = {
+        'Tea Break': '🍵',
+        'Meal Break': '🍱',
+        'Lunch Break': '🍽️',
+        'Team Huddle': '👥',
+        'Team Meeting': '📅',
+        'Attainment / Training': '🎓',
+        'Activity': '⚡',
+        'Geo-Fence Auto Break': '📍'
+      };
+      const emoji = emojiMap[type] || '⚡';
+      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ${emoji}` });
     }
   };
 
@@ -1217,17 +1232,21 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     </span>
                   </div>
                   {/* Active Break Timer */}
-                  {activeBreak && (
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400 flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-amber-400" />
-                        <span className="text-amber-400">{activeBreak.type}</span>
-                      </span>
-                      <span className="font-mono font-bold text-amber-300 bg-amber-500/10 px-2.5 py-0.5 rounded-md border border-amber-500/20 text-sm animate-pulse">
-                        {String(Math.floor(breakElapsedSec / 3600)).padStart(2, '0')}h {String(Math.floor((breakElapsedSec % 3600) / 60)).padStart(2, '0')}m {String(breakElapsedSec % 60).padStart(2, '0')}s
-                      </span>
-                    </div>
-                  )}
+                  {activeBreak && (() => {
+                    const cfg = getBreakColorConfig(activeBreak.type);
+                    const BreakIcon = cfg.icon;
+                    return (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400 flex items-center gap-1.5">
+                          <BreakIcon className={`w-3.5 h-3.5 ${cfg.iconClass}`} />
+                          <span className={cfg.iconClass}>{activeBreak.type}</span>
+                        </span>
+                        <span className={`font-mono font-bold px-2.5 py-0.5 rounded-md border text-sm animate-pulse ${cfg.badgeBg}`}>
+                          {String(Math.floor(breakElapsedSec / 3600)).padStart(2, '0')}h {String(Math.floor((breakElapsedSec % 3600) / 60)).padStart(2, '0')}m {String(breakElapsedSec % 60).padStart(2, '0')}s
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Live Productivity & Multi-Color Shift Distribution Meter */}
                   {(() => {
@@ -1346,28 +1365,39 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
           {/* Break & Activity Management */}
           {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
             <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 space-y-4 shadow-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center">
-                    <Coffee className="w-5 h-5 text-blue-400" />
+                    {activeBreak ? (() => {
+                      const cfg = getBreakColorConfig(activeBreak.type);
+                      const Icon = cfg.icon;
+                      return <Icon className={`w-5 h-5 ${cfg.iconClass}`} />;
+                    })() : (
+                      <Zap className="w-5 h-5 text-blue-400" />
+                    )}
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-white">Shift Activity & Break Management</h4>
+                    <h4 className="text-sm font-bold text-white">
+                      {activeBreak ? `${activeBreak.type} in Progress` : 'Shift Activity & Break Management'}
+                    </h4>
                     <p className="text-[11px] text-slate-400">Total break / activity time today: <span className="font-mono text-slate-300 font-bold">{todayRecord?.totalBreakMinutes || 0}m</span></p>
                   </div>
                 </div>
 
-                {activeBreak && (
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <span className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider">{activeBreak.type} Active</span>
-                      <span className="text-base font-mono font-bold text-white">{formatBreakTime(breakElapsedSec)}</span>
+                {activeBreak && (() => {
+                  const cfg = getBreakColorConfig(activeBreak.type);
+                  return (
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <span className={`block text-[10px] font-bold uppercase tracking-wider ${cfg.iconClass}`}>{activeBreak.type} Active</span>
+                        <span className="text-base font-mono font-bold text-white">{formatBreakTime(breakElapsedSec)}</span>
+                      </div>
+                      <button onClick={handleEndBreak} className={`px-4 py-2 ${cfg.btnBg} font-black text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-md`}>
+                        <StopCircle className="w-4 h-4" /> End {activeBreak.type}
+                      </button>
                     </div>
-                    <button onClick={handleEndBreak} className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-md">
-                      <StopCircle className="w-4 h-4" /> End Activity
-                    </button>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               {!activeBreak && (

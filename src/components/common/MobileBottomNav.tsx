@@ -22,15 +22,24 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   setActiveTab,
   onOpenMobileMenu
 }) => {
-  const { role } = useAuth();
+  const { role, activeEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
-  const isAdmin = role === 'SUPER_ADMIN' || role === 'HR_ADMIN';
+  const effectiveRole = activeEmployee?.role || role;
+  const isAdmin = effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'HR_ADMIN';
+  const isPm = effectiveRole === 'PROJECT_MANAGER';
 
   const adminTabs = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'employees', label: 'Directory', icon: Users },
     { id: 'attendance', label: 'Attendance', icon: CalendarCheck2 },
     { id: 'my_id_card', label: 'ID Card', icon: CreditCard },
+  ];
+
+  const pmTabs = [
+    { id: 'pm_dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'employees', label: 'Directory', icon: Users },
+    { id: 'pm_projects', label: 'Projects', icon: CalendarCheck2 },
+    { id: 'pm_team', label: 'Performance', icon: Users },
   ];
 
   const employeeTabs = [
@@ -40,7 +49,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     { id: 'emp_qr', label: 'ID Pass', icon: CreditCard },
   ];
 
-  const tabs = isAdmin ? adminTabs : employeeTabs;
+  const tabs = isAdmin ? adminTabs : isPm ? pmTabs : employeeTabs;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] backdrop-blur-xl pb-[env(safe-area-inset-bottom)] md:hidden shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
