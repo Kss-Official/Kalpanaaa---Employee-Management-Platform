@@ -16,7 +16,8 @@ import {
   LogIn,
   LogOut,
   Coffee,
-  Banknote
+  Banknote,
+  ShieldCheck
 } from 'lucide-react';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 

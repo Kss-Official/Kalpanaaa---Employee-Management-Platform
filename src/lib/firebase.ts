@@ -3,6 +3,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-ch
 import { 
   getAuth, 
   signInWithEmailAndPassword, 
+  signInAnonymously,
   signOut, 
   sendPasswordResetEmail,
   onAuthStateChanged,
