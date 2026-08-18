@@ -3,6 +3,8 @@ import { useAuth } from '../../context/AuthContext';
 import { Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useHaptic } from '../../hooks/useHaptic';
+import { isEmployeeMatch } from '../../lib/attendanceEngine';
+
 export const EmployeeLeaveTab: React.FC = () => {
   const { activeEmployee, leaveRequests, submitLeaveRequest, cancelLeaveRequest } = useAuth();
   const { triggerHaptic } = useHaptic();
@@ -19,9 +21,10 @@ export const EmployeeLeaveTab: React.FC = () => {
   const todayStr = new Date().toISOString().split('T')[0];
 
   const myRequests = leaveRequests.filter(r => 
-    r.employeeId === activeEmployee?.employeeId || 
+    isEmployeeMatch(activeEmployee, r.employeeId) || 
     r.employeeId === activeEmployee?.id || 
-    (r.employeeName && activeEmployee?.fullName && r.employeeName.toLowerCase() === activeEmployee.fullName.toLowerCase())
+    r.employeeId === activeEmployee?.employeeId || 
+    (r.employeeName && activeEmployee?.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())
   );
 
   const filteredMyRequests = myRequests.filter(r => {

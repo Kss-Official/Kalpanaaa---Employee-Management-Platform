@@ -37,3 +37,5 @@ files generated
 10:33:47 AM [vite] (client) page reload dev_log.txt
 10:36:58 AM [vite] (client) hmr update /src/context/AuthContext.tsx, /src/index.css
 10:36:58 AM [vite] (client) page reload dev_log.txt
+12:03:56 PM [vite] (client) page reload package.json
+12:03:56 PM [vite] (client) page reload dev_log.txt
