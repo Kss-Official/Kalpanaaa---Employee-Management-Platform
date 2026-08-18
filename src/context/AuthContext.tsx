@@ -1047,30 +1047,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'attendance');
         });
 
-        // Subscribe to leave requests
+        // Subscribe to leave requests with real-time cross-device sync
         unsubLeaveReqs = onSnapshot(collection(db, 'leaveRequests'), (snapshot) => {
-          if (snapshot.empty) return;
-
           const fetched: LeaveRequest[] = [];
-          snapshot.forEach(docSnap => {
-            const raw = { id: docSnap.id, ...docSnap.data() } as LeaveRequest;
-            const pmStatus = raw.pmStatus || 'Pending';
-            const ceoStatus = raw.ceoStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM');
-            const ctoStatus = raw.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
-            let status: 'Pending' | 'Approved' | 'Rejected' = raw.status || 'Pending';
-            if (pmStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || raw.status === 'Rejected') {
-              status = 'Rejected';
-            } else if (pmStatus === 'Approved' && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
-              status = 'Approved';
-            } else {
-              status = 'Pending';
-            }
-            fetched.push({ ...raw, pmStatus, ceoStatus, ctoStatus, status });
-          });
+          if (!snapshot.empty) {
+            snapshot.forEach(docSnap => {
+              const raw = { id: docSnap.id, ...docSnap.data() } as LeaveRequest;
+              const pmStatus = raw.pmStatus || 'Pending';
+              const ceoStatus = raw.ceoStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM');
+              const ctoStatus = raw.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
+              let status: 'Pending' | 'Approved' | 'Rejected' = raw.status || 'Pending';
+              if (pmStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || raw.status === 'Rejected') {
+                status = 'Rejected';
+              } else if (pmStatus === 'Approved' && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
+                status = 'Approved';
+              } else {
+                status = 'Pending';
+              }
+              fetched.push({ ...raw, pmStatus, ceoStatus, ctoStatus, status });
+            });
+          }
 
           setLeaveRequests(prev => {
             const map = new Map<string, LeaveRequest>();
-            // Read local storage to preserve newly submitted requests
+            // 1. Initial / default leaves
+            INITIAL_LEAVE_REQUESTS.forEach(r => map.set(r.id, r));
+            // 2. Previously cached local leaves
             const saved = localStorage.getItem('kss_v1_leave_requests');
             if (saved) {
               try {
@@ -1078,8 +1080,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (Array.isArray(parsed)) parsed.forEach((r: any) => map.set(r.id, r));
               } catch {}
             }
+            // 3. Current active state
             prev.forEach(r => map.set(r.id, r));
+            // 4. Authoritative real-time Firestore submissions (overwrites stale local data)
             fetched.forEach(r => map.set(r.id, r));
+
             const merged = Array.from(map.values());
             merged.sort((a, b) => {
               const timeA = new Date(a.requestDate || (a as any).createdAt || a.startDate || 0).getTime() || 0;
