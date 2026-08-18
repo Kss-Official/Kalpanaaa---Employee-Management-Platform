@@ -8,10 +8,13 @@ import {
   QrCode,
   Menu,
   X,
-  Download
+  Download,
+  LogIn,
+  Coffee
 } from 'lucide-react';
 import { UserRole } from '../../types';
 import { NotificationBell } from './NotificationBell';
+import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 
 interface HeaderProps {
   onOpenScanner?: () => void;
@@ -23,9 +26,95 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar, 
   isMobileSidebarOpen,
 }) => {
-  const { activeEmployee, role, logout, settings } = useAuth();
+  const { activeEmployee, attendance, checkIn, checkOut, startBreak, endBreak, role, logout, settings } = useAuth();
   const [timeStr, setTimeStr] = useState('');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [headerActionLoading, setHeaderActionLoading] = useState(false);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const myTodayRecord = activeEmployee 
+    ? attendance.find(a => (a.employeeId === activeEmployee.id || a.employeeCode === activeEmployee.employeeId) && a.date === todayStr) 
+    : null;
+
+  const isCheckedIn = !!myTodayRecord?.checkInAt && !myTodayRecord?.checkOutAt;
+  const activeBreak = myTodayRecord?.breaks?.find(b => !b.endAt && !b.endTime);
+
+  const [isHeaderFaceModalOpen, setIsHeaderFaceModalOpen] = useState(false);
+
+  const handleHeaderCheckIn = async () => {
+    if (!activeEmployee) return;
+    setIsHeaderFaceModalOpen(true);
+  };
+
+  const executeHeaderCheckInProcess = async () => {
+    setHeaderActionLoading(true);
+
+    let resolved = false;
+    const runCheckIn = (lat?: number, lon?: number, accuracy: number = 10) => {
+      if (resolved) return;
+      resolved = true;
+      checkIn(activeEmployee.id, lat, lon, 'WEB_APP', accuracy).finally(() => setHeaderActionLoading(false));
+    };
+
+    if (navigator.geolocation) {
+      const fallbackTimer = setTimeout(() => runCheckIn(), 1200);
+
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          clearTimeout(fallbackTimer);
+          runCheckIn(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+        },
+        () => {
+          clearTimeout(fallbackTimer);
+          runCheckIn();
+        },
+        { enableHighAccuracy: false, timeout: 1200 }
+      );
+    } else {
+      runCheckIn();
+    }
+  };
+
+  const handleHeaderCheckOut = async () => {
+    if (!activeEmployee) return;
+    setHeaderActionLoading(true);
+
+    let resolved = false;
+    const runCheckOut = (lat?: number, lon?: number) => {
+      if (resolved) return;
+      resolved = true;
+      checkOut(activeEmployee.id, lat, lon).finally(() => setHeaderActionLoading(false));
+    };
+
+    if (navigator.geolocation) {
+      const fallbackTimer = setTimeout(() => runCheckOut(), 1200);
+
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          clearTimeout(fallbackTimer);
+          runCheckOut(pos.coords.latitude, pos.coords.longitude);
+        },
+        () => {
+          clearTimeout(fallbackTimer);
+          runCheckOut();
+        },
+        { enableHighAccuracy: false, timeout: 1200 }
+      );
+    } else {
+      runCheckOut();
+    }
+  };
+
+  const handleHeaderBreakToggle = async () => {
+    if (!activeEmployee) return;
+    setHeaderActionLoading(true);
+    if (activeBreak) {
+      await endBreak(activeEmployee.id);
+    } else {
+      await startBreak(activeEmployee.id, 'Tea Break');
+    }
+    setHeaderActionLoading(false);
+  };
 
   useEffect(() => {
     const updateClock = () => {
@@ -69,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const getRoleLabel = (r: UserRole, designation?: string) => {
-    if (r === 'SUPER_ADMIN') return designation?.includes('CEO') ? 'CEO' : 'CTO';
+    if (r === 'SUPER_ADMIN') return designation?.includes('CEO') ? 'CEO' : 'CTO/MD';
     if (r === 'HR_ADMIN') return 'HR Lead';
     if (r === 'PROJECT_MANAGER') return 'PM';
     return 'Employee';
@@ -121,6 +210,12 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 font-mono">
           <Clock className="w-3 h-3 text-slate-500" />
           <span className="font-bold text-white">{timeStr}</span>
+        </div>
+
+        {/* Live Sync Active Badge */}
+        <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-bold text-emerald-400 shadow-sm">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Live Sync Active</span>
         </div>
 
         {/* Notification Bell — visible for all authenticated roles */}
@@ -197,6 +292,22 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+
+      {/* Mandatory Face Biometric Verification Modal for Header Check-Ins */}
+      {activeEmployee && (
+        <FaceCaptureModal
+          isOpen={isHeaderFaceModalOpen}
+          onClose={() => setIsHeaderFaceModalOpen(false)}
+          onSuccess={() => {
+            setIsHeaderFaceModalOpen(false);
+            executeHeaderCheckInProcess();
+          }}
+          employeeName={activeEmployee.fullName}
+          employeeId={activeEmployee.id}
+          profilePhotoUrl={activeEmployee.profilePhotoUrl}
+          cloudDescriptor={activeEmployee.faceDescriptor}
+        />
+      )}
     </header>
   );
 };

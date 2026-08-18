@@ -6,7 +6,7 @@ import {
   Download, RotateCcw, Shield, Clock
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { generateEmployeeQrToken, isRecordForEmployee } from '../../lib/attendanceEngine';
+import { generateEmployeeQrToken } from '../../lib/attendanceEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { triggerHaptic } from '../../hooks/useHaptic';
 import { animations } from '../../lib/animations';
@@ -25,7 +25,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   const [activeTab, setActiveTab] = useState<'details' | 'qr' | 'attendance' | 'activity'>('details');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
-  const empAttendance = attendance.filter(a => isRecordForEmployee(a, employee));
+  const empAttendance = attendance.filter(a => a.employeeId === employee.id || a.employeeCode === employee.employeeId);
   const empLogs = auditLogs.filter(l => l.target.includes(employee.employeeId) || l.actorId === employee.id);
 
   useEffect(() => {
@@ -95,14 +95,9 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
 
           {/* Sticky Header Hero */}
           <div className="bg-[var(--bg-tertiary)] p-5 sm:p-6 pt-10 sm:pt-6 relative border-b border-[var(--border-subtle)] shrink-0 z-10">
-            <button
-              onClick={() => { triggerHaptic('light'); onClose(); }}
-              className={`absolute top-3 right-3 sm:top-4 sm:right-4 z-30 p-2 text-[var(--text-tertiary)] hover:text-white hover:bg-[var(--bg-elevated)] rounded-full transition-colors cursor-pointer outline-none ${animations.tap}`}
-            >
-              <X className="w-5 h-5" />
-            </button>
 
-            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 pr-8 sm:pr-0">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
+              {/* Avatar */}
               <div className="relative shrink-0">
                 <img
                   src={employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(employee.fullName)}&background=111118&color=fff`}
@@ -111,6 +106,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                 />
               </div>
 
+              {/* Name + meta — takes remaining space */}
               <div className="text-center sm:text-left flex-1 min-w-0">
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-2">
                   <span className="font-mono text-[11px] font-bold bg-[var(--bg-elevated)] text-[var(--text-secondary)] px-2.5 py-0.5 rounded-lg border border-[var(--border-subtle)]">
@@ -137,18 +133,27 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                 </p>
               </div>
 
-              {/* Quick Actions */}
-              <div className="flex sm:flex-col items-center justify-center gap-2.5 w-full sm:w-auto pt-2 sm:pt-0">
+              {/* Right column: Close X on top, then ID Badge + Edit Profile */}
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                {/* Close button — top-right */}
+                <button
+                  onClick={() => { triggerHaptic('light'); onClose(); }}
+                  className={`self-end p-2 text-[var(--text-tertiary)] hover:text-white hover:bg-[var(--bg-elevated)] rounded-full transition-colors cursor-pointer outline-none ${animations.tap}`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                {/* Action Buttons */}
                 <button
                   onClick={() => { triggerHaptic('light'); onOpenIdCard(employee); }}
-                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--bg-secondary)] hover:bg-[var(--border-subtle)] text-[var(--text-primary)] text-xs font-bold rounded-xl border border-[var(--border-subtle)] cursor-pointer outline-none ${animations.tap}`}
+                  className={`flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--bg-secondary)] hover:bg-[var(--border-subtle)] text-[var(--text-primary)] text-xs font-bold rounded-xl border border-[var(--border-subtle)] cursor-pointer outline-none w-full ${animations.tap}`}
                 >
                   <CreditCard className="w-4 h-4" />
                   ID Badge
                 </button>
                 <button
                   onClick={() => { triggerHaptic('light'); onOpenEdit(employee); }}
-                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--accent-blue)] hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer outline-none shadow-lg shadow-blue-500/20 ${animations.tap}`}
+                  className={`flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--accent-blue)] hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer outline-none shadow-lg shadow-blue-500/20 w-full ${animations.tap}`}
                 >
                   Edit Profile
                 </button>
@@ -327,20 +332,12 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                       <div className="p-2 bg-[var(--accent-blue)]/10 rounded-lg text-[var(--accent-blue)] shrink-0">
                         <Shield className="w-4 h-4" />
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
                           <span className="font-bold text-[var(--text-primary)] text-xs">{log.action}</span>
-                          {log.category && (
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-[var(--accent-blue)] bg-[var(--accent-blue)]/10 border border-[var(--accent-blue)]/20 px-1.5 py-0.5 rounded-md">
-                              {log.category}
-                            </span>
-                          )}
-                          <span className="text-[10px] text-[var(--text-tertiary)] ml-auto">{new Date(log.timestamp).toLocaleString()}</span>
+                          <span className="text-[10px] text-[var(--text-tertiary)]">{new Date(log.timestamp).toLocaleString()}</span>
                         </div>
                         <p className="text-xs text-[var(--text-secondary)]">{log.details}</p>
-                        {log.ipAddress && (
-                          <p className="text-[10px] text-[var(--text-tertiary)] mt-1 font-mono">IP: {log.ipAddress}</p>
-                        )}
                       </div>
                     </div>
                   ))

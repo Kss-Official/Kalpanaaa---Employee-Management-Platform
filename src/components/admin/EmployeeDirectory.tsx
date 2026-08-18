@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { AllEmployeeBarcodesView } from './AllEmployeeBarcodesView';
 import { Employee, EmployeeStatus } from '../../types';
 import { motion } from 'framer-motion';
+import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { 
   Search, 
   Filter, 
@@ -19,7 +20,8 @@ import {
   LayoutGrid, 
   List,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  Calendar
 } from 'lucide-react';
 
 interface EmployeeDirectoryProps {
@@ -42,6 +44,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
   const [showPrintAllBarcodes, setShowPrintAllBarcodes] = useState(false);
+  const [attendanceModalEmp, setAttendanceModalEmp] = useState<Employee | null>(null);
 
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
@@ -74,89 +77,93 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
       {/* Top Header Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">Employee Directory</h1>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <h1 className="text-lg sm:text-2xl font-black text-white tracking-tight">Personnel Directory</h1>
+          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
             Manage corporate workforce records, employee IDs, and profiles ({filteredEmployees.length} total)
           </p>
         </div>
 
         {isAdmin && (
-          <div className="flex items-center gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full md:w-auto shrink-0">
             <button
               onClick={() => setShowPrintAllBarcodes(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md w-full"
             >
               <CreditCard className="w-4 h-4" />
-              Print All Barcodes
+              <span>Print All Barcodes</span>
             </button>
             <button
               onClick={onOpenAddModal}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40 w-full"
             >
               <Plus className="w-4 h-4" />
-              Add New Employee
+              <span>Add New Employee</span>
             </button>
           </div>
         )}
       </div>
 
       {/* Filters Bar */}
-      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
+      <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-4 shadow-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3.5 backdrop-blur-md">
         <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" strokeWidth={2.5} />
+          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" strokeWidth={2.5} />
           <input
             type="text"
             placeholder="Search name, ID, email..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2.5 text-xs bg-slate-950/50 border border-slate-800/60 rounded-xl focus:outline-none focus:border-blue-500/50 text-white placeholder-slate-500 transition-colors"
+            className="w-full pl-9 pr-4 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl focus:outline-none focus:border-blue-500 text-white placeholder-slate-500 transition-colors"
           />
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto">
-          {/* Department Filter */}
-          <select
-            value={deptFilter}
-            onChange={e => setDeptFilter(e.target.value)}
-            className="px-4 py-2.5 text-xs bg-slate-950/50 border border-slate-800/60 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500/50 cursor-pointer"
-          >
-            <option value="ALL">All Departments</option>
-            {departments.map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
+          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+            {/* Department Filter */}
+            <select
+              value={deptFilter}
+              onChange={e => setDeptFilter(e.target.value)}
+              className="px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500 cursor-pointer w-full"
+            >
+              <option value="ALL">All Departments</option>
+              {departments.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
 
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 text-xs bg-slate-950/50 border border-slate-800/60 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500/50 cursor-pointer"
-          >
-            <option value="ALL">All Statuses</option>
-            <option value="Active">Active</option>
-            <option value="On Leave">On Leave</option>
-            <option value="Terminated">Terminated</option>
-          </select>
+            {/* Status Filter */}
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className="px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500 cursor-pointer w-full"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="On Leave">On Leave</option>
+              <option value="Terminated">Terminated</option>
+            </select>
+          </div>
 
           {/* Grid vs Table View Toggle */}
-          <div className="flex items-center bg-slate-950/50 p-1 rounded-xl border border-slate-800/60">
+          <div className="flex items-center justify-center bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
             <button
               onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${viewMode === 'table' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 text-xs font-bold ${viewMode === 'table' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
               title="Table View"
             >
               <List className="w-4 h-4" />
+              <span className="sm:hidden">List</span>
             </button>
             <button
               onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer ${viewMode === 'grid' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 text-xs font-bold ${viewMode === 'grid' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
               title="Grid View"
             >
               <LayoutGrid className="w-4 h-4" />
+              <span className="sm:hidden">Grid</span>
             </button>
           </div>
         </div>
@@ -199,7 +206,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                     hidden: { opacity: 0, x: -10 },
                     show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
                   }}
-                  className="relative overflow-hidden bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-subtle)] p-4 shadow-[var(--shadow-sm)]"
+                  className="relative overflow-hidden bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-subtle)] p-5 shadow-[var(--shadow-sm)] h-full flex flex-col justify-between"
                 >
                   <div className="absolute top-0 left-0 right-0 h-[40px] opacity-20 pointer-events-none" style={{ background: 'var(--gradient-card)' }} />
                   
@@ -361,6 +368,13 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                           {isAdmin && (
                             <>
                               <button
+                                onClick={() => setAttendanceModalEmp(emp)}
+                                className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                                title="View 30-Day Monthly Attendance History"
+                              >
+                                <Calendar className="w-4 h-4 text-blue-400" />
+                              </button>
+                              <button
                                 onClick={() => onOpenIdCardModal(emp)}
                                 className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
                                 title="Print / Export ID Badge Card"
@@ -428,26 +442,41 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                 </div>
               </div>
 
-              {isAdmin && (
-                <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onOpenIdCardModal(emp); }}
-                    className="text-[10px] font-bold text-slate-400 hover:text-emerald-400 flex items-center gap-1 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
-                  >
-                    <CreditCard className="w-3 h-3" /> ID Card
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onOpenEditModal(emp); }}
-                    className="text-[10px] font-bold text-slate-400 hover:text-amber-400 flex items-center gap-1 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
-                  >
-                    <Edit className="w-3 h-3" /> Edit
-                  </button>
+                  {isAdmin && (
+                    <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setAttendanceModalEmp(emp); }}
+                        className="text-[10px] font-bold text-slate-400 hover:text-blue-400 flex items-center gap-1 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
+                        title="View 30-Day Monthly Attendance History"
+                      >
+                        <Calendar className="w-3 h-3 text-blue-400" /> Attendance History
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenIdCardModal(emp); }}
+                        className="text-[10px] font-bold text-slate-400 hover:text-emerald-400 flex items-center gap-1 bg-slate-950/50 px-2 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
+                      >
+                        <CreditCard className="w-3 h-3" /> ID Pass
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenEditModal(emp); }}
+                        className="text-[10px] font-bold text-slate-400 hover:text-amber-400 flex items-center gap-1 bg-slate-950/50 px-2 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
+                      >
+                        <Edit className="w-3 h-3" /> Edit
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
             </div>
-          ))}
+          )}
+
+          {/* Render Employee Monthly Attendance Modal */}
+          {attendanceModalEmp && (
+            <EmployeeMonthlyAttendanceModal
+              employee={attendanceModalEmp}
+              onClose={() => setAttendanceModalEmp(null)}
+            />
+          )}
         </div>
-      )}
-    </div>
-  );
-};
+      );
+    };

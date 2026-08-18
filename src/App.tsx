@@ -3,7 +3,9 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthView } from './components/auth/AuthView';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
 import { Employee } from './types';
-import { ShieldCheck, CreditCard, Loader2 } from 'lucide-react';
+import { ShieldCheck, CreditCard, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ErrorBoundary } from 'react-error-boundary';
+import { Toaster } from 'sonner';
 
 // ── Eager imports (needed immediately on boot) ──
 import { Header } from './components/common/Header';
@@ -26,19 +28,50 @@ const LeaveApprovalsView   = lazy(() => import('./components/admin/LeaveApproval
 const EmployeePortal       = lazy(() => import('./components/employee/EmployeePortal').then(m => ({ default: m.EmployeePortal })));
 const VerificationView     = lazy(() => import('./components/public/VerificationView').then(m => ({ default: m.VerificationView })));
 
-// HR & PM Portal Lazy Components
 const HRDashboard          = lazy(() => import('./components/hr/HRDashboard').then(m => ({ default: m.HRDashboard })));
+const HRProfileView        = lazy(() => import('./components/hr/HRProfileView').then(m => ({ default: m.HRProfileView })));
 const HRLeaveWfhApprovals  = lazy(() => import('./components/hr/HRLeaveWfhApprovals').then(m => ({ default: m.HRLeaveWfhApprovals })));
 const HRPayrollView        = lazy(() => import('./components/hr/HRPayrollView').then(m => ({ default: m.HRPayrollView })));
-const HRRulesView          = lazy(() => import('./components/hr/HRRulesView').then(m => ({ default: m.HRRulesView })));
+const CompanyRulesView     = lazy(() => import('./components/hr/CompanyRulesView').then(m => ({ default: m.CompanyRulesView })));
+const HRNotificationsView  = lazy(() => import('./components/hr/HRNotificationsView').then(m => ({ default: m.HRNotificationsView })));
 const PMDashboard          = lazy(() => import('./components/pm/PMDashboard').then(m => ({ default: m.PMDashboard })));
 const PMProjectsView       = lazy(() => import('./components/pm/PMProjectsView').then(m => ({ default: m.PMProjectsView })));
 const PMTeamPerformance    = lazy(() => import('./components/pm/PMTeamPerformance').then(m => ({ default: m.PMTeamPerformance })));
+const EmployeeTeamDirectory = lazy(() => import('./components/employee/EmployeeTeamDirectory').then(m => ({ default: m.EmployeeTeamDirectory })));
+const ExecutiveProfileView  = lazy(() => import('./components/admin/ExecutiveProfileView').then(m => ({ default: m.ExecutiveProfileView })));
 
 // Minimal spinner used as Suspense fallback inside the app (not a splash)
 const ViewLoader = () => (
   <div className="flex items-center justify-center h-64 w-full">
     <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+  </div>
+);
+
+// Crash recovery screen shown by ErrorBoundary when an uncaught error occurs
+const CrashScreen = ({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => (
+  <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-8 text-center">
+    <div className="w-16 h-16 bg-rose-500/20 border border-rose-500/30 rounded-2xl flex items-center justify-center mb-6">
+      <AlertTriangle className="w-8 h-8 text-rose-400" />
+    </div>
+    <h1 className="text-2xl font-black text-white mb-2">Something went wrong</h1>
+    <p className="text-sm text-slate-400 max-w-md mb-2">An unexpected error occurred in the application.</p>
+    <p className="text-xs text-slate-600 font-mono bg-slate-900 px-4 py-2 rounded-xl mb-6 max-w-lg break-all">
+      {error?.message || 'Unknown error'}
+    </p>
+    <div className="flex gap-3">
+      <button
+        onClick={resetErrorBoundary}
+        className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all cursor-pointer"
+      >
+        <RefreshCw className="w-4 h-4" /> Try Again
+      </button>
+      <button
+        onClick={() => { localStorage.removeItem('kss_v1_session'); window.location.reload(); }}
+        className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold rounded-xl transition-all cursor-pointer border border-slate-700"
+      >
+        <RefreshCw className="w-4 h-4" /> Clear & Reload
+      </button>
+    </div>
   </div>
 );
 
@@ -52,8 +85,14 @@ const dismissHtmlSplash = () => {
 const MainLayout: React.FC = () => {
   const { role, isAuthenticated, activeEmployee, isSessionReady } = useAuth();
 
-  const [viewMode, setViewMode] = useState<'landing' | 'app' | 'auth'>('landing');
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [viewMode, setViewMode] = useState<'landing' | 'app' | 'auth'>(() => {
+    return localStorage.getItem('kss_v1_session') ? 'app' : 'landing';
+  });
+
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    return localStorage.getItem('kss_active_tab') || 'dashboard';
+  });
+
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Modals
@@ -61,48 +100,74 @@ const MainLayout: React.FC = () => {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [idCardEmployee, setIdCardEmployee] = useState<Employee | null>(null);
+  const [attendanceFilters, setAttendanceFilters] = useState<{ dateFilter?: 'today' | 'yesterday' | 'all'; statusFilter?: string }>({ dateFilter: 'today', statusFilter: 'ALL' });
 
-  // Dismiss the HTML splash as soon as session state is resolved
-  useEffect(() => {
-    if (isSessionReady) {
-      dismissHtmlSplash();
+  const handleNavigateTab = (tab: string, filters?: { dateFilter?: 'today' | 'yesterday' | 'all'; statusFilter?: string }) => {
+    if (filters) {
+      setAttendanceFilters(filters);
+    } else if (tab === 'attendance') {
+      setAttendanceFilters({ dateFilter: 'today', statusFilter: 'ALL' });
     }
+    setActiveTab(tab);
+    localStorage.setItem('kss_active_tab', tab);
+  };
+
+  // Persist activeTab whenever it changes
+  useEffect(() => {
+    if (activeTab) {
+      localStorage.setItem('kss_active_tab', activeTab);
+    }
+  }, [activeTab]);
+
+  // Dismiss the HTML splash as soon as component mounts or session state is resolved
+  useEffect(() => {
+    dismissHtmlSplash();
   }, [isSessionReady]);
+
+  useEffect(() => {
+    dismissHtmlSplash();
+    const timer = setTimeout(dismissHtmlSplash, 50);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Auto-transition to app view when authenticated
   useEffect(() => {
-    if (isAuthenticated && activeEmployee) {
+    if (isAuthenticated) {
       setViewMode('app');
     }
-  }, [isAuthenticated, activeEmployee]);
+  }, [isAuthenticated]);
 
-  // Strict role-based tab routing based on Admin-assigned role
-  useEffect(() => {
-    const effectiveRole = activeEmployee?.role || role;
+  const effectiveRole = activeEmployee?.role || role;
 
-    if (effectiveRole === 'SUPER_ADMIN') {
-      if (activeTab.startsWith('emp_') || activeTab.startsWith('hr_') || activeTab.startsWith('pm_')) {
-        setActiveTab('dashboard');
+  // Synchronous tab sanitization per role to eliminate flash of wrong content (Fixes C15 Contract)
+  const getSanitizedTabForRole = (tab: string, roleToUse: string): string => {
+    if (roleToUse === 'EMPLOYEE') {
+      if (!tab.startsWith('emp_') && tab !== 'notifications') {
+        return 'emp_dashboard';
       }
-    } else if (effectiveRole === 'HR_ADMIN') {
-      // HR portal home is the HR Dashboard; only redirect from tabs that are not part of the HR portal
-      const validHrTabs = ['dashboard', 'employees', 'attendance', 'leave_approvals', 'hr_payroll', 'hr_rules', 'reports'];
-      if (activeTab === 'hr_dashboard') {
-        setActiveTab('dashboard');
-      } else if (!validHrTabs.includes(activeTab) && !activeTab.startsWith('emp_')) {
-        setActiveTab('dashboard');
+    } else if (roleToUse === 'PROJECT_MANAGER') {
+      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals'];
+      if (!allowedPMTabs.includes(tab) || tab.startsWith('emp_')) {
+        return 'pm_dashboard';
       }
-    } else if (effectiveRole === 'PROJECT_MANAGER') {
-      if (!activeTab.startsWith('pm_') && !activeTab.startsWith('emp_')) {
-        setActiveTab('pm_dashboard');
-      }
-    } else {
-      // Standard EMPLOYEE: locked strictly to emp_* tabs
-      if (!activeTab.startsWith('emp_')) {
-        setActiveTab('emp_dashboard');
+    } else if (roleToUse === 'HR_ADMIN') {
+      const allowedHRTabs = ['dashboard', 'hr_dashboard', 'hr_profile', 'employees', 'attendance', 'leave_approvals', 'hr_payroll', 'company_rules', 'notifications', 'reports', 'audit_logs', 'my_id_card', 'documents'];
+      if (!allowedHRTabs.includes(tab) && !tab.startsWith('emp_') && !tab.startsWith('hr_')) {
+        return 'dashboard';
       }
     }
-  }, [role, activeEmployee?.role, activeEmployee?.id]);
+    return tab;
+  };
+
+  const currentTab = getSanitizedTabForRole(activeTab, effectiveRole);
+
+  // Keep activeTab state in sync when effectiveRole changes
+  useEffect(() => {
+    if (currentTab !== activeTab) {
+      setActiveTab(currentTab);
+      localStorage.setItem('kss_active_tab', currentTab);
+    }
+  }, [effectiveRole, activeEmployee?.id, currentTab, activeTab]);
 
   const handleLandingGetStarted = () => setViewMode('auth');
 
@@ -131,16 +196,16 @@ const MainLayout: React.FC = () => {
           onShowSplash={() => {}}
         />
 
-        <div className="flex-1 flex w-full max-w-[1700px] mx-auto relative h-full overflow-hidden">
+        <div className="flex-1 flex w-full relative h-full overflow-hidden">
           <Sidebar
-            activeTab={activeTab}
+            activeTab={currentTab}
             setActiveTab={setActiveTab}
             isMobileOpen={isMobileSidebarOpen}
             onCloseMobile={() => setIsMobileSidebarOpen(false)}
           />
 
-          <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto h-full">
-            {!activeTab.startsWith('emp_') && role === 'EMPLOYEE' ? (
+          <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto overscroll-y-contain h-full bg-slate-950">
+            {!currentTab.startsWith('emp_') && currentTab !== 'notifications' && (role === 'EMPLOYEE' || activeEmployee?.role === 'EMPLOYEE') ? (
               <div className="bg-slate-900 border border-rose-900/50 rounded-3xl p-8 max-w-2xl mx-auto my-12 text-center space-y-5 shadow-2xl">
                 <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
                   <ShieldCheck className="w-8 h-8" />
@@ -161,27 +226,30 @@ const MainLayout: React.FC = () => {
               </div>
             ) : (
               <Suspense fallback={<ViewLoader />}>
-                {activeTab === 'dashboard' && (
-                  role === 'HR_ADMIN' ? (
-                    <HRDashboard onNavigateTab={tab => setActiveTab(tab)} />
-                  ) : role === 'PROJECT_MANAGER' ? (
-                    <PMDashboard onNavigateTab={tab => setActiveTab(tab)} />
+                {(currentTab === 'dashboard' || currentTab === 'hr_dashboard') && (
+                  (role === 'HR_ADMIN' || activeEmployee?.role === 'HR_ADMIN') ? (
+                    <HRDashboard onNavigateTab={handleNavigateTab} />
+                  ) : (role === 'PROJECT_MANAGER' || activeEmployee?.role === 'PROJECT_MANAGER') ? (
+                    <PMDashboard onNavigateTab={handleNavigateTab} />
                   ) : (
                     <DashboardView
-                      onNavigateTab={tab => setActiveTab(tab)}
+                      onNavigateTab={handleNavigateTab}
                       onOpenAddEmployee={() => setIsAddModalOpen(true)}
                     />
                   )
                 )}
 
-                {activeTab === 'hr_payroll' && <HRPayrollView />}
-                {activeTab === 'hr_rules' && <HRRulesView />}
-                {activeTab === 'hr_dashboard' && <HRDashboard onNavigateTab={tab => setActiveTab(tab)} />}
-                {activeTab === 'pm_dashboard' && <PMDashboard onNavigateTab={tab => setActiveTab(tab)} />}
-                {activeTab === 'pm_projects' && <PMProjectsView />}
-                {activeTab === 'pm_team' && <PMTeamPerformance />}
+                {currentTab === 'hr_profile' && <HRProfileView />}
+                {currentTab === 'hr_payroll' && <HRPayrollView />}
+                {currentTab === 'company_rules' && <CompanyRulesView />}
+                {currentTab === 'notifications' && <HRNotificationsView />}
+                {currentTab === 'pm_dashboard' && <PMDashboard onNavigateTab={handleNavigateTab} />}
+                {currentTab === 'pm_projects' && <PMProjectsView />}
+                {currentTab === 'pm_team' && <PMTeamPerformance />}
+                {currentTab === 'pm_profile' && <HRProfileView />}
+                {currentTab === 'my_profile' && <ExecutiveProfileView />}
 
-                {activeTab === 'my_id_card' && (
+                {currentTab === 'my_id_card' && (
                   <div className="flex flex-col items-center justify-center p-8 bg-slate-900 rounded-3xl border border-slate-800 shadow-xl mt-12 mx-auto max-w-lg text-center animate-in fade-in zoom-in-95">
                     <div className="w-16 h-16 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center mx-auto mb-4">
                       <CreditCard className="w-8 h-8" />
@@ -199,26 +267,24 @@ const MainLayout: React.FC = () => {
                   </div>
                 )}
 
-                {activeTab === 'employees' && (
-                  <EmployeeDirectory
-                    onSelectEmployee={emp => setSelectedEmpProfile(emp)}
-                    onOpenAddModal={() => setIsAddModalOpen(true)}
-                    onOpenEditModal={emp => setEditingEmployee(emp)}
-                    onOpenIdCardModal={emp => setIdCardEmployee(emp)}
+                {currentTab === 'employees' && <EmployeeTeamDirectory />}
+
+                {currentTab === 'attendance' && (
+                  <AttendanceManagement 
+                    initialDateFilter={attendanceFilters.dateFilter || 'today'}
+                    initialStatusFilter={attendanceFilters.statusFilter || 'ALL'}
                   />
                 )}
-
-                {activeTab === 'attendance' && <AttendanceManagement />}
-                {activeTab === 'reports' && <ReportsView />}
-                {activeTab === 'documents' && <DocumentGenerator />}
-                {activeTab === 'settings' && <SettingsView />}
-                {activeTab === 'audit_logs' && <AuditLogsView />}
-                {activeTab === 'leave_approvals' && (
+                {currentTab === 'reports' && <ReportsView />}
+                {currentTab === 'documents' && <DocumentGenerator />}
+                {currentTab === 'settings' && <SettingsView />}
+                {currentTab === 'audit_logs' && <AuditLogsView />}
+                {currentTab === 'leave_approvals' && (
                   role === 'HR_ADMIN' ? <HRLeaveWfhApprovals /> : <LeaveApprovalsView />
                 )}
 
-                {activeTab.startsWith('emp_') && (
-                  <EmployeePortal activeTab={activeTab} setActiveTab={setActiveTab} />
+                {currentTab.startsWith('emp_') && (
+                  <EmployeePortal activeTab={currentTab} setActiveTab={setActiveTab} />
                 )}
               </Suspense>
             )}
@@ -226,7 +292,7 @@ const MainLayout: React.FC = () => {
         </div>
 
         <MobileBottomNav
-          activeTab={activeTab}
+          activeTab={currentTab}
           setActiveTab={setActiveTab}
           onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
         />
@@ -265,9 +331,25 @@ const MainLayout: React.FC = () => {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-slate-950 font-sans text-slate-100 antialiased flex flex-col selection:bg-blue-600 selection:text-white">
+    <div className="w-full h-screen overflow-hidden overscroll-none bg-slate-950 font-sans text-slate-100 antialiased flex flex-col selection:bg-blue-600 selection:text-white">
       {renderView()}
       <PWAInstallPrompt />
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: {
+            background: '#0f172a',
+            border: '1px solid #1e293b',
+            color: '#f1f5f9',
+            fontFamily: 'inherit',
+            fontSize: '13px',
+            fontWeight: '600',
+            borderRadius: '12px',
+          },
+        }}
+        richColors
+        closeButton
+      />
     </div>
   );
 };
@@ -277,17 +359,21 @@ export default function App() {
 
   if (isVerifyRoute) {
     return (
-      <AuthProvider>
-        <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
-          <VerificationView />
-        </Suspense>
-      </AuthProvider>
+      <ErrorBoundary FallbackComponent={CrashScreen}>
+        <AuthProvider>
+          <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
+            <VerificationView />
+          </Suspense>
+        </AuthProvider>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <AuthProvider>
-      <MainLayout />
-    </AuthProvider>
+    <ErrorBoundary FallbackComponent={CrashScreen}>
+      <AuthProvider>
+        <MainLayout />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

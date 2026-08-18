@@ -56,11 +56,11 @@ export const WorkLocation: React.FC = () => {
     isFirestoreConnected 
   } = useAuth();
 
-  const isExecutive = role === 'SUPER_ADMIN' || 
+  const isExecutive = 
     activeEmployee?.employeeId === 'CEO001' || 
-    activeEmployee?.employeeId === 'CTO001' || 
-    activeEmployee?.designation?.toLowerCase().includes('ceo') || 
-    activeEmployee?.designation?.toLowerCase().includes('cto');
+    activeEmployee?.employeeId === 'CTO001' ||
+    (activeEmployee?.designation || '').toLowerCase().includes('ceo') ||
+    (activeEmployee?.designation || '').toLowerCase().includes('cto');
 
   const [officeName, setOfficeName] = useState(companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office');
   const [latitude, setLatitude] = useState<number>(companyWorkZone.latitude ?? 13.014333);

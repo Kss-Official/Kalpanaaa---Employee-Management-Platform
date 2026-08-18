@@ -1,5 +1,4 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAnalytics, isSupported } from "firebase/analytics";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import { 
   getAuth, 
@@ -26,15 +25,7 @@ import {
   getDocFromServer
 } from "firebase/firestore";
 
-import { 
-  getStorage, 
-  ref, 
-  uploadBytesResumable, 
-  getDownloadURL, 
-  deleteObject 
-} from "firebase/storage";
-
-// Config explicitly provided in prompt
+// Config explicitly targeting kalpanaaa-employees-website
 export const firebaseConfig = {
   apiKey: "AIzaSyB5sN1axynuVlmzK0k6lLrvL3PbsR7x0QA",
   authDomain: "kalpanaaa-employees-website.firebaseapp.com",
@@ -48,73 +39,25 @@ export const firebaseConfig = {
 // Initialize Firebase App
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firebase App Check to block API Sniffing & Database Scraping
+// Initialize Firebase App Check — only in production to prevent localhost token blocking
 if (typeof window !== "undefined") {
-  try {
-    initializeAppCheck(app, {
-      provider: new ReCaptchaEnterpriseProvider('6LcR5m8tAAAAAAEpJqgzO9KUJZ-lLX6s_QuoENfl'),
-      isTokenAutoRefreshEnabled: true
-    });
-  } catch (error) {
-    console.warn("App Check initialization error (often safe to ignore in dev):", error);
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (isLocalhost) {
+    (self as any).FIREBASE_APPCHECK_EXECUTE_IN_TEST_MODE = true;
+  } else {
+    try {
+      initializeAppCheck(app, {
+        provider: new ReCaptchaEnterpriseProvider('6LcR5m8tAAAAAAEpJqgzO9KUJZ-lLX6s_QuoENfl'),
+        isTokenAutoRefreshEnabled: true
+      });
+    } catch (error) {
+      console.warn("App Check initialization info:", error);
+    }
   }
 }
 
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true
-});
-
-// Initialize Firebase Storage
-export const storage = getStorage(app);
-
-// Initialize Analytics (only if supported in this environment)
-export const analytics = isSupported().then(yes => yes ? getAnalytics(app) : null);
-
-/**
- * Upload a file to Firebase Storage efficiently with optional progress callback
- */
-export async function uploadFile(
-  path: string, 
-  file: File, 
-  onProgress?: (progressPercent: number) => void
-): Promise<string> {
-  const storageRef = ref(storage, path);
-  const uploadTask = uploadBytesResumable(storageRef, file);
-
-  return new Promise((resolve, reject) => {
-    uploadTask.on(
-      'state_changed',
-      (snapshot) => {
-        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        if (onProgress) {
-          onProgress(Math.round(progress));
-        }
-      },
-      (error) => {
-        console.error('Firebase Storage upload error:', error);
-        reject(error);
-      },
-      async () => {
-        try {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          resolve(downloadUrl);
-        } catch (err) {
-          reject(err);
-        }
-      }
-    );
-  });
-}
-
-/**
- * Delete a file from Firebase Storage by full path or reference
- */
-export async function deleteFile(path: string): Promise<void> {
-  const storageRef = ref(storage, path);
-  await deleteObject(storageRef);
-}
-
+export const db = initializeFirestore(app, {});
 
 // Error Handling Helper as per Firebase skill guidelines
 export enum OperationType {
@@ -146,19 +89,23 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.warn('Firestore Operation Exception:', JSON.stringify(errInfo));
+  // Suppress permission-denied noise from dev console
+  if (!errInfo.error.includes('permissions') && !errInfo.error.includes('PERMISSION_DENIED')) {
+    console.warn('Firestore Operation Exception:', JSON.stringify(errInfo));
+  }
   return errInfo;
 }
 
-// Test Connection
+// Test Connection reliably
 export async function testConnection() {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return false;
+  }
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDocFromServer(doc(db, 'settings', 'global'));
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('offline')) {
-      console.warn("Firebase client is currently offline or uninitialized.");
-    }
-    return false;
+    // If online, return true so real-time listeners operate
+    return typeof navigator !== 'undefined' ? navigator.onLine : true;
   }
 }

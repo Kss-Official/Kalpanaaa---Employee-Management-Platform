@@ -4,35 +4,53 @@
 
 import * as faceapi from '@vladmandic/face-api';
 
-const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+const MODEL_URLS = [
+  'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/',
+  'https://raw.githubusercontent.com/vladmandic/face-api/master/model/'
+];
 
 let isModelsLoaded = false;
 let modelLoadingPromise: Promise<void> | null = null;
 
-// Initialize and load lightweight face recognition models from CDN
+// Initialize and load lightweight face recognition models with multi-CDN fallback
 export const loadFaceModels = async (): Promise<void> => {
   if (isModelsLoaded) return;
   if (modelLoadingPromise) return modelLoadingPromise;
 
   modelLoadingPromise = (async () => {
-    try {
-      console.log('[FaceEngine] Loading neural models from CDN...');
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-      ]);
-      isModelsLoaded = true;
-      console.log('[FaceEngine] Models loaded successfully!');
-    } catch (err) {
-      console.error('[FaceEngine] Failed to load models:', err);
-      modelLoadingPromise = null;
-      throw err;
+    for (const url of MODEL_URLS) {
+      try {
+        console.log(`[FaceEngine] Pre-loading neural face models from ${url}...`);
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(url),
+          faceapi.nets.faceLandmark68TinyNet.loadFromUri(url),
+          faceapi.nets.faceRecognitionNet.loadFromUri(url)
+        ]);
+        isModelsLoaded = true;
+        console.log('[FaceEngine] Models loaded successfully into memory!');
+        return;
+      } catch (err) {
+        console.warn(`[FaceEngine] CDN ${url} failed, trying fallback...`, err);
+      }
     }
+    modelLoadingPromise = null;
+    throw new Error('Could not load face recognition neural models from any CDN source.');
   })();
 
   return modelLoadingPromise;
 };
+
+// Automatic background preload on idle browser time so biometric modals open with 0ms delay
+if (typeof window !== 'undefined') {
+  const idlePreload = () => {
+    loadFaceModels().catch(() => {});
+  };
+  if ('requestIdleCallback' in window) {
+    (window as any).requestIdleCallback(idlePreload, { timeout: 3000 });
+  } else {
+    setTimeout(idlePreload, 1500);
+  }
+}
 
 export interface FaceScanResult {
   detected: boolean;
@@ -128,31 +146,46 @@ export const extractDescriptorFromImageUrl = async (
 
 // Biometric Profile Storage (IndexedDB / localStorage fallback)
 const STORAGE_PREFIX = 'kss_face_descriptor_v1_';
+const inMemoryDescriptorCache = new Map<string, Float32Array>();
+
+export const clearAllFaceEngineState = (): void => {
+  inMemoryDescriptorCache.clear();
+  console.log('[FaceEngine] Cleared in-memory face descriptor cache on logout.');
+};
 
 export const saveEmployeeDescriptor = (employeeId: string, descriptor: Float32Array): void => {
   const arrayData = Array.from(descriptor);
+  inMemoryDescriptorCache.set(employeeId, descriptor);
   localStorage.setItem(`${STORAGE_PREFIX}${employeeId}`, JSON.stringify(arrayData));
 };
 
 export const getEmployeeDescriptor = (employeeId: string, cloudDescriptor?: number[]): Float32Array | null => {
+  if (inMemoryDescriptorCache.has(employeeId)) {
+    return inMemoryDescriptorCache.get(employeeId)!;
+  }
+
   const stored = localStorage.getItem(`${STORAGE_PREFIX}${employeeId}`);
   if (stored) {
     try {
       const arrayData = JSON.parse(stored) as number[];
-      return new Float32Array(arrayData);
+      const vec = new Float32Array(arrayData);
+      inMemoryDescriptorCache.set(employeeId, vec);
+      return vec;
     } catch {}
   }
   
   if (cloudDescriptor && cloudDescriptor.length > 0) {
     // Restore from Cloud Firestore backup!
-    saveEmployeeDescriptor(employeeId, new Float32Array(cloudDescriptor));
-    return new Float32Array(cloudDescriptor);
+    const vec = new Float32Array(cloudDescriptor);
+    saveEmployeeDescriptor(employeeId, vec);
+    return vec;
   }
 
   return null;
 };
 
 export const clearEmployeeDescriptor = (employeeId: string): void => {
+  inMemoryDescriptorCache.delete(employeeId);
   localStorage.removeItem(`${STORAGE_PREFIX}${employeeId}`);
 };
 

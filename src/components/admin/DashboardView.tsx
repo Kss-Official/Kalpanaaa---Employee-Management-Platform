@@ -17,7 +17,9 @@ import {
   AlertTriangle,
   X,
   MapPin,
-  Timer
+  Timer,
+  Home,
+  Loader2
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -37,7 +39,6 @@ import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 import { Employee, AttendanceRecord } from '../../types';
-import { getLocalDateString, isCeoOrCto } from '../../lib/attendanceEngine';
 
 interface DashboardViewProps {
   onNavigateTab: (tab: string) => void;
@@ -45,10 +46,14 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onOpenAddEmployee }) => {
-  const { employees, attendance, settings, activeEmployee, auditLogs } = useAuth();
+  const { employees, attendance, settings, activeEmployee, auditLogs, companyWideWfhDates, addAuditLog } = useAuth();
   const { triggerHaptic } = useHaptic();
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month'>('today');
   
+  // Loading & Progress state for Restore Logs async writes (Addresses Test A9 UX Gap)
+  const [isRestoringLogs, setIsRestoringLogs] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState<{ current: number; total: number } | null>(null);
+
   // Employee list modal state
   const [cardModal, setCardModal] = useState<{
     title: string;
@@ -65,27 +70,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   };
   const displayName = activeEmployee?.fullName?.split(' ')[0] || 'there';
 
-  const todayStr = getLocalDateString();
-  const regularEmployees = employees.filter(e => !isCeoOrCto(e));
-  const todayRecords = attendance.filter(a => 
-    a.date === todayStr && 
-    !isCeoOrCto(employees.find(e => e.id === a.employeeId || e.employeeId === a.employeeCode)) &&
-    !a.employeeName?.toLowerCase().includes('akshit') &&
-    !a.employeeName?.toLowerCase().includes('gaurav')
-  );
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayRecords = attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
 
-  const totalEmployeesCount = regularEmployees.filter(e => e.status === 'Active').length;
+  const totalEmployeesCount = employees.filter(e => e.status === 'Active').length;
   const presentTodayCount = todayRecords.filter(a => a.status === 'Present').length;
   const lateTodayCount = todayRecords.filter(a => a.status === 'Late').length;
   const absentTodayCount = todayRecords.filter(a => a.status === 'Absent').length;
-  const onLeaveCount = regularEmployees.filter(e => e.status === 'On Leave').length;
+  const onLeaveCount = employees.filter(e => e.status === 'On Leave').length;
   const currentlyCheckedInCount = todayRecords.filter(a => a.checkInAt && !a.checkOutAt).length;
 
   // Compute 7-day attendance trend chart data
   const trendData = Array.from({ length: 7 }).map((_, idx) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - idx));
-    const dStr = getLocalDateString(d);
+    const dStr = d.toISOString().split('T')[0];
     const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' });
     const dayRecs = attendance.filter(a => a.date === dStr);
 
@@ -109,21 +108,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
     };
   });
 
-  // Break & Activity Analytics for today
-  const breakTypes = ['Tea Break', 'Lunch Break', 'Team Huddle', 'Official Event'];
-  const breakData = breakTypes.map(type => {
-    let totalMins = 0;
-    todayRecords.forEach(rec => {
-      if (rec.breaks) {
-        rec.breaks.forEach(b => {
-          if (b.type.includes(type) || (type === 'Official Event' && b.type.includes('Official Work'))) {
-             totalMins += b.durationMinutes || 0;
-          }
-        });
-      }
-    });
-    return { type: type === 'Official Event' ? 'Official Work' : type, minutes: totalMins };
-  });
   const recentCheckIns = todayRecords
     .filter(a => a.checkInAt)
     .sort((a, b) => new Date(b.checkInAt!).getTime() - new Date(a.checkInAt!).getTime())
@@ -155,74 +139,108 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   }));
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
       {/* Top Banner & Quick Actions */}
-      <div className="relative bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] p-8 rounded-3xl shadow-[var(--shadow-md)] overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      <div className="relative bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] p-4 sm:p-8 rounded-3xl shadow-[var(--shadow-md)] overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-5 backdrop-blur-md">
         {/* Subtle engineering background pattern */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-[var(--accent-blue)]/10 via-transparent to-transparent pointer-events-none opacity-50"></div>
         <div className="absolute -right-20 -top-20 w-64 h-64 bg-[var(--accent-blue)]/5 rounded-full blur-3xl pointer-events-none"></div>
         
-        <div className="relative z-10">
-          <div className="flex items-center gap-2 text-[10px] font-black text-[var(--accent-blue)] uppercase tracking-widest mb-2">
+        <div className="relative z-10 space-y-1">
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-black text-[var(--accent-blue)] uppercase tracking-widest">
             <span>Executive Command Center</span>
             <span className="text-[var(--text-tertiary)]">•</span>
             <span className="text-[var(--text-secondary)]">{settings.companyName}</span>
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-[var(--text-primary)] mb-1">
+          <h1 className="text-xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-primary)] leading-tight">
             {getGreeting()}, {displayName}
           </h1>
-          <p className="text-xs text-[var(--text-secondary)] font-medium">
+          <p className="text-xs text-[var(--text-secondary)] font-medium leading-relaxed">
             System overview and workforce analytics for {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
           </p>
         </div>
 
-        <div className="relative z-10 flex flex-wrap items-center gap-3">
+        <div className="relative z-10 grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full lg:w-auto shrink-0">
           <button
             onClick={() => {
               triggerHaptic();
               onOpenAddEmployee();
             }}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[var(--text-primary)] hover:opacity-90 text-black text-xs font-black tracking-wide uppercase rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--text-primary)] hover:opacity-90 text-black text-xs font-black tracking-wide uppercase rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95 w-full"
           >
             <Plus className="w-4 h-4" strokeWidth={3} />
-            New Employee
+            <span>New Employee</span>
           </button>
 
-
           <button
+            disabled={isRestoringLogs}
             onClick={async () => {
+              if (isRestoringLogs) return;
               triggerHaptic();
-              const todayStr = getLocalDateString();
+              const todayStr = new Date().toISOString().split('T')[0];
               const checkinLogs = auditLogs.filter(log => log.action === 'ATTENDANCE_CHECKIN' && log.timestamp.startsWith(todayStr));
               if (checkinLogs.length === 0) {
-                alert('No check-ins found in Audit Logs for today.'); return;
+                alert('No check-ins found in Audit Logs for today.');
+                return;
               }
+
+              setIsRestoringLogs(true);
+              setRestoreProgress({ current: 0, total: checkinLogs.length });
               let restored = 0;
-              for (const log of checkinLogs) {
-                const match = log.target.match(/^(.*?)\s\(/);
-                const empCode = match ? match[1] : log.target;
-                const emp = employees.find(e => e.employeeId === empCode);
-                if (!emp) continue;
-                const recordId = `att-${emp.employeeId}-${todayStr}`;
-                const status = log.details.includes('Status: Late') ? 'Late' : 'Present';
-                const newRecord = {
-                  id: recordId, employeeId: emp.id, employeeCode: emp.employeeId,
-                  employeeName: emp.fullName, department: emp.department, date: todayStr,
-                  checkInAt: log.timestamp, checkOutAt: null, workingMinutes: 0,
-                  status, attendanceMethod: 'Self Portal', locationVerified: log.details.includes('GPS: Verified'),
-                  createdAt: log.timestamp, updatedAt: new Date().toISOString()
-                };
-                try {
-                  await setDoc(doc(db, 'attendance', recordId), newRecord);
-                  restored++;
-                } catch (e) { console.error(e); }
+
+              try {
+                for (let i = 0; i < checkinLogs.length; i++) {
+                  const log = checkinLogs[i];
+                  const match = log.target.match(/^(.*?)\s\(/);
+                  const empCode = match ? match[1] : log.target;
+                  const emp = employees.find(e => e.employeeId === empCode || e.id === empCode);
+                  if (emp) {
+                    const recordId = `att-${emp.employeeId}-${todayStr}`;
+                    const status = log.details.includes('Status: Late') ? 'Late' : 'Present';
+                    const newRecord = {
+                      id: recordId,
+                      employeeId: emp.id,
+                      employeeCode: emp.employeeId,
+                      employeeName: emp.fullName,
+                      department: emp.department,
+                      date: todayStr,
+                      checkInAt: log.timestamp,
+                      checkOutAt: null,
+                      workingMinutes: 0,
+                      status,
+                      attendanceMethod: 'Self Portal',
+                      locationVerified: log.details.includes('GPS: Verified'),
+                      createdAt: log.timestamp,
+                      updatedAt: new Date().toISOString()
+                    };
+                    await setDoc(doc(db, 'attendance', recordId), newRecord);
+                    restored++;
+                  }
+                  setRestoreProgress({ current: i + 1, total: checkinLogs.length });
+                }
+                addAuditLog('ATTENDANCE_RESTORED', 'Audit Logs', `Restored ${restored} attendance records for ${todayStr}`);
+                alert(`Successfully restored ${restored} check-ins from Audit Logs!`);
+              } catch (e) {
+                console.error('[DashboardView] Error restoring logs:', e);
+                alert('An error occurred while restoring logs.');
+              } finally {
+                setIsRestoringLogs(false);
+                setRestoreProgress(null);
               }
-              alert(`Successfully restored ${restored} check-ins from Audit Logs!`);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[var(--accent-amber)]/10 hover:bg-[var(--accent-amber)]/20 border border-[var(--accent-amber)]/30 text-[var(--accent-amber)] text-xs font-bold rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--accent-amber)]/10 hover:bg-[var(--accent-amber)]/20 border border-[var(--accent-amber)]/30 text-[var(--accent-amber)] text-xs font-bold rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed w-full"
           >
-            <AlertTriangle className="w-4 h-4" />
-            Restore Check-ins
+            {isRestoringLogs ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-amber-400 shrink-0" />
+                <span>Restoring ({restoreProgress?.current}/{restoreProgress?.total})...</span>
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>Restore Logs</span>
+              </>
+            )}
           </button>
 
           <button
@@ -230,16 +248,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
               triggerHaptic();
               generateAttendanceReportPdf(todayRecords, settings, 'Daily Attendance Summary Report');
             }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-subtle)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs font-bold rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-subtle)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs font-bold rounded-xl transition-all cursor-pointer shadow-[var(--shadow-sm)] active:scale-95 w-full"
           >
             <FileDown className="w-4 h-4" />
-            Export PDF
+            <span>Export PDF</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* KPI Cards Grid — 2 columns on mobile (<640px) */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
         <div onClick={() => openCardModal('Total Workforce', 'var(--accent-blue)', totalWorkforceItems)} className="cursor-pointer">
           <StatCard
             title="Total Workforce"
@@ -253,7 +271,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           <StatCard
             title="Present Today"
             value={presentTodayCount}
-            subtext={`${Math.round((presentTodayCount / (totalEmployeesCount || 1)) * 100)}% attendance rate`}
+            subtext={`${Math.round((presentTodayCount / (totalEmployeesCount || 1)) * 100)}% rate`}
             icon={UserCheck}
             color="emerald"
           />
@@ -262,7 +280,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           <StatCard
             title="Late Arrivals"
             value={lateTodayCount}
-            subtext={`Grace > ${settings.gracePeriodMinutes} mins`}
+            subtext={`> ${settings.gracePeriodMinutes} mins`}
             icon={Clock}
             color="amber"
           />
@@ -289,7 +307,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           <StatCard
             title="Active Checked-In"
             value={currentlyCheckedInCount}
-            subtext="Currently on premises"
+            subtext="On premises"
             icon={CheckCircle2}
             color="emerald"
           />
@@ -365,11 +383,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                         <div className="text-right shrink-0">
                           <span className="font-mono text-[10px] text-[var(--text-tertiary)] block">{emp.employeeId}</span>
                           {rec?.status && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md mt-1 inline-block" style={{ 
-                              color: cardModal.color, 
-                              backgroundColor: `${cardModal.color}15`,
-                              border: `1px solid ${cardModal.color}30`
-                            }}>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md mt-1 inline-block border ${
+                              rec.status === 'Late'
+                                ? 'text-amber-400 bg-amber-500/20 border-amber-500/40'
+                                : rec.status === 'Present'
+                                ? 'text-emerald-400 bg-emerald-500/20 border-emerald-500/40'
+                                : rec.status === 'Absent'
+                                ? 'text-rose-400 bg-rose-500/20 border-rose-500/40'
+                                : 'text-purple-400 bg-purple-500/20 border-purple-500/40'
+                            }`}>
                               {rec.status}
                             </span>
                           )}
@@ -470,55 +492,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         </div>
       </div>
 
-      {/* Additional Analytics Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Break Usage Chart */}
-        <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] p-6 shadow-[var(--shadow-sm)] flex flex-col">
-          <div className="mb-6">
-            <h3 className="text-sm font-bold text-[var(--text-primary)]">Workforce Activity & Break Utilization</h3>
-            <p className="text-xs text-[var(--text-secondary)]">Total minutes spent across activities today</p>
-          </div>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={breakData} layout="vertical" margin={{ top: 10, right: 30, left: 40, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-medium)" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
-                <YAxis dataKey="type" type="category" tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: 'var(--bg-elevated)', borderRadius: '12px', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontSize: '12px', boxShadow: 'var(--shadow-md)' }}
-                  cursor={{fill: 'var(--border-subtle)'}}
-                  formatter={(val: number) => [`${val} mins`, 'Duration']}
-                />
-                <Bar dataKey="minutes" fill="var(--accent-purple)" radius={[0, 6, 6, 0]} barSize={20} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-        
-        {/* Recent Activity Feed */}
-        <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] p-6 shadow-[var(--shadow-sm)] flex flex-col h-[340px]">
-          <div className="mb-4">
-            <h3 className="text-sm font-bold text-[var(--text-primary)]">Real-Time Event Stream</h3>
-            <p className="text-xs text-[var(--text-secondary)]">Live feed from Firestore database</p>
-          </div>
-          <div className="flex-1 overflow-y-auto pr-2 space-y-3">
-            {auditLogs.slice(0, 15).map(log => (
-              <div key={log.id} className="flex gap-3 items-start border-l-2 border-[var(--border-medium)] pl-3 py-1">
-                <div className="w-2 h-2 rounded-full bg-[var(--accent-blue)] mt-1.5 -ml-4 shrink-0 shadow-[0_0_8px_var(--accent-blue)]"></div>
-                <div>
-                  <div className="text-xs font-bold text-[var(--text-primary)]">{log.action.replace(/_/g, ' ')}</div>
-                  <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">{log.details}</div>
-                  <div className="text-[10px] text-[var(--text-tertiary)] mt-1 font-mono">
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} • {log.target}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-
       {/* Live Activity Feed */}
       <div className="bg-[var(--bg-tertiary)] rounded-3xl border border-[var(--border-subtle)] overflow-hidden shadow-[var(--shadow-sm)]">
         <div className="p-6 border-b border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -574,7 +547,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                     {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
                   </div>
                   <div className="px-6 py-4 text-right flex justify-end">
-                    {rec.locationVerified ? (
+                    {rec.isWfh || 
+                     (companyWideWfhDates || []).includes(rec.date) || 
+                     (companyWideWfhDates || []).includes(todayStr) || 
+                     (settings?.companyWideWfhDates || []).includes(rec.date) || 
+                     (settings?.companyWideWfhDates || []).includes(todayStr) ? (
+                      <span className="text-sky-400 bg-sky-500/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] font-bold uppercase w-fit border border-sky-500/30">
+                        <Home className="w-3 h-3"/> Office WFH
+                      </span>
+                    ) : rec.locationVerified ? (
                       <span className="text-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-[10px] font-bold uppercase w-fit">
                         <CheckCircle2 className="w-3 h-3"/> Office GPS
                       </span>

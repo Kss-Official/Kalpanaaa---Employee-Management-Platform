@@ -27,8 +27,6 @@ import {
   Briefcase
 } from 'lucide-react';
 
-import { getLocalDateString } from '../../lib/attendanceEngine';
-
 interface LandingViewProps {
   onGetStarted: (tab?: 'signin' | 'signup' | 'demo') => void;
   onShowSplash?: () => void;
@@ -37,7 +35,7 @@ interface LandingViewProps {
 export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSplash }) => {
   const { activeEmployee, role, attendance, employees, quickDemoLogin } = useAuth();
 
-  const todayStr = getLocalDateString();
+  const todayStr = new Date().toISOString().split('T')[0];
   const todayAttendance = attendance.filter(a => a.date === todayStr);
   const presentCount = todayAttendance.filter(a => a.status === 'PRESENT' || a.status === 'LATE').length;
   const lateCount = todayAttendance.filter(a => a.status === 'LATE').length;

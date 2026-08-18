@@ -1,36 +1,17 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { ShieldCheck, Search, Layers } from 'lucide-react';
-
-const CATEGORY_STYLES: Record<string, string> = {
-  attendance: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-  leave: 'text-violet-400 bg-violet-500/10 border-violet-500/20',
-  profile: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  security: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
-  payroll: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  rules: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
-  admin: 'text-orange-400 bg-orange-500/10 border-orange-500/20',
-  system: 'text-slate-400 bg-slate-500/10 border-slate-500/20',
-};
+import { ShieldCheck, Search, Clock, FileText, User } from 'lucide-react';
 
 export const AuditLogsView: React.FC = () => {
   const { auditLogs } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<string>('All');
 
-  const categories = Array.from(new Set(auditLogs.map(l => l.category || 'system').filter(Boolean))).sort();
-
-  const filteredLogs = auditLogs.filter(log => {
-    const matchesCategory = categoryFilter === 'All' || (log.category || 'system') === categoryFilter;
-    const q = searchTerm.toLowerCase();
-    const matchesSearch = !q ||
-      log.action.toLowerCase().includes(q) ||
-      log.actorName.toLowerCase().includes(q) ||
-      log.target.toLowerCase().includes(q) ||
-      log.details.toLowerCase().includes(q) ||
-      (log.ipAddress || '').toLowerCase().includes(q);
-    return matchesCategory && matchesSearch;
-  });
+  const filteredLogs = auditLogs.filter(log =>
+    (log.action || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (log.actorName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (log.target || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (log.details || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
@@ -55,30 +36,6 @@ export const AuditLogsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Category Filter */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">
-          <Layers className="w-3.5 h-3.5" />
-          Category
-        </span>
-        {['All', ...categories].map(cat => (
-          <button
-            key={cat}
-            onClick={() => setCategoryFilter(cat)}
-            className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all border cursor-pointer ${
-              categoryFilter === cat
-                ? 'bg-slate-800 text-white border-slate-600'
-                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:border-slate-600'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-        <span className="ml-auto text-[11px] text-slate-500 font-mono">
-          {filteredLogs.length} of {auditLogs.length} logs
-        </span>
-      </div>
-
       {/* Logs Table */}
       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
@@ -88,7 +45,6 @@ export const AuditLogsView: React.FC = () => {
                 <th className="py-3.5 px-4">Timestamp</th>
                 <th className="py-3.5 px-4">Actor / User</th>
                 <th className="py-3.5 px-4">Action Event</th>
-                <th className="py-3.5 px-4">Category</th>
                 <th className="py-3.5 px-4">Target Resource</th>
                 <th className="py-3.5 px-4">Audit Details</th>
               </tr>
@@ -96,7 +52,7 @@ export const AuditLogsView: React.FC = () => {
             <tbody className="divide-y divide-slate-800 text-xs">
               {filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-500 font-medium">
+                  <td colSpan={5} className="py-12 text-center text-slate-500 font-medium">
                     No security audit logs match your search.
                   </td>
                 </tr>
@@ -110,21 +66,11 @@ export const AuditLogsView: React.FC = () => {
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-white">{log.actorName}</div>
                       <div className="text-[10px] text-purple-400 font-bold">{log.actorRole}</div>
-                      {log.ipAddress && (
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">IP: {log.ipAddress}</div>
-                      )}
                     </td>
 
                     <td className="py-3.5 px-4">
                       <span className="font-mono text-[10px] font-bold bg-slate-950 text-slate-300 px-2 py-0.5 rounded-md border border-slate-800">
                         {log.action}
-                      </span>
-                    </td>
-
-                    <td className="py-3.5 px-4">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border ${CATEGORY_STYLES[log.category || 'system']}`}>
-                        <ShieldCheck className="w-3 h-3" />
-                        {log.category || 'system'}
                       </span>
                     </td>
 

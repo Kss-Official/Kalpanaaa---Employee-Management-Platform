@@ -3,7 +3,7 @@
 // All events are stored in Firestore 'notifications' collection for real-time sync
 
 import { db } from './firebase';
-import { collection, addDoc, serverTimestamp, Timestamp, query, where, getDocs, limit as firestoreLimit } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 export type NotificationEventType =
   | 'ATTENDANCE_CHECKIN'
@@ -122,24 +122,28 @@ export const sendKssNotification = async (
   try {
     const audience = options?.overrideAudience ?? AUDIENCE_MAP[type] ?? ['SUPER_ADMIN'];
 
-    const notification: Omit<KssNotification, 'id'> = {
+    const rawNotification: Record<string, any> = {
       type,
       title,
       body,
       audience,
-      actorId: options?.actorId,
-      actorName: options?.actorName,
-      targetEmployeeId: options?.targetEmployeeId,
-      targetEmployeeName: options?.targetEmployeeName,
-      metadata: options?.metadata,
+      actorId: options?.actorId ?? '',
+      actorName: options?.actorName ?? '',
+      targetEmployeeId: options?.targetEmployeeId ?? '',
+      targetEmployeeName: options?.targetEmployeeName ?? '',
+      metadata: options?.metadata ?? {},
       isRead: false,
-      createdAt: serverTimestamp(),
+      createdAt: new Date().toISOString(),
     };
 
-    await addDoc(collection(db, 'notifications'), notification);
-  } catch (err) {
-    // Silent fail — notifications should never block core operations
-    console.warn('[KSS Notifications] Failed to write notification:', err);
+    // Strip undefined keys to prevent Firestore write failure
+    const cleanNotification = Object.fromEntries(
+      Object.entries(rawNotification).filter(([_, v]) => v !== undefined)
+    );
+
+    await addDoc(collection(db, 'notifications'), cleanNotification);
+  } catch {
+    // Silent fail — notifications should never block core operations or clutter console
   }
 };
 
@@ -158,107 +162,38 @@ export const sendAdminBroadcast = async (
   });
 };
 
-// Local helper — updates a token document without extra imports
-const updateTokenDoc = async (id: string, data: Record<string, any>) => {
-  const { doc, updateDoc } = await import('firebase/firestore');
-  await updateDoc(doc(db, 'fcmTokens', id), data);
-};
-
 // ----- FCM Token Registration -----
-// Registers current browser's FCM push token to Firestore under 'fcmTokens' collection.
-// Tokens are deduplicated by token value so repeated logins never pile up stale rows.
+// Registers current browser's FCM push token to Firestore under 'fcmTokens' collection
 export const registerFcmToken = async (
   employeeId: string,
   role: string
 ): Promise<void> => {
   try {
-    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-    if (!vapidKey || vapidKey.includes('YOUR_')) {
-      console.warn('[FCM] VAPID key not configured. Push notifications will not work on mobile. Add VITE_FIREBASE_VAPID_KEY to .env');
-      return;
-    }
-
     // Dynamically import FCM to avoid breaking non-supported environments
     const { getMessaging, getToken } = await import('firebase/messaging');
     const { getApp } = await import('firebase/app');
     
     const messaging = getMessaging(getApp());
-    const registration = await navigator.serviceWorker.ready;
-    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
-
-    if (!token) return;
-
-    const tokenCollection = collection(db, 'fcmTokens');
-    const existing = await getDocs(query(tokenCollection, where('token', '==', token), firestoreLimit(1)));
-
-    if (!existing.empty) {
-      const existingDoc = existing.docs[0];
-      const current = existingDoc.data();
-      // Update ownership/metadata if the same token is now used by a different account or device
-      if (current.employeeId !== employeeId || current.role !== role || current.userAgent !== navigator.userAgent) {
-        await updateTokenDoc(existingDoc.id, { employeeId, role, userAgent: navigator.userAgent, registeredAt: serverTimestamp() });
-      }
-      console.info('[FCM] Token already registered — skipped duplicate.');
+    
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+    if (!vapidKey || vapidKey.includes('YOUR_')) {
       return;
     }
 
-    await addDoc(tokenCollection, {
-      employeeId,
-      role,
-      token,
-      userAgent: navigator.userAgent,
-      registeredAt: serverTimestamp()
-    });
-    console.info('[FCM] Token registered for employee:', employeeId);
+    const registration = await navigator.serviceWorker.ready;
+    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
+
+    if (token) {
+      await addDoc(collection(db, 'fcmTokens'), {
+        employeeId,
+        role,
+        token,
+        userAgent: navigator.userAgent,
+        registeredAt: serverTimestamp()
+      });
+      console.info('[FCM] Token registered for employee:', employeeId);
+    }
   } catch (err) {
     console.warn('[FCM] Token registration failed (safe to ignore in dev/unsupported browsers):', err);
-  }
-};
-
-// ----- Foreground push handler -----
-// While the app is open, incoming FCM messages show a system notification via the
-// active service worker (same visual as background pushes) and dispatch a DOM event
-// so the in-app UI can react instantly. Call once after login.
-let foregroundListenerStarted = false;
-export const setupFcmForegroundListener = (): void => {
-  if (foregroundListenerStarted) return;
-  foregroundListenerStarted = true;
-
-  const start = async () => {
-    try {
-      const { getMessaging, onMessage } = await import('firebase/messaging');
-      const { getApp } = await import('firebase/app');
-      const messaging = getMessaging(getApp());
-
-      onMessage(messaging, (payload) => {
-        const title = payload.notification?.title || '📢 Kalpanaaa HR Alert';
-        const body = payload.notification?.body || 'You have a new notification from KSS HR System.';
-        const type = payload.data?.type || 'SYSTEM_ALERT';
-
-        // Re-dispatch so in-app listeners (badge, toasts) react without polling
-        try {
-          window.dispatchEvent(new CustomEvent('kss:fcm', { detail: { title, body, type, data: payload.data } }));
-        } catch { /* noop */ }
-
-        // Show a browser notification through the active SW registration
-        navigator.serviceWorker.ready
-          .then(reg => reg.showNotification(title, {
-            body,
-            icon: '/pwa-192x192.png',
-            badge: '/favicon.png',
-            tag: type || 'kss-notification',
-            data: payload.data
-          }))
-          .catch(() => { /* notification display is best-effort */ });
-      });
-
-      console.info('[FCM] Foreground push listener active.');
-    } catch (err) {
-      console.warn('[FCM] Foreground listener unavailable:', err);
-    }
-  };
-
-  if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-    start();
   }
 };

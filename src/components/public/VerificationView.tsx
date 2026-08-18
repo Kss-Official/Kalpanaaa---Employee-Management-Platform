@@ -22,7 +22,12 @@ export const VerificationView: React.FC = () => {
     );
   }
 
-  const employee = employees.find(e => e.employeeId === empId);
+  const cleanId = (empId || '').trim();
+  const employee = employees.find(e => 
+    e.employeeId?.toLowerCase() === cleanId.toLowerCase() || 
+    e.id?.toLowerCase() === cleanId.toLowerCase() ||
+    `emp-${e.employeeId?.toLowerCase()}` === cleanId.toLowerCase()
+  );
 
   if (!employee) {
     return (

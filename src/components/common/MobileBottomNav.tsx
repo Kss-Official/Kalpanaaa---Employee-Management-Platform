@@ -34,7 +34,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   ];
 
   const employeeTabs = [
-    { id: 'emp_dashboard', label: 'Workspace', icon: LayoutDashboard },
+    { id: 'emp_dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'emp_attendance', label: 'Attendance', icon: UserCheck },
     { id: 'emp_leave', label: 'Leaves', icon: CalendarCheck2 },
     { id: 'emp_qr', label: 'ID Pass', icon: CreditCard },
@@ -88,22 +88,6 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             </button>
           );
         })}
-
-        {/* Menu Drawer Toggle */}
-        <button
-          onClick={() => {
-            triggerHaptic('light');
-            onOpenMobileMenu();
-          }}
-          className={`flex flex-col items-center justify-center h-full rounded-2xl text-[var(--text-tertiary)] font-medium cursor-pointer min-w-[60px] outline-none ${animations.tap}`}
-        >
-          <div className="relative mt-1">
-            <Menu className="w-[22px] h-[22px]" strokeWidth={2} />
-          </div>
-          <span className="text-[10px] tracking-tight mt-1 opacity-0 translate-y-1 absolute bottom-0 transition-all duration-[var(--duration-normal)]">
-            More
-          </span>
-        </button>
       </div>
     </nav>
   );

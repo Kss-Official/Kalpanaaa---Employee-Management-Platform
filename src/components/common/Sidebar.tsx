@@ -14,8 +14,7 @@ import {
   FolderLock,
   LogOut,
   X,
-  Banknote,
-  History
+  Banknote
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -40,15 +39,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isAdmin = isExecutive || isHr;
 
   const executiveNavItems = [
-    { id: 'dashboard', label: 'Executive Overview', icon: LayoutDashboard },
-    { id: 'employees', label: 'Team Directory', icon: Users },
-    { id: 'my_id_card', label: 'My ID Card (QR/Barcode)', icon: CreditCard },
-    { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
-    { id: 'reports', label: 'Reports & Intelligence', icon: FileSpreadsheet },
-    { id: 'leave_approvals', label: 'Leave & WFH Sanctions', icon: FileText },
-    { id: 'documents', label: 'Document Generator', icon: FileText },
-    { id: 'settings', label: 'Policy & Rules', icon: Settings },
-    { id: 'audit_logs', label: 'Audit Trail', icon: ShieldCheck },
+    { id: 'dashboard',       label: 'Executive Overview',          icon: LayoutDashboard },
+    { id: 'employees',       label: 'Team Directory',               icon: Users },
+    { id: 'my_id_card',      label: 'My ID Card (QR/Barcode)',      icon: CreditCard },
+    { id: 'attendance',      label: 'Attendance Ledger',            icon: CalendarCheck2 },
+    { id: 'reports',         label: 'Reports & Intelligence',       icon: FileSpreadsheet },
+    { id: 'leave_approvals', label: 'Leave & WFH Sanctions',        icon: FileText },
+    { id: 'hr_payroll',      label: 'Salary Disbursement',          icon: Banknote },
+    { id: 'company_rules',   label: 'Company & Employee Rules',     icon: FileText },
+    { id: 'notifications',   label: 'Notification History',         icon: ShieldCheck },
+    { id: 'documents',       label: 'Document Generator',           icon: FileText },
+    { id: 'my_profile',      label: 'My Profile',                   icon: UserCheck },
+    { id: 'settings',        label: 'Policy & Settings',            icon: Settings },
+    { id: 'audit_logs',      label: 'Audit Trail',                  icon: ShieldCheck },
   ];
 
   const hrNavItems = [
@@ -57,15 +60,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
     { id: 'leave_approvals', label: 'Leave & WFH Inbox', icon: FileText },
     { id: 'hr_payroll', label: 'Salary Disbursement', icon: Banknote },
+    { id: 'company_rules', label: 'Company & Employee Rules', icon: FileText },
+    { id: 'notifications', label: 'Notification History', icon: ShieldCheck },
     { id: 'reports', label: 'Reports & Intelligence', icon: FileSpreadsheet },
-    { id: 'hr_rules', label: 'Company & Employee Rules', icon: ShieldCheck },
+    { id: 'hr_profile', label: 'My Profile', icon: UserCheck },
   ];
 
   const pmNavItems = [
     { id: 'pm_dashboard', label: 'PM Control Center', icon: LayoutDashboard },
+    { id: 'employees', label: 'Team Directory', icon: Users },
+    { id: 'leave_approvals', label: 'Team Leave Approvals', icon: FileText },
     { id: 'pm_projects', label: 'Projects & Kanban', icon: FolderLock },
     { id: 'pm_team', label: 'Team Performance & 1:1s', icon: Users },
-    { id: 'emp_dashboard', label: 'My Personal Workspace', icon: UserCheck },
+    { id: 'notifications', label: 'Notification History', icon: ShieldCheck },
+    { id: 'pm_profile', label: 'My Profile', icon: UserCheck },
   ];
 
   const employeeNavItems = [
@@ -73,9 +81,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'emp_attendance', label: 'My Attendance', icon: UserCheck },
     { id: 'emp_leave', label: 'My Leave & WFH', icon: CalendarCheck2 },
     { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },
+    { id: 'notifications', label: 'Notification History', icon: ShieldCheck },
     { id: 'emp_qr', label: 'Barcode & QR Printing', icon: CreditCard },
     { id: 'emp_directory', label: 'Team Directory', icon: Users },
-    { id: 'emp_activity', label: 'My Activity Log', icon: History },
     { id: 'emp_profile', label: 'My Profile', icon: UserCheck },
   ];
 
@@ -107,11 +115,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       `}>
         <div className="px-4 py-3.5 border-b border-slate-800/80 flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase block">
-              {isAdmin ? 'Kalpanaaa Workspace' : 'Employee Workspace'}
+            <span className="text-[10px] font-bold tracking-wider text-blue-400 uppercase block">
+              {isAdmin ? 'Corporate Admin' : isPm ? 'Project Manager' : 'Employee Session'}
             </span>
-            <span className="text-xs font-semibold text-white truncate block max-w-[170px]">
-              {activeEmployee?.fullName || 'Active Workspace'}
+            <span className="text-xs font-bold text-white truncate block max-w-[170px]">
+              {activeEmployee?.fullName || 'Kalpanaaa HRMS'}
             </span>
           </div>
           
@@ -128,25 +136,89 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleSelectTab(item.id)}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                }`}
-              >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+          {!isAdmin && !isPm ? (
+            <>
+              {/* MY WORKSPACE Section */}
+              <div className="space-y-1">
+                <span className="px-3 text-[10px] font-extrabold tracking-widest text-slate-400 uppercase block mb-1.5">
+                  MY WORKSPACE
+                </span>
+                {[
+                  { id: 'emp_dashboard', label: 'Dashboard', icon: LayoutDashboard },
+                  { id: 'emp_attendance', label: 'Attendance', icon: UserCheck },
+                  { id: 'emp_leave', label: 'Leave & WFH', icon: CalendarCheck2 },
+                  { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },
+                  { id: 'notifications', label: 'Notification History', icon: ShieldCheck },
+                  { id: 'emp_qr', label: 'QR & Printing', icon: CreditCard },
+                ].map(item => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleSelectTab(item.id)}
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40 font-bold'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* TEAM Section */}
+              <div className="space-y-1 pt-2 border-t border-slate-800/60">
+                <span className="px-3 text-[10px] font-extrabold tracking-widest text-slate-400 uppercase block mb-1.5">
+                  TEAM
+                </span>
+                {[
+                  { id: 'emp_directory', label: 'Team Directory', icon: Users },
+                  { id: 'emp_profile', label: 'My Profile', icon: UserCheck },
+                ].map(item => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleSelectTab(item.id)}
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40 font-bold'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleSelectTab(item.id)}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })
+          )}
         </nav>
 
         {/* Bottom Actions Area */}

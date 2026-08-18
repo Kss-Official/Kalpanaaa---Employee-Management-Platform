@@ -21,10 +21,7 @@ export default defineConfig(({ command }) => {
           globPatterns: command === 'build' ? ['**/*.{js,css,html,ico,png,svg,jpeg}'] : [],
           maximumFileSizeToCacheInBytes: 6000000, // 6MB to accommodate large JS bundles and logo
           skipWaiting: true,
-          clientsClaim: true,
-          // Load the FCM background-messaging handler inside the generated sw.js so
-          // push notifications work even when the PWA tab is closed (required for FCM).
-          importScripts: ['/firebase-messaging-sw.js']
+          clientsClaim: true
         },
         manifest: {
           name: 'Kalpanaaa Software Solutions',
@@ -56,6 +53,17 @@ export default defineConfig(({ command }) => {
     },
     build: {
       chunkSizeWarningLimit: 3000,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-icons': ['lucide-react'],
+            'vendor-motion': ['framer-motion', 'motion'],
+            'vendor-faceapi': ['@vladmandic/face-api'],
+            'vendor-pdf': ['jspdf', 'jspdf-autotable']
+          }
+        }
+      }
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

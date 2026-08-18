@@ -3,11 +3,11 @@
 @layer base {
   :root {
     /* Primary Backgrounds */
-    --bg-primary:       #000000;
-    --bg-secondary:     #0a0a0f;
-    --bg-tertiary:      #111118;
-    --bg-elevated:      #1a1a24;
-    --bg-overlay:       rgba(10,10,15,0.85);
+    --bg-primary:       #020617;
+    --bg-secondary:     #0b0f19;
+    --bg-tertiary:      #111827;
+    --bg-elevated:      #1e293b;
+    --bg-overlay:       rgba(2,6,23,0.85);
 
     /* Text Colors */
     --text-primary:     #ffffff;
@@ -62,32 +62,31 @@
     --duration-dramatic: 600ms;
   }
 
-  body {
-    background-color: var(--bg-primary);
+  html, body, #root {
+    background-color: var(--bg-primary) !important;
     color: var(--text-primary);
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none !important;
+    overscroll-behavior-x: none !important;
+    overscroll-behavior-y: none !important;
+    overflow-x: hidden !important;
+    width: 100%;
+    min-height: 100vh;
   }
 }
 
-/* Custom Sleek Dark Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Hide scrollbars globally across all elements while keeping full smooth scrolling functionality */
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;     /* Firefox */
 }
 
-::-webkit-scrollbar-track {
-  background: #030712;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+*::-webkit-scrollbar {
+  display: none;
+  width: 0px;
+  height: 0px;
 }
 
 @media print {

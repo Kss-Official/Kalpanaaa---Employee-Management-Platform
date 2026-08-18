@@ -1,4 +1,5 @@
 import { AttendanceRecord } from '../types';
+import { toISTTimeString } from './absoluteTime';
 
 export const exportAttendanceToCSV = (records: AttendanceRecord[], filename: string) => {
   if (records.length === 0) {
@@ -24,15 +25,15 @@ export const exportAttendanceToCSV = (records: AttendanceRecord[], filename: str
 
   // Map data to rows
   const rows = records.map(rec => {
-    const checkIn = rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--';
-    const checkOut = rec.checkOutAt ? new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--';
+    const checkIn = rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--';
+    const checkOut = rec.checkOutAt ? toISTTimeString(rec.checkOutAt) : '--';
     const workingHours = rec.workingMinutes > 0 ? `${Math.floor(rec.workingMinutes / 60)}h ${rec.workingMinutes % 60}m` : '--';
     
     let breaksInfo = 'No Breaks';
     if (rec.breaks && rec.breaks.length > 0) {
       breaksInfo = rec.breaks.map(b => {
-        const start = new Date(b.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-        const end = b.endAt ? new Date(b.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'Ongoing';
+        const start = toISTTimeString(b.startAt);
+        const end = b.endAt ? toISTTimeString(b.endAt) : 'Ongoing';
         return `${b.type} (${start} - ${end}) [${b.durationMinutes}m]`;
       }).join(' | ');
     }

@@ -6,8 +6,29 @@ export type EmployeeStatus = 'Active' | 'On Leave' | 'Terminated' | 'Suspended';
 
 export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Half Day' | 'On Leave' | 'Holiday' | 'Work From Home';
 
+export type BreakType = 
+  | 'Tea Break' 
+  | 'Meal Break' 
+  | 'Team Huddle' 
+  | 'Team Meeting' 
+  | 'Attainment / Training' 
+  | 'Activity' 
+  | 'Geo-Fence Auto Break';
+
+export const normalizeBreakType = (type?: string): BreakType | string => {
+  if (!type) return 'Meal Break';
+  const lower = type.toLowerCase();
+  if (lower.includes('meal') || lower.includes('lunch')) return 'Meal Break';
+  if (lower.includes('tea') || lower.includes('coffee')) return 'Tea Break';
+  if (lower.includes('huddle')) return 'Team Huddle';
+  if (lower.includes('meeting')) return 'Team Meeting';
+  if (lower.includes('attainment') || lower.includes('training')) return 'Attainment / Training';
+  if (lower.includes('geo')) return 'Geo-Fence Auto Break';
+  return type;
+};
+
 export interface BreakEntry {
-  type: 'Tea Break' | 'Lunch Break' | 'Geo-Fence Auto Break' | 'Team Huddle' | 'Official Event';
+  type: BreakType;
   startAt: string;   // ISO timestamp
   endAt: string | null; // null = break is ongoing
   durationMinutes: number;
@@ -17,19 +38,38 @@ export interface LeaveRequest {
   id: string;
   employeeId: string;
   employeeName: string;
+  department?: string;
+  employeeRole?: UserRole | string;
   type: 'Leave' | 'WFH';
   startDate: string;
   endDate: string;
   reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
+  status: 'Pending' | 'Approved' | 'Rejected';
   requestDate: string;
   reviewedBy?: string;
   reviewNotes?: string;
-  // PM Pipeline fields
+  
+  // Multi-tier Approval Cycle fields (PM -> HR -> CEO -> CTO)
+  pmStatus?: 'Pending' | 'Approved' | 'Rejected' | 'N/A' | 'Bypassed';
   pmRecommendation?: 'Approved' | 'Rejected';
   pmNotes?: string;
   pmReviewedBy?: string;
   pmReviewedAt?: string;
+
+  hrStatus?: 'Pending' | 'Approved' | 'Rejected' | 'Waiting PM' | 'N/A' | 'Bypassed';
+  hrNotes?: string;
+  hrReviewedBy?: string;
+  hrReviewedAt?: string;
+
+  ceoStatus?: 'Pending' | 'Approved' | 'Rejected' | 'Waiting PM' | 'Waiting HR' | 'Bypassed';
+  ceoNotes?: string;
+  ceoReviewedBy?: string;
+  ceoReviewedAt?: string;
+
+  ctoStatus?: 'Pending' | 'Approved' | 'Rejected' | 'Waiting CEO';
+  ctoNotes?: string;
+  ctoReviewedBy?: string;
+  ctoReviewedAt?: string;
 }
 
 export type AttendanceMethod = 'QR Code' | 'Manual Admin' | 'Self Portal' | 'Biometric' | 'Facial Recognition';
@@ -144,7 +184,6 @@ export interface AuditLog {
   details: string;
   timestamp: string;
   ipAddress?: string;
-  category?: 'attendance' | 'leave' | 'profile' | 'security' | 'admin' | 'payroll' | 'system' | 'rules';
 }
 
 export interface CompanySettings {
@@ -168,6 +207,7 @@ export interface CompanySettings {
   teaBreakDurationMinutes: number; // 10
   lunchBreakDurationMinutes: number; // 30
   wfhEnabled: boolean;
+  companyWideWfhDates?: string[]; // Dates (YYYY-MM-DD) assigned by CEO or CTO for Office-Wide WFH
   
   // QR settings
   qrTokenLifetimeMinutes: number;

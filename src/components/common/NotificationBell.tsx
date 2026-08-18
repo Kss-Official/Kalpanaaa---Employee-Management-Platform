@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, X, CheckCheck, Megaphone, Send, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
@@ -6,7 +7,7 @@ import { notificationIcon, notificationColor } from '../../lib/notifications';
 
 // ──── Notification Bell + Dropdown ────
 export const NotificationBell: React.FC = () => {
-  const { notifications, unreadNotificationCount, markAllNotificationsRead, role, sendBroadcast } = useAuth();
+  const { notifications, unreadNotificationCount, markAllNotificationsRead, role, sendBroadcast, activeEmployee } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
   const [broadcastTitle, setBroadcastTitle] = useState('');
@@ -17,11 +18,52 @@ export const NotificationBell: React.FC = () => {
 
   const isAdmin = role === 'SUPER_ADMIN' || role === 'HR_ADMIN' || role === 'PROJECT_MANAGER';
 
-  // Filter notifications visible to current role
+  const [dismissedToastIds, setDismissedToastIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('kss_v1_dismissed_toasts');
+      if (saved) return new Set(JSON.parse(saved));
+    } catch {}
+    return new Set();
+  });
+
+  const handleDismissToast = (id?: string) => {
+    if (!id) return;
+    setDismissedToastIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      try {
+        localStorage.setItem('kss_v1_dismissed_toasts', JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
+    markAllNotificationsRead();
+  };
+
+  // Filter ONLY main / high-priority notifications (Leave/WFH requests, Approvals, Rejections, Broadcasts, Security Alerts) for Activity Notifications bell dropdown
   const visibleNotifications = notifications.filter(n => {
     if (!n.audience) return false;
+
+    const typeStr = (n.type || '').toUpperCase();
+    const titleStr = (n.title || '').toLowerCase();
+
+    // Filter out all routine attendance events (Check-in, Check-out, Break Start, Break End) from the top bell dropdown.
+    // These routine logs remain 100% available in the "Notification History" section.
+    const isRoutineAttendance = 
+      typeStr.startsWith('ATTENDANCE_') || 
+      titleStr.includes('break started') || 
+      titleStr.includes('break ended') || 
+      titleStr.includes('check-in') || 
+      titleStr.includes('check-out');
+
+    if (isRoutineAttendance) return false;
+
     if (n.audience.includes('ALL')) return true;
-    return n.audience.includes(role as any);
+    if (n.audience.includes(role as any)) return true;
+    if (role === 'EMPLOYEE') {
+      const isMyRecord = n.targetEmployeeId === activeEmployee?.id || n.targetEmployeeId === activeEmployee?.employeeId;
+      if ((n as any).isPersonalSanction && isMyRecord) return true;
+    }
+    return false;
   }).slice(0, 20);
 
   // Close dropdown on outside click
@@ -135,6 +177,12 @@ export const NotificationBell: React.FC = () => {
                   const timeStr = n.createdAt 
                     ? new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : '';
+                  const isMyRecord = n.targetEmployeeId === activeEmployee?.id || n.targetEmployeeId === activeEmployee?.employeeId;
+                  const isOwnSanction = role === 'EMPLOYEE' && (n as any).isPersonalSanction && isMyRecord;
+                  const isOwnAtt    = role === 'EMPLOYEE' && (n as any).isOwnAttendance    && isMyRecord;
+                  const usePersonal = isOwnSanction || isOwnAtt;
+                  const displayTitle = usePersonal && (n as any).personalTitle ? (n as any).personalTitle : n.title;
+                  const displayBody  = usePersonal && (n as any).personalBody  ? (n as any).personalBody  : n.body;
                   return (
                     <div key={n.id || idx} className="px-4 py-3 hover:bg-slate-800/40 transition-colors">
                       <div className="flex items-start gap-3">
@@ -142,8 +190,8 @@ export const NotificationBell: React.FC = () => {
                           {icon}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-white truncate">{n.title}</p>
-                          <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed line-clamp-2">{n.body}</p>
+                          <p className="text-xs font-bold text-white truncate">{displayTitle}</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed line-clamp-2">{displayBody}</p>
                           {n.actorName && (
                             <p className="text-[10px] text-slate-600 mt-0.5">by {n.actorName}</p>
                           )}
@@ -156,7 +204,6 @@ export const NotificationBell: React.FC = () => {
               )}
             </div>
 
-            {/* Footer */}
             <div className="px-4 py-2.5 border-t border-slate-800 bg-slate-950/30 text-center">
               <span className="text-[10px] text-slate-600 font-medium">
                 Live feed from Firestore · {visibleNotifications.length} recent events
@@ -166,15 +213,50 @@ export const NotificationBell: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Admin Broadcast Modal */}
-      <AnimatePresence>
-        {isBroadcastOpen && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      {/* High Visibility Floating Announcement Popup Toast — rendered via Portal at bottom-right of viewport */}
+      {visibleNotifications.length > 0 &&
+        (visibleNotifications[0].type === 'ADMIN_BROADCAST' || visibleNotifications[0].type === 'BROADCAST') &&
+        visibleNotifications[0].actorId &&
+        visibleNotifications[0].id &&
+        !dismissedToastIds.has(visibleNotifications[0].id) &&
+        createPortal(
+          <div className="fixed bottom-6 right-6 z-[9999] max-w-md w-full bg-slate-900/95 border-2 border-blue-500 rounded-2xl p-4 shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-xl animate-in slide-in-from-bottom-5 duration-300">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center font-bold text-lg shrink-0 shadow-inner">
+                  📢
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black tracking-widest text-blue-400 uppercase">OFFICIAL BROADCAST</span>
+                    <span className="text-[10px] text-slate-400 font-mono">• Just now</span>
+                  </div>
+                  <h4 className="text-sm font-black text-white mt-0.5">{visibleNotifications[0].title}</h4>
+                  <p className="text-xs text-slate-200 font-medium mt-1 leading-relaxed">{visibleNotifications[0].body}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => handleDismissToast(visibleNotifications[0].id)}
+                className="text-slate-400 hover:text-white p-1.5 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer shrink-0 border border-slate-700 hover:border-slate-600"
+                title="Dismiss Announcement"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>,
+          document.body
+        )
+      }
+
+      {/* Admin Broadcast Modal rendered via Portal to prevent header context cutoff */}
+      {isBroadcastOpen && createPortal(
+        <AnimatePresence>
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl space-y-5"
+              className="w-full max-w-md bg-slate-900 border-2 border-blue-500/60 rounded-3xl p-6 shadow-2xl space-y-5"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -240,8 +322,9 @@ export const NotificationBell: React.FC = () => {
               </div>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };

@@ -3,18 +3,28 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" href="/favicon.png" type="image/png">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="icon" href="/favicon.png?v=3" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#020617">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Kalpanaaa Software Solutions-Employees MGMNT</title>
   <style>
-    html, body { margin: 0; padding: 0; background: #000000; }
+    html, body, #root {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      min-height: 100vh;
+      background: #020617 !important;
+      overscroll-behavior: none !important;
+      overscroll-behavior-x: none !important;
+      overscroll-behavior-y: none !important;
+      overflow-x: hidden !important;
+    }
     #splash-screen {
       position: fixed; inset: 0;
-      background: #000000;
+      background: #020617;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px;
       z-index: 99999;
       transition: opacity 0.5s ease-in-out;
@@ -67,8 +77,8 @@
           }, 500);
         }
       };
-      // Absolute safety net: force-remove after 6s no matter what
-      setTimeout(window.__hideSplash, 6000);
+      // Fast safety net: remove splash after 150ms
+      setTimeout(window.__hideSplash, 150);
     });
   </script>
   <script type="module" src="/src/main.tsx"></script>

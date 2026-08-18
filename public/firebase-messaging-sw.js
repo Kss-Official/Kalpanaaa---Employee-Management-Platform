@@ -2,8 +2,8 @@
 // Required for background push notifications on mobile and PWA
 // Place this in /public/firebase-messaging-sw.js
 
-importScripts('https://www.gstatic.com/firebasejs/12.17.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/12.17.0/firebase-messaging-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.0.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.0.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: "AIzaSyB5sN1axynuVlmzK0k6lLrvL3PbsR7x0QA",
