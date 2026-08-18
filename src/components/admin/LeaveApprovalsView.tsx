@@ -11,6 +11,7 @@ export const LeaveApprovalsView: React.FC = () => {
 
   const effectiveRole = activeEmployee?.role || role || 'SUPER_ADMIN';
   const isPm = effectiveRole === 'PROJECT_MANAGER';
+  const isHr = effectiveRole === 'HR_ADMIN';
   const todayStr = new Date().toISOString().split('T')[0];
   const [wfhDateInput, setWfhDateInput] = useState(todayStr);
   const [wfhFeedback, setWfhFeedback] = useState<{ success: boolean; message: string } | null>(null);
@@ -141,15 +142,22 @@ export const LeaveApprovalsView: React.FC = () => {
     }
 
     if (isPm) {
-      const isHrEmployee = (req.department || '').toLowerCase().includes('hr') ||
-        (req.employeeRole || '').toLowerCase().includes('hr') ||
-        (() => {
-          const emp = employees.find(e => e.id === req.employeeId || e.employeeId === req.employeeId || e.fullName === req.employeeName);
-          return emp?.department?.toLowerCase().includes('hr') || emp?.role === 'HR_ADMIN';
-        })();
-      if (isHrEmployee) return false;
+      if (req.pmStatus === 'N/A' || req.pmStatus === 'Bypassed' || req.pmStatus === 'Approved' || req.pmStatus === 'Rejected') return false;
 
-      if (req.pmStatus === 'N/A' || req.employeeRole === 'PROJECT_MANAGER' || req.employeeId === activeEmployee?.id || req.employeeId === activeEmployee?.employeeId || req.employeeName === activeEmployee?.fullName) {
+      const isHrOrPmApplicant = (req.department || '').toLowerCase().includes('hr') ||
+        (req.employeeRole || '').toLowerCase().includes('hr') ||
+        req.employeeRole === 'PROJECT_MANAGER' ||
+        req.employeeRole === 'SUPER_ADMIN' ||
+        (req.employeeName || '').toLowerCase().includes('koushik') ||
+        (req.employeeName || '').toLowerCase().includes('abhinaya');
+
+      if (isHrOrPmApplicant) return false;
+
+      if (
+        (activeEmployee?.id && req.employeeId === activeEmployee.id) ||
+        (activeEmployee?.employeeId && req.employeeId === activeEmployee.employeeId) ||
+        (activeEmployee?.fullName && req.employeeName?.toLowerCase() === activeEmployee.fullName.toLowerCase())
+      ) {
         return false;
       }
     } else if (isHr) {

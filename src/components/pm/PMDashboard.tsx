@@ -155,27 +155,29 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     if (r.status !== 'Pending') return false;
 
     // PM stage must be pending for PM to review
-    if (r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') return false;
+    if (r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed' || r.pmStatus === 'Approved' || r.pmStatus === 'Rejected') return false;
 
     // Self-request check: PM cannot approve/reject their own request!
-    if (r.employeeId === activeEmployee?.id || r.employeeId === activeEmployee?.employeeId || r.employeeName === activeEmployee?.fullName) {
+    if (
+      (activeEmployee?.id && r.employeeId === activeEmployee.id) ||
+      (activeEmployee?.employeeId && r.employeeId === activeEmployee.employeeId) ||
+      (activeEmployee?.fullName && r.employeeName?.toLowerCase() === activeEmployee.fullName.toLowerCase())
+    ) {
       return false;
     }
 
     // Exclude HR employees and PM/Executive applicants from PM leave approval pipeline
-    const isHrOrPmEmployee = (r.department || '').toLowerCase().includes('hr') ||
+    const isHrOrPmApplicant =
+      (r.department || '').toLowerCase().includes('hr') ||
       (r.employeeRole || '').toLowerCase().includes('hr') ||
-      r.employeeRole === 'PROJECT_MANAGER' || r.employeeRole === 'SUPER_ADMIN' ||
+      r.employeeRole === 'PROJECT_MANAGER' ||
+      r.employeeRole === 'SUPER_ADMIN' ||
       (r.employeeName || '').toLowerCase().includes('koushik') ||
-      (r.employeeName || '').toLowerCase().includes('abhinaya') ||
-      (() => {
-        const emp = employees.find(e => e.id === r.employeeId || e.employeeId === r.employeeId || e.fullName === r.employeeName);
-        return emp?.department?.toLowerCase().includes('hr') || emp?.role === 'HR_ADMIN' || emp?.role === 'PROJECT_MANAGER';
-      })();
+      (r.employeeName || '').toLowerCase().includes('abhinaya');
 
-    if (isHrOrPmEmployee) return false;
+    if (isHrOrPmApplicant) return false;
 
-    return r.pmStatus === 'Pending' || !r.pmStatus;
+    return true;
   });
 
   return (

@@ -1048,18 +1048,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (!snapshot.empty) {
             snapshot.forEach(docSnap => {
               const raw = { id: docSnap.id, ...docSnap.data() } as LeaveRequest;
-              const pmStatus = raw.pmStatus || 'Pending';
-              const ceoStatus = raw.ceoStatus || (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM');
+              const isApplicantPmOrHr = raw.employeeRole === 'PROJECT_MANAGER' || raw.employeeRole === 'HR_ADMIN' ||
+                (raw.department || '').toLowerCase().includes('hr') ||
+                (raw.employeeName || '').toLowerCase().includes('koushik') ||
+                (raw.employeeName || '').toLowerCase().includes('abhinaya');
+
+              const pmStatus = raw.pmStatus || (isApplicantPmOrHr ? 'N/A' : 'Pending');
+              const hrStatus = raw.hrStatus || (isApplicantPmOrHr ? 'N/A' : (pmStatus === 'Approved' ? 'Pending' : 'Waiting PM'));
+              const ceoStatus = raw.ceoStatus || (isApplicantPmOrHr ? 'Pending' : (hrStatus === 'Approved' ? 'Pending' : 'Waiting HR'));
               const ctoStatus = raw.ctoStatus || (ceoStatus === 'Approved' ? 'Pending' : 'Waiting CEO');
+
               let status: 'Pending' | 'Approved' | 'Rejected' = raw.status || 'Pending';
-              if (pmStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || raw.status === 'Rejected') {
+              if (pmStatus === 'Rejected' || hrStatus === 'Rejected' || ceoStatus === 'Rejected' || ctoStatus === 'Rejected' || raw.status === 'Rejected') {
                 status = 'Rejected';
-              } else if (pmStatus === 'Approved' && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
+              } else if ((pmStatus === 'Approved' || pmStatus === 'N/A') && (hrStatus === 'Approved' || hrStatus === 'N/A') && ceoStatus === 'Approved' && ctoStatus === 'Approved') {
                 status = 'Approved';
               } else {
                 status = 'Pending';
               }
-              fetched.push({ ...raw, pmStatus, ceoStatus, ctoStatus, status });
+              fetched.push({ ...raw, pmStatus, hrStatus, ceoStatus, ctoStatus, status });
             });
           }
 
@@ -2168,9 +2175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       // Clean undefined values to prevent Firestore setDoc crash
-      const cleanPayload = Object.fromEntries(
-        Object.entries(updatedReq).filter(([_, v]) => v !== undefined)
-      );
+      const cleanPayload = cleanFirestorePayload(updatedReq);
 
       // Update in Firestore
       setDoc(doc(db, 'leaveRequests', id), cleanPayload, { merge: true }).catch(err => {

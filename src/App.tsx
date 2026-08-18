@@ -291,7 +291,7 @@ const MainLayout: React.FC = () => {
                 {currentTab === 'settings' && <SettingsView />}
                 {currentTab === 'audit_logs' && <AuditLogsView />}
                 {currentTab === 'leave_approvals' && (
-                  role === 'HR_ADMIN' ? <HRLeaveWfhApprovals /> : <LeaveApprovalsView />
+                  effectiveRole === 'HR_ADMIN' ? <HRLeaveWfhApprovals /> : <LeaveApprovalsView />
                 )}
 
                 {currentTab.startsWith('emp_') && (
