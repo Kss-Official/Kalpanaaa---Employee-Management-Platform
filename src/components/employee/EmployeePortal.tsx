@@ -176,6 +176,8 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [isCapturingCamera, setIsCapturingCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Late' | 'Absent' | 'Leave'>('All');
+
   const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
     (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
     (activeEmployee?.designation || '').toUpperCase().includes('CTO') ||
