@@ -810,12 +810,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let unsubLeaveReqs = () => { };
     let unsubNotifs = () => { };
 
-    const initFirestore = async () => {
+    const initFirestore = () => {
       try {
-        const connected = await testConnection();
-        setIsFirestoreConnected(connected);
+        testConnection().then(connected => setIsFirestoreConnected(connected)).catch(() => {
+          setIsFirestoreConnected(typeof navigator !== 'undefined' ? navigator.onLine : true);
+        });
 
-        // Subscribe to real-time updates for employees
+        // Subscribe to real-time updates IMMEDIATELY for employees
         unsubEmps = onSnapshot(collection(db, 'employees'), (snapshot) => {
           if (!snapshot.empty) {
             const fetched: Employee[] = [];
