@@ -2026,8 +2026,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const submitLeaveRequest = (data: Omit<LeaveRequest, 'id' | 'status' | 'requestDate'>) => {
     const emp = activeEmployee;
-    const empId = data.employeeId || emp?.employeeId || emp?.id || 'KSS2407013';
-    const empName = data.employeeName || emp?.fullName || 'Akash SB';
+    const empId = data.employeeId || emp?.employeeId || emp?.id || `EMP-${Date.now().toString().slice(-6)}`;
+    const empName = data.employeeName || emp?.fullName || 'Employee';
     const empDept = data.department || emp?.department || 'Engineering';
     const empRole = data.employeeRole || emp?.role || 'EMPLOYEE';
 

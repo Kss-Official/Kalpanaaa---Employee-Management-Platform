@@ -63,8 +63,8 @@ export const EmployeeLeaveTab: React.FC = () => {
     }
 
     submitLeaveRequest({
-      employeeId: activeEmployee!.employeeId,
-      employeeName: activeEmployee!.fullName,
+      employeeId: activeEmployee?.employeeId || activeEmployee?.id || '',
+      employeeName: activeEmployee?.fullName || 'Employee',
       department: activeEmployee?.department || 'Engineering',
       employeeRole: activeEmployee?.role || 'EMPLOYEE',
       type,
