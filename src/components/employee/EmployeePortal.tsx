@@ -670,10 +670,24 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const startAt = new Date().toISOString();
     const existingBreaks = (todayRecord.breaks || []).map(b => {
       if (!b.endAt && !(b as any).endTime) {
-        const dur = Math.max(1, Math.round((new Date(startAt).getTime() - new Date(b.startAt || (b as any).startTime).getTime()) / 60000));
-        return { ...b, endAt: startAt, durationMinutes: dur };
+        const bStart = b.startAt || (b as any).startTime || startAt;
+        const startMs = new Date(bStart).getTime();
+        const endMs = new Date(startAt).getTime();
+        const diffMins = !isNaN(startMs) && !isNaN(endMs) && endMs > startMs ? Math.round((endMs - startMs) / 60000) : 1;
+        const dur = Math.max(1, isNaN(diffMins) ? 1 : diffMins);
+        return {
+          type: b.type || 'Break',
+          startAt: bStart,
+          endAt: startAt,
+          durationMinutes: dur
+        };
       }
-      return b;
+      return {
+        type: b.type || 'Break',
+        startAt: b.startAt || (b as any).startTime || startAt,
+        endAt: b.endAt || null,
+        durationMinutes: isNaN(Number(b.durationMinutes)) ? 0 : Number(b.durationMinutes)
+      };
     });
 
     const newBreak: BreakEntry = { type, startAt, endAt: null, durationMinutes: 0 };

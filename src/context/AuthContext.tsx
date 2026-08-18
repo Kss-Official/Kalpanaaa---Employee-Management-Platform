@@ -10,7 +10,7 @@ import {
   deleteDoc,
   onSnapshot
 } from 'firebase/firestore';
-import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig } from '../lib/firebase';
+import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload } from '../lib/firebase';
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
 import {
   INITIAL_EMPLOYEES,
@@ -1062,21 +1062,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
 
-          setLeaveRequests(prev => {
+          setLeaveRequests(() => {
             const map = new Map<string, LeaveRequest>();
             // 1. Initial / default leaves
             INITIAL_LEAVE_REQUESTS.forEach(r => map.set(r.id, r));
-            // 2. Previously cached local leaves
-            const saved = localStorage.getItem('kss_v1_leave_requests');
-            if (saved) {
-              try {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed)) parsed.forEach((r: any) => map.set(r.id, r));
-              } catch {}
-            }
-            // 3. Current active state
-            prev.forEach(r => map.set(r.id, r));
-            // 4. Authoritative real-time Firestore submissions (overwrites stale local data)
+            // 2. Authoritative real-time Firestore submissions
             fetched.forEach(r => map.set(r.id, r));
 
             const merged = Array.from(map.values());
@@ -1974,8 +1964,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return updated;
     });
 
-    // Update in Firestore
-    setDoc(doc(db, 'attendance', recordId), { ...updates, updatedAt: new Date().toISOString() }, { merge: true }).catch(err => {
+    // Update in Firestore (clean any undefined/NaN values)
+    const cleanUpdates = cleanFirestorePayload({ ...updates, updatedAt: new Date().toISOString() });
+    setDoc(doc(db, 'attendance', recordId), cleanUpdates, { merge: true }).catch(err => {
       handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
     });
 
@@ -2068,10 +2059,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {}
     }
     
-    // Write to Firestore (clean undefined fields)
-    const cleanPayload = Object.fromEntries(
-      Object.entries(newRequest).filter(([_, v]) => v !== undefined)
-    );
+    // Write to Firestore (clean undefined/NaN fields recursively)
+    const cleanPayload = cleanFirestorePayload(newRequest);
     setDoc(doc(db, 'leaveRequests', newRequest.id), cleanPayload).catch(err => {
       handleFirestoreError(err, OperationType.WRITE, `leaveRequests/${newRequest.id}`);
     });

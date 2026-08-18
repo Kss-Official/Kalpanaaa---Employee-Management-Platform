@@ -18,10 +18,10 @@ export type BreakType =
 export const normalizeBreakType = (type?: string): BreakType | string => {
   if (!type) return 'Meal Break';
   const lower = type.toLowerCase();
-  if (lower.includes('meal') || lower.includes('lunch')) return 'Meal Break';
-  if (lower.includes('tea') || lower.includes('coffee')) return 'Tea Break';
   if (lower.includes('huddle')) return 'Team Huddle';
   if (lower.includes('meeting')) return 'Team Meeting';
+  if (lower.includes('meal') || lower.includes('lunch')) return 'Meal Break';
+  if (lower.includes('tea break') || lower.includes('tea /') || lower.includes('coffee') || lower === 'tea') return 'Tea Break';
   if (lower.includes('attainment') || lower.includes('training')) return 'Attainment / Training';
   if (lower.includes('activity')) return 'Activity';
   if (lower.includes('geo')) return 'Geo-Fence Auto Break';
