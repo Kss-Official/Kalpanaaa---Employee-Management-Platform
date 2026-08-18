@@ -32,6 +32,13 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
 
   const targetEmployee = activeEmployee || employees.find(e => e.department?.toLowerCase().includes('hr') || e.role === 'HR_ADMIN') || employees[0];
 
+  const isCeoOrCto = targetEmployee?.role === 'SUPER_ADMIN' ||
+    (targetEmployee?.designation || '').toUpperCase().includes('CEO') ||
+    (targetEmployee?.designation || '').toUpperCase().includes('CTO') ||
+    (targetEmployee?.designation || '').toUpperCase().includes('FOUNDER') ||
+    targetEmployee?.employeeId === 'CEO001' ||
+    targetEmployee?.employeeId === 'CTO001';
+
   const totalEmployees = employees.length;
   const presentCount = todayAttendance.filter(a => a.status === 'Present').length;
   const absentCount = todayAttendance.filter(a => a.status === 'Absent').length;
@@ -178,7 +185,12 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
 
         {/* Action Buttons matching screenshot media_1786517118960 */}
         <div className="flex flex-wrap items-center gap-3">
-          {!isHrCheckedIn ? (
+          {isCeoOrCto ? (
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-black shadow-sm">
+              <ShieldCheck className="w-4 h-4 text-purple-400" />
+              <span>Executive Officer — Check-In Exempt</span>
+            </div>
+          ) : !isHrCheckedIn ? (
             <button
               onClick={initiateHrCheckIn}
               disabled={hrActionLoading}
