@@ -411,18 +411,18 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     profilePhotoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300'
   },
   {
-    id: 'emp-KSS2407014',
+    id: 'KfAB95lpbJOeylpKQaWX4GXOPGt2',
     employeeId: 'KSS2407014',
-    fullName: 'Gaurav Kumar Tripathi',
-    email: 'gaurav@kalpanaaa.in',
-    phone: '7273832175',
+    fullName: 'Jason Kenneth N',
+    email: 'jasonkennethn@kalpanaaa.in',
+    phone: '+91 98765 00014',
     gender: 'Male',
-    dateOfBirth: '1996-05-15',
+    dateOfBirth: '2000-01-01',
     department: 'Engineering',
-    designation: 'Chief Technology Officer (CTO)',
-    joiningDate: '2024-05-10',
+    designation: 'Software Engineer',
+    joiningDate: '2026-08-17',
     employmentType: 'Full-Time',
-    reportingManager: 'Executive Board',
+    reportingManager: 'D. Koushik',
     workLocation: 'Main Office HQ',
     status: 'Active',
     shift: 'Day Shift (10:00 - 19:30)',
@@ -431,13 +431,13 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     city: 'Bengaluru',
     state: 'Karnataka',
     postalCode: '560102',
-    emergencyContact: '7273832175',
+    emergencyContact: '+91 98765 00000',
     emergencyRelationship: 'Management',
-    role: 'SUPER_ADMIN',
-    qrToken: 'QR-KSS2407014',
-    createdAt: '2024-05-10T10:00:00Z',
+    role: 'EMPLOYEE',
+    qrToken: 'KSS2407014',
+    createdAt: '2026-08-17T04:38:47.685Z',
     updatedAt: new Date().toISOString(),
-    profilePhotoUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300'
+    profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'
   }
 ];
 
