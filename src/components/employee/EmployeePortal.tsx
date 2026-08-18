@@ -176,8 +176,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [isCapturingCamera, setIsCapturingCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Late' | 'Absent' | 'Leave'>('All');
-  
+  const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
+    (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
+    (activeEmployee?.designation || '').toUpperCase().includes('CTO') ||
+    (activeEmployee?.designation || '').toUpperCase().includes('FOUNDER') ||
+    activeEmployee?.employeeId === 'CEO001' ||
+    activeEmployee?.employeeId === 'CTO001';
+
   const todayStr = new Date().toISOString().split('T')[0];
   const todayRecords = attendance.filter(a => 
     (a.employeeId === activeEmployee?.id || a.employeeId === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.id) && 
@@ -1029,7 +1034,15 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     );
                   })()}
 
-                  {!todayRecord?.checkInAt ? (
+                  {isCeoOrCto ? (
+                    <div className="relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] border-purple-500/50 bg-gradient-to-b from-purple-950/40 to-slate-900 text-purple-300 shadow-xl shadow-purple-950/50 text-center p-4">
+                      <ShieldCheck className="w-10 h-10 mb-2 text-purple-400 animate-pulse" />
+                      <span className="font-extrabold text-sm tracking-wide text-white">Executive Officer</span>
+                      <span className="text-[10px] font-bold text-purple-300 mt-1 bg-purple-500/20 px-3 py-1 rounded-full border border-purple-500/30">
+                        Check-In Exempt
+                      </span>
+                    </div>
+                  ) : !todayRecord?.checkInAt ? (
                     <button 
                       onClick={handleSelfCheckIn} 
                       disabled={isCheckingIn}

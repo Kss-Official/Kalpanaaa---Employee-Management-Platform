@@ -142,11 +142,11 @@ const MainLayout: React.FC = () => {
   // Synchronous tab sanitization per role to eliminate flash of wrong content (Fixes C15 Contract)
   const getSanitizedTabForRole = (tab: string, roleToUse: string): string => {
     if (roleToUse === 'EMPLOYEE') {
-      if (!tab.startsWith('emp_') && tab !== 'notifications') {
+      if (!tab.startsWith('emp_') && tab !== 'notifications' && tab !== 'company_rules') {
         return 'emp_dashboard';
       }
     } else if (roleToUse === 'PROJECT_MANAGER') {
-      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees', 'emp_directory'];
+      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees', 'emp_directory', 'company_rules'];
       if (!allowedPMTabs.includes(tab) || (tab.startsWith('emp_') && tab !== 'emp_directory')) {
         return 'pm_dashboard';
       }

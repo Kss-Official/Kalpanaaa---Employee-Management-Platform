@@ -56,8 +56,16 @@ const DEFAULT_RULES: CompanyRuleItem[] = [
 ];
 
 export const CompanyRulesView: React.FC = () => {
-  const { role } = useAuth();
-  const isHR = role === 'SUPER_ADMIN' || role === 'HR_ADMIN';
+  const { role, activeEmployee } = useAuth();
+  const isHR = activeEmployee?.role === 'SUPER_ADMIN' ||
+    activeEmployee?.role === 'HR_ADMIN' ||
+    role === 'SUPER_ADMIN' ||
+    role === 'HR_ADMIN' ||
+    (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
+    (activeEmployee?.designation || '').toUpperCase().includes('CTO') ||
+    (activeEmployee?.designation || '').toUpperCase().includes('FOUNDER') ||
+    activeEmployee?.employeeId === 'CEO001' ||
+    activeEmployee?.employeeId === 'CTO001';
 
   const [rules, setRules] = useState<CompanyRuleItem[]>(() => {
     const saved = localStorage.getItem('kss_company_rules');
