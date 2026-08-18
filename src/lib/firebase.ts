@@ -92,3 +92,14 @@ export async function testConnection() {
     return typeof navigator !== 'undefined' ? navigator.onLine : true;
   }
 }
+
+// Clean any payload recursively to prevent Firestore undefined / NaN serialization crashes
+export function cleanFirestorePayload<T extends Record<string, any>>(obj: T): T {
+  return JSON.parse(
+    JSON.stringify(obj, (key, value) => {
+      if (value === undefined) return null;
+      if (typeof value === 'number' && isNaN(value)) return 0;
+      return value;
+    })
+  );
+}

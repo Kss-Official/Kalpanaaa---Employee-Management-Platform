@@ -2,7 +2,7 @@
 // Replaces Discord webhook with Firestore-backed in-app + FCM push notifications
 // All events are stored in Firestore 'notifications' collection for real-time sync
 
-import { db } from './firebase';
+import { db, cleanFirestorePayload } from './firebase';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 export type NotificationEventType =
@@ -136,10 +136,8 @@ export const sendKssNotification = async (
       createdAt: new Date().toISOString(),
     };
 
-    // Strip undefined keys to prevent Firestore write failure
-    const cleanNotification = Object.fromEntries(
-      Object.entries(rawNotification).filter(([_, v]) => v !== undefined)
-    );
+    // Strip undefined/NaN keys recursively to prevent Firestore write failure
+    const cleanNotification = cleanFirestorePayload(rawNotification);
 
     await addDoc(collection(db, 'notifications'), cleanNotification);
   } catch {
