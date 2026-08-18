@@ -190,10 +190,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     (a.employeeId === activeEmployee?.id || a.employeeId === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.id) && 
     a.date === todayStr
   );
-  // Prioritize record with active ongoing break, then checked-in record, then latest
-  const todayRecord = todayRecords.find(r => r.breaks?.some(b => !b.endAt && !(b as any).endTime)) || 
-                      todayRecords.find(r => r.checkInAt) || 
-                      todayRecords[0];
+  // Sort by latest updated record first
+  const sortedTodayRecords = [...todayRecords].sort((a, b) => {
+    const timeA = new Date((a as any).updatedAt || a.checkInAt || (a as any).createdAt || 0).getTime();
+    const timeB = new Date((b as any).updatedAt || b.checkInAt || (b as any).createdAt || 0).getTime();
+    return timeB - timeA;
+  });
+  const todayRecord = sortedTodayRecords[0];
 
   const rawHistory = attendance.filter(a => 
     a.employeeId === activeEmployee?.id || 
@@ -659,7 +662,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const handleStartBreak = (type: BreakType) => {
     triggerHaptic('medium');
-    if (!todayRecord || activeBreak) return;
+    if (!todayRecord) return;
 
     const startAt = new Date().toISOString();
     const existingBreaks = (todayRecord.breaks || []).map(b => {
