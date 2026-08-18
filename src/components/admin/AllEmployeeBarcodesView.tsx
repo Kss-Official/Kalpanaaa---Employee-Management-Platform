@@ -27,20 +27,20 @@ export const AllEmployeeBarcodesView: React.FC<{ onBack: () => void }> = ({ onBa
         <p className="text-slate-600">Employee Master Barcode List</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 print:grid-cols-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 print:grid-cols-4 print:gap-3">
         {employees.filter(emp => emp.fullName && emp.fullName.trim() !== '').map(emp => (
-          <div key={emp.id} className="border-2 border-slate-200 p-4 rounded-xl flex flex-col items-center justify-center break-inside-avoid text-center">
-            <img src={kalpanaLogo} alt="Logo" className="w-10 h-10 object-contain mb-2" />
-            <h3 className="font-bold text-base text-slate-900 leading-tight mb-1">{emp.fullName}</h3>
-            <p className="text-xs text-slate-600 mb-3 truncate w-full">{emp.designation}</p>
-            <div className="bg-white p-2 pb-4 rounded-lg overflow-visible w-full flex justify-center">
+          <div key={emp.id} className="border-2 border-slate-200 p-4 print:p-2 rounded-xl flex flex-col items-center justify-center break-inside-avoid print:break-inside-avoid text-center">
+            <img src={kalpanaLogo} alt="Logo" className="w-10 h-10 print:w-7 print:h-7 object-contain mb-2 print:mb-1" />
+            <h3 className="font-bold text-base print:text-xs text-slate-900 leading-tight mb-1 print:mb-0.5">{emp.fullName}</h3>
+            <p className="text-xs print:text-[10px] text-slate-600 mb-3 print:mb-1 truncate w-full">{emp.designation}</p>
+            <div className="bg-white p-2 print:p-1 pb-4 print:pb-2 rounded-lg overflow-visible w-full flex justify-center">
               <Barcode 
                 value={emp.employeeId} 
-                width={1.5} 
-                height={50} 
-                fontSize={16} 
+                width={1.4} 
+                height={40} 
+                fontSize={13} 
                 background="transparent"
-                margin={5}
+                margin={2}
               />
             </div>
           </div>
