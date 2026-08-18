@@ -45,7 +45,11 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   const lateCount = todayAttendance.filter(a => a.status === 'Late').length;
   const onLeaveCount = todayAttendance.filter(a => a.status === 'On Leave' || a.status === 'Leave').length;
   const wfhCount = todayAttendance.filter(a => a.isWfh).length;
-  const hrPendingRequests = leaveRequests.filter(r => r.status === 'Pending' && (r.hrStatus === 'Pending' || r.hrStatus === 'Waiting PM' || r.pmStatus === 'Pending' || r.ceoStatus === 'Pending'));
+  const hrPendingRequests = leaveRequests.filter(r => 
+    r.status === 'Pending' && 
+    (r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && 
+    (r.hrStatus === 'Pending' || r.ceoStatus === 'Pending' || r.ctoStatus === 'Pending')
+  );
   const pendingApprovalsCount = hrPendingRequests.length;
 
   // HR Personal Attendance Record for today

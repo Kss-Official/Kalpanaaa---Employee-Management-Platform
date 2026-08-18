@@ -152,6 +152,10 @@ export const LeaveApprovalsView: React.FC = () => {
       if (req.pmStatus === 'N/A' || req.employeeRole === 'PROJECT_MANAGER' || req.employeeId === activeEmployee?.id || req.employeeId === activeEmployee?.employeeId || req.employeeName === activeEmployee?.fullName) {
         return false;
       }
+    } else if (isHr) {
+      // HR should only see requests after PM approval (or if PM stage is N/A for HR/PM/Exec applicants)
+      const isPmStagePassed = req.pmStatus === 'Approved' || req.pmStatus === 'N/A' || req.pmStatus === 'Bypassed';
+      if (!isPmStagePassed) return false;
     }
     return true;
   });

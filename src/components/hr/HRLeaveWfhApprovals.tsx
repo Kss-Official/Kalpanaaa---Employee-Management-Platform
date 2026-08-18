@@ -53,6 +53,10 @@ export const HRLeaveWfhApprovals: React.FC = () => {
   };
 
   const filteredRequests = leaveRequests.filter(req => {
+    // Before PM approval, hide standard employee requests from HR inbox (must be Approved or N/A)
+    const isPmStagePassed = req.pmStatus === 'Approved' || req.pmStatus === 'N/A' || req.pmStatus === 'Bypassed';
+    if (!isPmStagePassed) return false;
+
     const matchesType = filterType === 'All' || req.type === filterType;
     const matchesStatus = filterStatus === 'All' || req.status === filterStatus;
     const matchesSearch = (req.employeeName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
