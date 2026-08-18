@@ -146,8 +146,8 @@ const MainLayout: React.FC = () => {
         return 'emp_dashboard';
       }
     } else if (roleToUse === 'PROJECT_MANAGER') {
-      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals'];
-      if (!allowedPMTabs.includes(tab) || tab.startsWith('emp_')) {
+      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees', 'emp_directory'];
+      if (!allowedPMTabs.includes(tab) || (tab.startsWith('emp_') && tab !== 'emp_directory')) {
         return 'pm_dashboard';
       }
     } else if (roleToUse === 'HR_ADMIN') {

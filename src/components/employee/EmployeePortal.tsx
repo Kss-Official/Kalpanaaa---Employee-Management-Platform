@@ -206,10 +206,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [breakElapsedSec, setBreakElapsedSec] = useState(0);
   const [isWfh, setIsWfh] = useState(false);
 
-  // Sync activeBreak from today's record (Fixes E36 Break Type Aliasing)
+  // Sync activeBreak from today's record (Fixes E36 Break Type Aliasing & Latest Break Selection)
   useEffect(() => {
-    if (todayRecord?.breaks) {
-      const ongoing = todayRecord.breaks.find(b => !b.endAt && !(b as any).endTime);
+    if (todayRecord?.breaks && todayRecord.breaks.length > 0) {
+      // Find the LATEST active ongoing break
+      const ongoing = todayRecord.breaks.slice().reverse().find(b => !b.endAt && !(b as any).endTime);
       if (ongoing) {
         const normalizedType = normalizeBreakType(ongoing.type);
         setActiveBreak({ type: normalizedType, startAt: ongoing.startAt || (ongoing as any).startTime });
@@ -654,8 +655,15 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     if (!todayRecord || activeBreak) return;
 
     const startAt = new Date().toISOString();
+    const existingBreaks = (todayRecord.breaks || []).map(b => {
+      if (!b.endAt && !(b as any).endTime) {
+        const dur = Math.max(1, Math.round((new Date(startAt).getTime() - new Date(b.startAt || (b as any).startTime).getTime()) / 60000));
+        return { ...b, endAt: startAt, durationMinutes: dur };
+      }
+      return b;
+    });
+
     const newBreak: BreakEntry = { type, startAt, endAt: null, durationMinutes: 0 };
-    const existingBreaks = todayRecord.breaks || [];
     updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, newBreak] });
     
     if (activeEmployee) {
@@ -663,7 +671,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     }
     
     if (type !== 'Geo-Fence Auto Break') {
-      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ☕` });
+      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! 👥` });
     }
   };
 
