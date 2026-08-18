@@ -23,6 +23,7 @@ export const normalizeBreakType = (type?: string): BreakType | string => {
   if (lower.includes('huddle')) return 'Team Huddle';
   if (lower.includes('meeting')) return 'Team Meeting';
   if (lower.includes('attainment') || lower.includes('training')) return 'Attainment / Training';
+  if (lower.includes('activity')) return 'Activity';
   if (lower.includes('geo')) return 'Geo-Fence Auto Break';
   return type;
 };

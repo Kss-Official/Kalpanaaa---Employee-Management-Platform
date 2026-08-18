@@ -834,16 +834,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // LIVE AUTOCORRECT CEO SPELLING AND EMAIL IN FIREBASE
               if (data.employeeId === 'CEO001') {
                 let needsUpdate = false;
-                // Intercept CEO registration if needed
                 if (data.role === 'SUPER_ADMIN' && (data.fullName || '').toLowerCase().includes('akshit')) {
                   if (data.email !== 'akshit@kalpanaaa.in') {
                     data.email = 'akshit@kalpanaaa.in';
                     needsUpdate = true;
                   }
                 }
-
                 if (needsUpdate) {
-                  // Push correction back to Firestore silently
                   setDoc(doc(db, 'employees', data.id), data, { merge: true }).catch(() => { });
                 }
               }
@@ -874,17 +871,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               fetched.push(data);
             });
 
-            // Deduplicate employees by employeeId or email (keep newest, delete older duplicates)
+            // Safe in-memory deduplication (keep newest, never delete real Firestore docs automatically)
             const deduplicated: Employee[] = [];
             const seen = new Set<string>();
             
-            // Sort by createdAt descending so we keep the newest one
-            fetched.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            // Sort by createdAt descending so we keep the newest record
+            fetched.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0).getTime() - new Date(a.createdAt || a.updatedAt || 0).getTime());
             
             for (const emp of fetched) {
-              // Delete corrupted or nameless employee records
+              // Skip corrupted records with empty names
               if (!emp.fullName || emp.fullName.trim() === '') {
-                deleteDoc(doc(db, 'employees', emp.id)).catch(() => { });
                 continue;
               }
 
@@ -892,8 +888,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const idKey = emp.employeeId?.trim();
               
               if ((emailKey && seen.has(emailKey)) || (idKey && seen.has(idKey))) {
-                // Delete the duplicate from Firestore to solve it at the root level
-                deleteDoc(doc(db, 'employees', emp.id)).catch(() => { });
+                // In-memory deduplication only - do NOT delete from Firestore
                 continue;
               }
               
@@ -902,11 +897,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               deduplicated.push(emp);
             }
 
-            // Restore original order or sort appropriately (e.g., by ID)
+            // Restore display order
             deduplicated.reverse();
 
             // Ensure Official D. Koushik (Project Manager) exists in Team Directory
-            // NOTE: Only seed if not already in Firestore — never override existing role
             const koushikExists = deduplicated.some(e => 
               e.employeeId === 'KSS2407003' || 
               (e.email || '').toLowerCase().includes('d.koushik@kalpanaaasoftwaresolutions.in')
@@ -918,7 +912,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 employeeId: 'KSS2407003',
                 fullName: 'D. Koushik',
                 email: 'd.koushik@kalpanaaasoftwaresolutions.in',
-                role: 'PROJECT_MANAGER', // correct role — HR_ADMIN was wrong
+                role: 'PROJECT_MANAGER',
                 department: 'Software Engineering',
                 designation: 'Project Manager',
                 status: 'Active',
@@ -1406,38 +1400,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return { success: true, message: `Welcome back, ${matched.fullName}!` };
           }
 
-          // Firebase auth succeeded but no employee record yet — create a basic one
+          // Firebase auth succeeded but no employee record yet — fetch user details and create a complete one
           const uid = userCred.user.uid;
           const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          const fullName = userCred.user.displayName || cleanEmail.split('@')[0];
-          const autoDetails = getAssignedEmployeeDetails(fullName, employees);
+          
+          let savedFullName = userCred.user.displayName || cleanEmail.split('@')[0];
+          let savedRole: UserRole = 'EMPLOYEE';
+          try {
+            const userDocSnap = await getDoc(doc(db, 'users', uid));
+            if (userDocSnap.exists()) {
+              const uData = userDocSnap.data();
+              if (uData.fullName) savedFullName = uData.fullName;
+              if (uData.role) savedRole = uData.role as UserRole;
+            }
+          } catch (e) { }
+
+          const autoDetails = getAssignedEmployeeDetails(savedFullName, employees);
           const empCode = autoDetails.employeeId;
           
           const basicEmp: Employee = {
-            id: uid, employeeId: empCode,
-            fullName: fullName,
+            id: uid,
+            uid: uid,
+            employeeId: empCode,
+            fullName: savedFullName,
             email: cleanEmail, 
-            role: autoDetails.role || 'EMPLOYEE', 
-            department: 'General Operations',
+            role: autoDetails.role || savedRole, 
+            department: 'Engineering',
             designation: autoDetails.designation || 'Software Engineer', 
             status: 'Active',
-            phone: '', gender: 'Prefer not to say', dateOfBirth: '', joiningDate: new Date().toISOString().split('T')[0],
-            employmentType: 'Full-Time', permanentAddress: '', currentAddress: '', city: '', state: '', postalCode: '',
-            emergencyContact: '', emergencyRelationship: '',
-            shift: 'General Shift (09:00 - 18:00)', workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
-            reportingManager: '', qrToken: empCode,
+            phone: '',
+            gender: 'Male',
+            dateOfBirth: '',
+            joiningDate: new Date().toISOString().split('T')[0],
+            employmentType: 'Full-Time',
+            permanentAddress: 'Bengaluru HQ Campus',
+            currentAddress: 'Bengaluru HQ Campus',
+            city: 'Bengaluru',
+            state: 'Karnataka',
+            postalCode: '560102',
+            emergencyContact: '',
+            emergencyRelationship: '',
+            shift: 'General Shift (09:00 - 18:00)',
+            workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
+            reportingManager: 'D. Koushik',
+            qrToken: empCode,
             currentSessionId: newSessionId,
             sessionFingerprint: generateDeviceFingerprint(),
-            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
           };
           setEmployees(prev => [basicEmp, ...prev.filter(e => e.id !== basicEmp.id)]);
           setActiveEmployee(basicEmp);
-          setRole('EMPLOYEE');
+          setRole(basicEmp.role);
           setIsAuthenticated(true);
           localStorage.setItem('kss_v1_session', basicEmp.id);
           if (cleanEmail) localStorage.setItem('kss_v1_session_email', cleanEmail);
           localStorage.setItem('kss_v1_session_id', newSessionId);
-          setDoc(doc(db, 'employees', basicEmp.id), { currentSessionId: newSessionId, sessionFingerprint: basicEmp.sessionFingerprint }, { merge: true }).catch(() => { });
+          setDoc(doc(db, 'employees', basicEmp.id), basicEmp, { merge: true }).catch(() => { });
 
           setIsLoading(false);
           return { success: true, message: `Welcome! You're now signed in.` };

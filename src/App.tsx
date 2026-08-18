@@ -267,7 +267,18 @@ const MainLayout: React.FC = () => {
                   </div>
                 )}
 
-                {currentTab === 'employees' && <EmployeeTeamDirectory />}
+                {currentTab === 'employees' && (
+                  (effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'HR_ADMIN') ? (
+                    <EmployeeDirectory
+                      onSelectEmployee={emp => setSelectedEmpProfile(emp)}
+                      onOpenAddModal={() => setIsAddModalOpen(true)}
+                      onOpenEditModal={emp => setEditingEmployee(emp)}
+                      onOpenIdCardModal={emp => setIdCardEmployee(emp)}
+                    />
+                  ) : (
+                    <EmployeeTeamDirectory />
+                  )
+                )}
 
                 {currentTab === 'attendance' && (
                   <AttendanceManagement 
