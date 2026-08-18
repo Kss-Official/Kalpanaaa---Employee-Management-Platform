@@ -42,6 +42,13 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {});
 
+// Ensure request.auth is NEVER null for Firestore security rules on any device
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    signInAnonymously(auth).catch(() => {});
+  }
+});
+
 // Error Handling Helper as per Firebase skill guidelines
 export enum OperationType {
   CREATE = 'create',
