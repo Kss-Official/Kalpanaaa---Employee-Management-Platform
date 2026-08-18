@@ -39,23 +39,6 @@ export const firebaseConfig = {
 // Initialize Firebase App
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firebase App Check — only in production to prevent localhost token blocking
-if (typeof window !== "undefined") {
-  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  if (isLocalhost) {
-    (self as any).FIREBASE_APPCHECK_EXECUTE_IN_TEST_MODE = true;
-  } else {
-    try {
-      initializeAppCheck(app, {
-        provider: new ReCaptchaEnterpriseProvider('6LcR5m8tAAAAAAEpJqgzO9KUJZ-lLX6s_QuoENfl'),
-        isTokenAutoRefreshEnabled: true
-      });
-    } catch (error) {
-      console.warn("App Check initialization info:", error);
-    }
-  }
-}
-
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {});
 
