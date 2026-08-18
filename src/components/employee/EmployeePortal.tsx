@@ -219,11 +219,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Sync activeBreak from today's record (Fixes E36 Break Type Aliasing & Latest Break Selection)
   useEffect(() => {
     if (todayRecord?.breaks && todayRecord.breaks.length > 0) {
-      // Find the LATEST active ongoing break
-      const ongoing = todayRecord.breaks.slice().reverse().find(b => !b.endAt && !(b as any).endTime);
-      if (ongoing) {
-        const normalizedType = normalizeBreakType(ongoing.type);
-        setActiveBreak({ type: normalizedType, startAt: ongoing.startAt || (ongoing as any).startTime });
+      // Sort breaks by start time ascending to find the most recent chronological entry
+      const sortedBreaks = [...todayRecord.breaks].sort((a, b) => 
+        new Date(a.startAt || (a as any).startTime || 0).getTime() - new Date(b.startAt || (b as any).startTime || 0).getTime()
+      );
+      const lastBreak = sortedBreaks[sortedBreaks.length - 1];
+      if (lastBreak && !lastBreak.endAt && !(lastBreak as any).endTime) {
+        const normalizedType = normalizeBreakType(lastBreak.type);
+        setActiveBreak({ type: normalizedType, startAt: lastBreak.startAt || (lastBreak as any).startTime });
         return;
       }
     }
