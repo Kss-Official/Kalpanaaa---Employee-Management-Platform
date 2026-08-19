@@ -94,6 +94,24 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
     }
   };
 
+  const getDisplayWorkingHours = (rec: AttendanceRecord) => {
+    if (rec.workingMinutes && rec.workingMinutes > 0) {
+      return `${Math.floor(rec.workingMinutes / 60)}h ${rec.workingMinutes % 60}m`;
+    }
+    if (rec.checkInAt) {
+      const totalBreakMins = (rec.breaks || []).reduce((acc, b) => acc + (b.durationMinutes || 0), 0) || (rec.totalBreakMinutes || 0);
+      const endMs = rec.checkOutAt ? new Date(rec.checkOutAt).getTime() : Date.now();
+      const startMs = new Date(rec.checkInAt).getTime();
+      if (!isNaN(startMs) && !isNaN(endMs) && endMs > startMs) {
+        const elapsedMins = Math.max(0, Math.floor((endMs - startMs) / 60000) - totalBreakMins);
+        if (elapsedMins > 0) {
+          return `${Math.floor(elapsedMins / 60)}h ${elapsedMins % 60}m${!rec.checkOutAt ? ' (Live)' : ''}`;
+        }
+      }
+    }
+    return '--';
+  };
+
   const handleSaveCorrection = () => {
     if (!editingRecord) return;
     updateAttendanceRecord(editingRecord.id, {
@@ -277,7 +295,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                   <div>
                     <span className="text-[10px] text-slate-500 font-mono block">Hours</span>
                     <span className="font-bold text-slate-200 whitespace-nowrap">
-                      {rec.workingMinutes > 0 ? `${Math.floor(rec.workingMinutes / 60)}h ${rec.workingMinutes % 60}m` : '--'}
+                      {getDisplayWorkingHours(rec)}
                     </span>
                   </div>
                 </div>
@@ -292,7 +310,11 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        const emp = employees.find(e => e.id === rec.employeeId || e.employeeId === rec.employeeCode);
+                        const emp = employees.find(e => 
+                          e.id === rec.employeeId || 
+                          e.employeeId === rec.employeeCode || 
+                          (e.fullName && rec.employeeName && e.fullName.trim().toLowerCase() === rec.employeeName.trim().toLowerCase())
+                        );
                         if (emp) {
                           setHistoryEmployee(emp);
                           setHistoryInitialRecord(rec);
@@ -387,11 +409,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                     </td>
 
                     <td className="py-3 px-4 font-mono font-semibold text-slate-200 whitespace-nowrap">
-                      {rec.workingMinutes > 0 ? (
-                        `${Math.floor(rec.workingMinutes / 60)}h ${rec.workingMinutes % 60}m`
-                      ) : (
-                        '--'
-                      )}
+                      {getDisplayWorkingHours(rec)}
                     </td>
 
                     <td className="py-3 px-4 whitespace-nowrap">
@@ -420,7 +438,11 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                     <td className="py-3 px-4 text-center whitespace-nowrap">
                       <button
                         onClick={() => {
-                          const emp = employees.find(e => e.id === rec.employeeId || e.employeeId === rec.employeeCode);
+                          const emp = employees.find(e => 
+                            e.id === rec.employeeId || 
+                            e.employeeId === rec.employeeCode || 
+                            (e.fullName && rec.employeeName && e.fullName.trim().toLowerCase() === rec.employeeName.trim().toLowerCase())
+                          );
                           if (emp) {
                             setHistoryEmployee(emp);
                             setHistoryInitialRecord(rec);

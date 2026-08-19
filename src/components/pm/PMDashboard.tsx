@@ -388,7 +388,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                         {/* Real Hours Calculated per Date */}
                         {weekDays.map(d => {
                           const rec = attendance.find(a => 
-                            (a.employeeId === emp.id || a.employeeCode === emp.employeeId) && 
+                            (a.employeeId === emp.id || 
+                             a.employeeCode === emp.employeeId || 
+                             (a.employeeName && emp.fullName && a.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
                             a.date === d.dateStr
                           );
 

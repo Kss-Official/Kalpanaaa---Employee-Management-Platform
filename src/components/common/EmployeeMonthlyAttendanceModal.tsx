@@ -55,7 +55,11 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
   // Filter employee attendance records for this selected year & month
   const empRecords = attendance.filter(rec => {
-    const isEmpMatch = rec.employeeId === employee.id || rec.employeeCode === employee.employeeId;
+    const isEmpMatch = 
+      rec.employeeId === employee.id || 
+      rec.employeeCode === employee.employeeId || 
+      (rec.employeeName && employee.fullName && rec.employeeName.trim().toLowerCase() === employee.fullName.trim().toLowerCase()) ||
+      (employee.email && rec.employeeName && employee.email.toLowerCase().includes(rec.employeeName.toLowerCase()));
     const isMonthMatch = rec.date && rec.date.startsWith(selectedYearMonth);
     return isEmpMatch && isMonthMatch;
   });
@@ -73,54 +77,6 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   empRecords.forEach(rec => {
     if (rec.date) recordsByDate.set(rec.date, rec);
   });
-
-  // Monthly Statistics
-  let presentDays = 0;
-  let lateDays = 0;
-  let wfhDays = 0;
-  let leaveDays = 0;
-  let totalWorkingMinutes = 0;
-
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateFormatted = `${selectedYearMonth}-${String(d).padStart(2, '0')}`;
-    const dateObj = new Date(year, month - 1, d);
-    const dayOfWeek = dateObj.getDay();
-
-    const rec = recordsByDate.get(dateFormatted);
-
-    if (rec) {
-      if (rec.status === 'Present' || rec.checkInAt) presentDays++;
-      if (rec.status === 'Late') lateDays++;
-      if (rec.isWfh || rec.status === 'Work From Home') wfhDays++;
-      if (rec.workingMinutes) totalWorkingMinutes += rec.workingMinutes;
-    } else {
-      // Check if approved leave
-      const hasLeave = empLeaveRequests.some(l => dateFormatted >= l.startDate && dateFormatted <= l.endDate);
-      if (hasLeave) leaveDays++;
-    }
-  }
-
-  const workingHoursFormatted = `${Math.floor(totalWorkingMinutes / 60)}h ${totalWorkingMinutes % 60}m`;
-
-  const handlePrevMonth = () => {
-    let newYear = year;
-    let newMonth = month - 1;
-    if (newMonth < 1) {
-      newMonth = 12;
-      newYear -= 1;
-    }
-    setSelectedYearMonth(`${newYear}-${String(newMonth).padStart(2, '0')}`);
-  };
-
-  const handleNextMonth = () => {
-    let newYear = year;
-    let newMonth = month + 1;
-    if (newMonth > 12) {
-      newMonth = 1;
-      newYear += 1;
-    }
-    setSelectedYearMonth(`${newYear}-${String(newMonth).padStart(2, '0')}`);
-  };
 
   // Calculate detailed activity & break time breakdown for selected day (Fixes Root Cause 90% Meal Mismatch)
   const computeActivityBreakdown = (record: AttendanceRecord) => {
@@ -199,6 +155,55 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
       totalBreakMins,
       grandTotalMins
     };
+  };
+
+  // Monthly Statistics
+  let presentDays = 0;
+  let lateDays = 0;
+  let wfhDays = 0;
+  let leaveDays = 0;
+  let totalWorkingMinutes = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateFormatted = `${selectedYearMonth}-${String(d).padStart(2, '0')}`;
+    const dateObj = new Date(year, month - 1, d);
+    const dayOfWeek = dateObj.getDay();
+
+    const rec = recordsByDate.get(dateFormatted);
+
+    if (rec) {
+      if (rec.status === 'Present' || rec.checkInAt) presentDays++;
+      if (rec.status === 'Late') lateDays++;
+      if (rec.isWfh || rec.status === 'Work From Home') wfhDays++;
+      const breakdown = computeActivityBreakdown(rec);
+      totalWorkingMinutes += breakdown.workingMins;
+    } else {
+      // Check if approved leave
+      const hasLeave = empLeaveRequests.some(l => dateFormatted >= l.startDate && dateFormatted <= l.endDate);
+      if (hasLeave) leaveDays++;
+    }
+  }
+
+  const workingHoursFormatted = `${Math.floor(totalWorkingMinutes / 60)}h ${totalWorkingMinutes % 60}m`;
+
+  const handlePrevMonth = () => {
+    let newYear = year;
+    let newMonth = month - 1;
+    if (newMonth < 1) {
+      newMonth = 12;
+      newYear -= 1;
+    }
+    setSelectedYearMonth(`${newYear}-${String(newMonth).padStart(2, '0')}`);
+  };
+
+  const handleNextMonth = () => {
+    let newYear = year;
+    let newMonth = month + 1;
+    if (newMonth > 12) {
+      newMonth = 1;
+      newYear += 1;
+    }
+    setSelectedYearMonth(`${newYear}-${String(newMonth).padStart(2, '0')}`);
   };
 
   const renderDoughnutChart = (record: AttendanceRecord) => {
@@ -570,11 +575,18 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                             {new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
-                        {rec?.workingMinutes ? (
-                          <span className="text-[7.5px] sm:text-[9px] font-mono text-slate-400 block truncate leading-none">
-                            {Math.floor(rec.workingMinutes / 60)}h {rec.workingMinutes % 60}m
-                          </span>
-                        ) : null}
+                        {(() => {
+                          if (!rec) return null;
+                          const bk = computeActivityBreakdown(rec);
+                          if (bk.workingMins > 0) {
+                            return (
+                              <span className="text-[7.5px] sm:text-[9px] font-mono text-slate-400 block truncate leading-none">
+                                {Math.floor(bk.workingMins / 60)}h {bk.workingMins % 60}m
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
                     </div>
                   );
@@ -620,7 +632,10 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   <div className="bg-slate-900 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-800">
                     <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Working Duration</span>
                     <span className="font-mono text-xs sm:text-sm font-black text-white block mt-0.5 sm:mt-1">
-                      {selectedDayRecord.workingMinutes ? `${Math.floor(selectedDayRecord.workingMinutes / 60)}h ${selectedDayRecord.workingMinutes % 60}m` : '--'}
+                      {(() => {
+                        const bk = computeActivityBreakdown(selectedDayRecord);
+                        return bk.workingMins > 0 ? `${Math.floor(bk.workingMins / 60)}h ${bk.workingMins % 60}m` : '--';
+                      })()}
                     </span>
                   </div>
 

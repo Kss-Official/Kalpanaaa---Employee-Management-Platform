@@ -1633,7 +1633,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-sm font-black text-white tabular-nums">
-                          {rec.workingMinutes ? `${Math.floor(rec.workingMinutes/60)}h ${rec.workingMinutes%60}m` : '--'}
+                          {calculateWorkHours(rec)}
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5 font-semibold">Working Time</div>
                       </div>
