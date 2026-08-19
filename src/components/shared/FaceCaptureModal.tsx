@@ -97,28 +97,28 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
         setStatusStep('LOADING_MODELS');
         setFeedbackText('Loading neural network face models...');
 
+        // Start camera stream acquisition in parallel with model loading
+        let mediaStream: MediaStream | null = null;
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: false
+          });
+        } catch {
+          // Fallback to generic video
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+        }
+
+        if (isMounted && mediaStream) {
+          setStream(mediaStream);
+        }
+
         await loadFaceModels();
 
-        if (!isMounted) return;
-
-        setStatusStep('INITIALIZING');
-        setFeedbackText('Accessing device camera...');
-
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
-        });
-
         if (isMounted) {
-          setStream(mediaStream);
-          if (videoRef.current) {
-            videoRef.current.srcObject = mediaStream;
-            videoRef.current.onloadedmetadata = () => {
-              videoRef.current?.play().catch(e => console.warn('Video auto-play prompt:', e));
-            };
-            try {
-              await videoRef.current.play();
-            } catch (e) {}
-          }
           setStatusStep('CENTER_FACE');
           setFeedbackText('Position your face inside the frame...');
         }
@@ -140,6 +140,17 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
       }
     };
   }, [isOpen]);
+
+  // Guaranteed video stream binding hook whenever stream or video element is available
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.onloadedmetadata = () => {
+        videoRef.current?.play().catch(e => console.warn('Video play prompt:', e));
+      };
+      videoRef.current.play().catch(() => {});
+    }
+  }, [stream, isOpen]);
 
   // Handle Enrollment Action
   const handlePerformEnrollment = (scannedDescriptor: Float32Array) => {
@@ -271,11 +282,57 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
           </button>
         </div>
 
-        {/* Video Frame */}
-        <div className="relative w-full aspect-4/3 bg-black flex items-center justify-center overflow-hidden">
-          {errorMsg ? (
-            <div className="p-6 text-center space-y-4">
-              <div className="relative w-28 h-28 mx-auto rounded-full overflow-hidden border-2 border-slate-700 shadow-xl">
+        {/* Video Viewport - Always mounted so video feed is never blank */}
+        <div className="relative w-full aspect-4/3 bg-slate-950 flex items-center justify-center overflow-hidden">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover transform -scale-x-100 bg-slate-950"
+          />
+
+          {/* Real Neural 68-Point Facial Landmark Overlay Canvas */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full pointer-events-none transform -scale-x-100 z-10"
+          />
+
+          {/* Face Oval Target Boundary Overlay */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-20">
+            <div className={`w-56 h-72 rounded-[40%] border-2 transition-all duration-500 relative flex flex-col items-center justify-center ${
+              statusStep === 'VERIFIED' ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_40px_rgba(16,185,129,0.3)]' :
+              statusStep === 'FAILED' ? 'border-rose-500 bg-rose-500/10 shadow-[0_0_40px_rgba(244,63,94,0.3)]' :
+              statusStep === 'NOT_ENROLLED' ? 'border-amber-500 bg-amber-500/10 shadow-[0_0_40px_rgba(245,158,11,0.3)]' :
+              statusStep === 'SCANNING' ? 'border-blue-400 bg-blue-500/5 shadow-[0_0_30px_rgba(59,130,246,0.2)] animate-pulse' :
+              'border-emerald-400/80 border-dashed'
+            }`}>
+              <div className="w-full h-full border border-emerald-400/30 rounded-[40%] absolute inset-2 opacity-60" />
+              {statusStep === 'VERIFIED' && (
+                <CheckCircle2 className="w-16 h-16 text-emerald-400 animate-in zoom-in-50 duration-300" />
+              )}
+              {statusStep === 'FAILED' && (
+                <ShieldAlert className="w-16 h-16 text-rose-500 animate-in zoom-in-50 duration-300" />
+              )}
+              {statusStep === 'NOT_ENROLLED' && (
+                <AlertTriangle className="w-16 h-16 text-amber-400 animate-in zoom-in-50 duration-300" />
+              )}
+            </div>
+          </div>
+
+          {/* Overlay: Neural Network Loading State */}
+          {statusStep === 'LOADING_MODELS' && (
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-6 text-center space-y-3">
+              <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
+              <p className="text-xs text-slate-200 font-bold">{feedbackText}</p>
+              <p className="text-[10px] text-slate-400">Initializing camera and neural models...</p>
+            </div>
+          )}
+
+          {/* Overlay: Fatal Camera Error */}
+          {errorMsg && (
+            <div className="absolute inset-0 bg-slate-950/95 z-30 flex flex-col items-center justify-center p-6 text-center space-y-4">
+              <div className="relative w-24 h-24 rounded-full overflow-hidden border-2 border-slate-700 shadow-xl">
                 <img
                   src={profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'}
                   alt={employeeName}
@@ -296,93 +353,12 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
                   onSuccess();
                   onClose();
                 }}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 mx-auto cursor-pointer"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer"
               >
                 <UserCheck className="w-4 h-4" />
                 <span>Verify via Profile Photo &amp; Check In</span>
               </button>
             </div>
-          ) : statusStep === 'LOADING_MODELS' ? (
-            <div className="p-8 text-center space-y-4">
-              <Loader2 className="w-10 h-10 text-emerald-400 animate-spin mx-auto" />
-              <p className="text-xs text-slate-300 font-semibold">{feedbackText}</p>
-              <p className="text-[10px] text-slate-500 max-w-xs mx-auto">First time loading 128-point face descriptor model (~2MB)...</p>
-            </div>
-          ) : !stream ? (
-            <div className="relative w-full h-full flex flex-col items-center justify-center p-6 bg-slate-950 text-center space-y-4">
-              <div className="relative w-36 h-36 rounded-full overflow-hidden border-4 border-blue-500/40 shadow-2xl shadow-blue-500/30 flex items-center justify-center">
-                <img
-                  src={profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'}
-                  alt={employeeName}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-blue-500/10 animate-pulse pointer-events-none" />
-              </div>
-              
-              <div className="space-y-1">
-                <p className="text-xs font-extrabold text-white flex items-center justify-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-emerald-400" />
-                  Profile Photo AI Biometric Scanning
-                </p>
-                <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
-                  Camera feed unavailable. AI will extract 128-point face descriptor vector directly from your profile photo.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const dummyVector: number[] = profileDescriptor ? Array.from(profileDescriptor) : Array.from({ length: 128 }, () => Math.random() * 0.1);
-                  saveEmployeeDescriptor(employeeId, new Float32Array(dummyVector));
-                  onEnrollSuccess?.(dummyVector);
-                  setIsEnrolled(true);
-                  onSuccess();
-                  onClose();
-                }}
-                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-extrabold text-xs rounded-2xl shadow-lg shadow-blue-900/40 flex items-center gap-2 cursor-pointer transition-all"
-              >
-                <UserCheck className="w-4 h-4" />
-                <span>Register &amp; Complete Check-In</span>
-              </button>
-            </div>
-          ) : (
-            <>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover transform -scale-x-100"
-              />
-
-              {/* Real Neural 68-Point Facial Landmark Overlay Canvas */}
-              <canvas
-                ref={canvasRef}
-                className="absolute inset-0 w-full h-full pointer-events-none transform -scale-x-100 z-10"
-              />
-              
-              {/* MediaPipe / Face-API Mesh Overlay Visual */}
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                <div className={`w-56 h-72 rounded-[40%] border-2 transition-all duration-500 relative flex flex-col items-center justify-center ${
-                  statusStep === 'VERIFIED' ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_40px_rgba(16,185,129,0.3)]' :
-                  statusStep === 'FAILED' ? 'border-rose-500 bg-rose-500/10 shadow-[0_0_40px_rgba(244,63,94,0.3)]' :
-                  statusStep === 'NOT_ENROLLED' ? 'border-amber-500 bg-amber-500/10 shadow-[0_0_40px_rgba(245,158,11,0.3)]' :
-                  statusStep === 'SCANNING' ? 'border-blue-400 bg-blue-500/5 shadow-[0_0_30px_rgba(59,130,246,0.2)] animate-pulse' :
-                  'border-emerald-400/80 border-dashed'
-                }`}>
-                  <div className="w-full h-full border border-emerald-400/30 rounded-[40%] absolute inset-2 opacity-60" />
-                  {statusStep === 'VERIFIED' && (
-                    <CheckCircle2 className="w-16 h-16 text-emerald-400 animate-in zoom-in-50 duration-300" />
-                  )}
-                  {statusStep === 'FAILED' && (
-                    <ShieldAlert className="w-16 h-16 text-rose-500 animate-in zoom-in-50 duration-300" />
-                  )}
-                  {statusStep === 'NOT_ENROLLED' && (
-                    <AlertTriangle className="w-16 h-16 text-amber-400 animate-in zoom-in-50 duration-300" />
-                  )}
-                </div>
-              </div>
-            </>
           )}
 
           {/* Top Floating Badges */}
