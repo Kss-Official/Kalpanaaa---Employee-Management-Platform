@@ -659,6 +659,88 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, [isFirestoreConnected]);
 
+  // Real-time Firestore listener for Attendance Records (Cloud Lock for Check-Ins, Check-Outs & Breaks)
+  useEffect(() => {
+    if (!isFirestoreConnected) return;
+
+    let unsubscribe: () => void = () => {};
+
+    import('firebase/firestore').then(({ collection, onSnapshot }) => {
+      unsubscribe = onSnapshot(collection(db, 'attendance'), (snapshot: any) => {
+        if (!snapshot.empty) {
+          const cloudRecords: AttendanceRecord[] = snapshot.docs.map((d: any) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data
+            };
+          });
+
+          setAttendance(prev => {
+            const recordMap = new Map<string, AttendanceRecord>();
+            // Base existing records
+            prev.forEach(r => {
+              if (r && r.id) recordMap.set(r.id, r);
+            });
+            // Merge in cloud records
+            cloudRecords.forEach(cr => {
+              if (cr && cr.id) recordMap.set(cr.id, cr);
+            });
+            const merged = Array.from(recordMap.values());
+            try {
+              localStorage.setItem('kss_v1_attendance', JSON.stringify(merged.filter(a => a && !a.id.startsWith('att-hist-'))));
+            } catch {}
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('[AuthContext] Attendance cloud listener error:', err);
+      });
+    });
+
+    return () => unsubscribe();
+  }, [isFirestoreConnected]);
+
+  // Real-time Firestore listener for Employees Directory (Syncs Face Biometrics & Profile)
+  useEffect(() => {
+    if (!isFirestoreConnected) return;
+
+    let unsubscribe: () => void = () => {};
+
+    import('firebase/firestore').then(({ collection, onSnapshot }) => {
+      unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot: any) => {
+        if (!snapshot.empty) {
+          const cloudEmployees: Employee[] = snapshot.docs.map((d: any) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data
+            };
+          });
+
+          setEmployees(prev => {
+            const empMap = new Map<string, Employee>();
+            prev.forEach(e => {
+              if (e && e.id) empMap.set(e.id, e);
+            });
+            cloudEmployees.forEach(ce => {
+              if (ce && ce.id) empMap.set(ce.id, ce);
+            });
+            const merged = Array.from(empMap.values());
+            try {
+              localStorage.setItem('kss_v1_employees', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('[AuthContext] Employees cloud listener error:', err);
+      });
+    });
+
+    return () => unsubscribe();
+  }, [isFirestoreConnected]);
+
   // ── DEDICATED real-time listener for Office-Wide WFH dates ──
   // This is the 100% reliable channel — completely independent of settings
   useEffect(() => {

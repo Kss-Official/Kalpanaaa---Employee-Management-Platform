@@ -69,10 +69,7 @@ service cloud.firestore {
     match /employees/{employeeId} {
       allow read: if isSignedIn();
       allow create: if isHrAdmin() || isSuperAdmin();
-      allow update: if isHrAdmin() || isSuperAdmin() || (
-        isSignedIn() && request.auth.uid == resource.data.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio', 'skills', 'currentAddress', 'phone', 'preferredShift', 'linkedinUrl', 'updatedAt'])
-      );
+      allow update: if isHrAdmin() || isSuperAdmin() || isSignedIn();
       allow delete: if isSuperAdmin();
 
       // Date lock subcollection for overlapping leave prevention
