@@ -6,7 +6,8 @@ import * as faceapi from '@vladmandic/face-api';
 
 const MODEL_URLS = [
   'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/',
-  'https://raw.githubusercontent.com/vladmandic/face-api/master/model/'
+  'https://raw.githubusercontent.com/vladmandic/face-api/master/model/',
+  'https://cdn.jsdelivr.net/gh/vladmandic/face-api@master/model/'
 ];
 
 let isModelsLoaded = false;
@@ -20,21 +21,26 @@ export const loadFaceModels = async (): Promise<void> => {
   modelLoadingPromise = (async () => {
     for (const url of MODEL_URLS) {
       try {
-        console.log(`[FaceEngine] Pre-loading neural face models from ${url}...`);
+        console.log(`[FaceEngine] Loading neural face models from ${url}...`);
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri(url),
           faceapi.nets.faceLandmark68TinyNet.loadFromUri(url),
           faceapi.nets.faceRecognitionNet.loadFromUri(url)
         ]);
         isModelsLoaded = true;
-        console.log('[FaceEngine] Models loaded successfully into memory!');
+        console.log('[FaceEngine] Neural face models loaded successfully into memory!');
         return;
       } catch (err) {
-        console.warn(`[FaceEngine] CDN ${url} failed, trying fallback...`, err);
+        console.warn(`[FaceEngine] CDN source ${url} failed, trying next fallback...`, err);
       }
     }
+    // Fallback: mark loaded if nets are loaded in background
+    if (faceapi.nets.tinyFaceDetector.isLoaded && faceapi.nets.faceRecognitionNet.isLoaded) {
+      isModelsLoaded = true;
+      return;
+    }
     modelLoadingPromise = null;
-    throw new Error('Could not load face recognition neural models from any CDN source.');
+    throw new Error('Could not load face recognition neural models from CDN sources.');
   })();
 
   return modelLoadingPromise;
@@ -48,7 +54,7 @@ if (typeof window !== 'undefined') {
   if ('requestIdleCallback' in window) {
     (window as any).requestIdleCallback(idlePreload, { timeout: 3000 });
   } else {
-    setTimeout(idlePreload, 1500);
+    setTimeout(idlePreload, 1000);
   }
 }
 
@@ -69,25 +75,34 @@ export const detectSingleFaceDescriptor = async (
     await loadFaceModels();
   }
 
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
-  const result = await faceapi
-    .detectSingleFace(video, options)
-    .withFaceLandmarks(true)
-    .withFaceDescriptor();
-
-  if (!result) {
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
     return { detected: false };
   }
 
-  const { box, score } = result.detection;
-  return {
-    detected: true,
-    descriptor: result.descriptor,
-    detectionBox: { x: box.x, y: box.y, width: box.width, height: box.height },
-    score,
-    landmarks: result.landmarks,
-    fullResult: result
-  };
+  try {
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 });
+    const result = await faceapi
+      .detectSingleFace(video, options)
+      .withFaceLandmarks(true)
+      .withFaceDescriptor();
+
+    if (!result) {
+      return { detected: false };
+    }
+
+    const { box, score } = result.detection;
+    return {
+      detected: true,
+      descriptor: result.descriptor,
+      detectionBox: { x: box.x, y: box.y, width: box.width, height: box.height },
+      score,
+      landmarks: result.landmarks,
+      fullResult: result
+    };
+  } catch (err) {
+    console.warn('[FaceEngine] detectSingleFace error:', err);
+    return { detected: false };
+  }
 };
 
 // Render real-time 68-point facial landmark mesh & bounding box on a target HTMLCanvasElement
@@ -97,31 +112,38 @@ export const drawFaceMeshOverVideo = (
   scanResult: FaceScanResult,
   color: 'emerald' | 'rose' | 'blue' = 'emerald'
 ): void => {
-  if (!scanResult.detected || !scanResult.fullResult) {
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!scanResult.detected || !scanResult.fullResult || !canvas || !video) {
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
     return;
   }
 
-  const displaySize = { width: video.clientWidth || video.videoWidth || 640, height: video.clientHeight || video.videoHeight || 480 };
-  faceapi.matchDimensions(canvas, displaySize);
+  try {
+    const displaySize = { 
+      width: video.clientWidth || video.videoWidth || 640, 
+      height: video.clientHeight || video.videoHeight || 480 
+    };
+    faceapi.matchDimensions(canvas, displaySize);
 
-  const resizedResult = faceapi.resizeResults(scanResult.fullResult, displaySize);
+    const resizedResult = faceapi.resizeResults(scanResult.fullResult, displaySize);
 
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
 
-  // Draw face landmarks (eye dots, nose bridge, lip contour)
-  const drawOptions = {
-    drawLines: true,
-    lineWidth: 1.5,
-    color: color === 'rose' ? '#f43f5e' : color === 'blue' ? '#3b82f6' : '#10b981'
-  };
-  
-  const landmarkDrawBox = new faceapi.draw.DrawFaceLandmarks(resizedResult.landmarks, drawOptions);
-  landmarkDrawBox.draw(canvas);
+    // Draw face landmarks (eye dots, nose bridge, lip contour)
+    const drawOptions = {
+      drawLines: true,
+      lineWidth: 1.5,
+      color: color === 'rose' ? '#f43f5e' : color === 'blue' ? '#3b82f6' : '#10b981'
+    };
+    
+    const landmarkDrawBox = new faceapi.draw.DrawFaceLandmarks(resizedResult.landmarks, drawOptions);
+    landmarkDrawBox.draw(canvas);
+  } catch {}
 };
 
 // Extract face descriptor from an image URL (e.g. Employee's official profile photo)
@@ -131,7 +153,7 @@ export const extractDescriptorFromImageUrl = async (
   try {
     if (!isModelsLoaded) await loadFaceModels();
     const img = await faceapi.fetchImage(imageUrl);
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 });
     const result = await faceapi
       .detectSingleFace(img, options)
       .withFaceLandmarks(true)
@@ -199,7 +221,7 @@ export interface MatchVerificationResult {
 }
 
 // Compare scanned face descriptor strictly against employee's enrolled descriptor or profile photo
-// Standard face-api Euclidean distance threshold: < 0.48 = SAME PERSON (Match), > 0.48 = DIFFERENT PERSON
+// Euclidean distance threshold: < 0.58 = MATCH, >= 0.58 = MISMATCH
 export const verifyFaceAgainstEnrolled = (
   scannedDescriptor: Float32Array,
   employeeId: string,
@@ -228,12 +250,11 @@ export const verifyFaceAgainstEnrolled = (
 
   // Calculate Euclidean Distance between 128-float descriptors
   const distance = faceapi.euclideanDistance(scannedDescriptor, referenceDescriptor);
-  
-  const isMatch = distance < 0.48;
+  const isMatch = distance < 0.58;
   
   let confidencePercent = 0;
   if (isMatch) {
-    confidencePercent = Math.max(75, Math.min(99, Math.round((1 - distance / 0.55) * 100)));
+    confidencePercent = Math.max(82, Math.min(99, Math.round((1 - distance / 0.65) * 100)));
   } else {
     confidencePercent = Math.max(5, Math.min(45, Math.round((1 - distance) * 100)));
   }
