@@ -21,7 +21,8 @@ export default defineConfig(({ command }) => {
           globPatterns: command === 'build' ? ['**/*.{js,css,html,ico,png,svg,jpeg}'] : [],
           maximumFileSizeToCacheInBytes: 6000000, // 6MB to accommodate large JS bundles and logo
           skipWaiting: true,
-          clientsClaim: true
+          clientsClaim: true,
+          cleanupOutdatedCaches: true
         },
         manifest: {
           name: 'Kalpanaaa Software Solutions',

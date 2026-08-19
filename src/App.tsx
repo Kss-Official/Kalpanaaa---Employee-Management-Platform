@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthView } from './components/auth/AuthView';
 import { PWAInstallPrompt } from './components/common/PWAInstallPrompt';
@@ -6,39 +6,40 @@ import { Employee } from './types';
 import { ShieldCheck, CreditCard, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { Toaster } from 'sonner';
+import { lazyWithRetry } from './lib/lazyWithRetry';
 
 // ── Eager imports (needed immediately on boot) ──
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
 
-// ── Lazy imports (code-split: only loaded when user navigates to that view) ──
-const LandingView          = lazy(() => import('./components/landing/LandingView').then(m => ({ default: m.LandingView })));
-const DashboardView        = lazy(() => import('./components/admin/DashboardView').then(m => ({ default: m.DashboardView })));
-const EmployeeDirectory    = lazy(() => import('./components/admin/EmployeeDirectory').then(m => ({ default: m.EmployeeDirectory })));
-const EmployeeProfileModal = lazy(() => import('./components/admin/EmployeeProfileModal').then(m => ({ default: m.EmployeeProfileModal })));
-const EmployeeFormModal    = lazy(() => import('./components/admin/EmployeeFormModal').then(m => ({ default: m.EmployeeFormModal })));
-const EmployeeIdCardModal  = lazy(() => import('./components/admin/EmployeeIdCardModal').then(m => ({ default: m.EmployeeIdCardModal })));
-const AttendanceManagement = lazy(() => import('./components/admin/AttendanceManagement').then(m => ({ default: m.AttendanceManagement })));
-const ReportsView          = lazy(() => import('./components/admin/ReportsView').then(m => ({ default: m.ReportsView })));
-const DocumentGenerator    = lazy(() => import('./components/admin/DocumentGenerator').then(m => ({ default: m.DocumentGenerator })));
-const SettingsView         = lazy(() => import('./components/admin/SettingsView').then(m => ({ default: m.SettingsView })));
-const AuditLogsView        = lazy(() => import('./components/admin/AuditLogsView').then(m => ({ default: m.AuditLogsView })));
-const LeaveApprovalsView   = lazy(() => import('./components/admin/LeaveApprovalsView').then(m => ({ default: m.LeaveApprovalsView })));
-const EmployeePortal       = lazy(() => import('./components/employee/EmployeePortal').then(m => ({ default: m.EmployeePortal })));
-const VerificationView     = lazy(() => import('./components/public/VerificationView').then(m => ({ default: m.VerificationView })));
+// ── Resilient Lazy imports with automatic Chunk Load Failure Recovery ──
+const LandingView          = lazyWithRetry(() => import('./components/landing/LandingView').then(m => ({ default: m.LandingView })), 'LandingView');
+const DashboardView        = lazyWithRetry(() => import('./components/admin/DashboardView').then(m => ({ default: m.DashboardView })), 'DashboardView');
+const EmployeeDirectory    = lazyWithRetry(() => import('./components/admin/EmployeeDirectory').then(m => ({ default: m.EmployeeDirectory })), 'EmployeeDirectory');
+const EmployeeProfileModal = lazyWithRetry(() => import('./components/admin/EmployeeProfileModal').then(m => ({ default: m.EmployeeProfileModal })), 'EmployeeProfileModal');
+const EmployeeFormModal    = lazyWithRetry(() => import('./components/admin/EmployeeFormModal').then(m => ({ default: m.EmployeeFormModal })), 'EmployeeFormModal');
+const EmployeeIdCardModal  = lazyWithRetry(() => import('./components/admin/EmployeeIdCardModal').then(m => ({ default: m.EmployeeIdCardModal })), 'EmployeeIdCardModal');
+const AttendanceManagement = lazyWithRetry(() => import('./components/admin/AttendanceManagement').then(m => ({ default: m.AttendanceManagement })), 'AttendanceManagement');
+const ReportsView          = lazyWithRetry(() => import('./components/admin/ReportsView').then(m => ({ default: m.ReportsView })), 'ReportsView');
+const DocumentGenerator    = lazyWithRetry(() => import('./components/admin/DocumentGenerator').then(m => ({ default: m.DocumentGenerator })), 'DocumentGenerator');
+const SettingsView         = lazyWithRetry(() => import('./components/admin/SettingsView').then(m => ({ default: m.SettingsView })), 'SettingsView');
+const AuditLogsView        = lazyWithRetry(() => import('./components/admin/AuditLogsView').then(m => ({ default: m.AuditLogsView })), 'AuditLogsView');
+const LeaveApprovalsView   = lazyWithRetry(() => import('./components/admin/LeaveApprovalsView').then(m => ({ default: m.LeaveApprovalsView })), 'LeaveApprovalsView');
+const EmployeePortal       = lazyWithRetry(() => import('./components/employee/EmployeePortal').then(m => ({ default: m.EmployeePortal })), 'EmployeePortal');
+const VerificationView     = lazyWithRetry(() => import('./components/public/VerificationView').then(m => ({ default: m.VerificationView })), 'VerificationView');
 
-const HRDashboard          = lazy(() => import('./components/hr/HRDashboard').then(m => ({ default: m.HRDashboard })));
-const HRProfileView        = lazy(() => import('./components/hr/HRProfileView').then(m => ({ default: m.HRProfileView })));
-const HRLeaveWfhApprovals  = lazy(() => import('./components/hr/HRLeaveWfhApprovals').then(m => ({ default: m.HRLeaveWfhApprovals })));
-const HRPayrollView        = lazy(() => import('./components/hr/HRPayrollView').then(m => ({ default: m.HRPayrollView })));
-const CompanyRulesView     = lazy(() => import('./components/hr/CompanyRulesView').then(m => ({ default: m.CompanyRulesView })));
-const HRNotificationsView  = lazy(() => import('./components/hr/HRNotificationsView').then(m => ({ default: m.HRNotificationsView })));
-const PMDashboard          = lazy(() => import('./components/pm/PMDashboard').then(m => ({ default: m.PMDashboard })));
-const PMProjectsView       = lazy(() => import('./components/pm/PMProjectsView').then(m => ({ default: m.PMProjectsView })));
-const PMTeamPerformance    = lazy(() => import('./components/pm/PMTeamPerformance').then(m => ({ default: m.PMTeamPerformance })));
-const EmployeeTeamDirectory = lazy(() => import('./components/employee/EmployeeTeamDirectory').then(m => ({ default: m.EmployeeTeamDirectory })));
-const ExecutiveProfileView  = lazy(() => import('./components/admin/ExecutiveProfileView').then(m => ({ default: m.ExecutiveProfileView })));
+const HRDashboard          = lazyWithRetry(() => import('./components/hr/HRDashboard').then(m => ({ default: m.HRDashboard })), 'HRDashboard');
+const HRProfileView        = lazyWithRetry(() => import('./components/hr/HRProfileView').then(m => ({ default: m.HRProfileView })), 'HRProfileView');
+const HRLeaveWfhApprovals  = lazyWithRetry(() => import('./components/hr/HRLeaveWfhApprovals').then(m => ({ default: m.HRLeaveWfhApprovals })), 'HRLeaveWfhApprovals');
+const HRPayrollView        = lazyWithRetry(() => import('./components/hr/HRPayrollView').then(m => ({ default: m.HRPayrollView })), 'HRPayrollView');
+const CompanyRulesView     = lazyWithRetry(() => import('./components/hr/CompanyRulesView').then(m => ({ default: m.CompanyRulesView })), 'CompanyRulesView');
+const HRNotificationsView  = lazyWithRetry(() => import('./components/hr/HRNotificationsView').then(m => ({ default: m.HRNotificationsView })), 'HRNotificationsView');
+const PMDashboard          = lazyWithRetry(() => import('./components/pm/PMDashboard').then(m => ({ default: m.PMDashboard })), 'PMDashboard');
+const PMProjectsView       = lazyWithRetry(() => import('./components/pm/PMProjectsView').then(m => ({ default: m.PMProjectsView })), 'PMProjectsView');
+const PMTeamPerformance    = lazyWithRetry(() => import('./components/pm/PMTeamPerformance').then(m => ({ default: m.PMTeamPerformance })), 'PMTeamPerformance');
+const EmployeeTeamDirectory = lazyWithRetry(() => import('./components/employee/EmployeeTeamDirectory').then(m => ({ default: m.EmployeeTeamDirectory })), 'EmployeeTeamDirectory');
+const ExecutiveProfileView  = lazyWithRetry(() => import('./components/admin/ExecutiveProfileView').then(m => ({ default: m.ExecutiveProfileView })), 'ExecutiveProfileView');
 
 // Minimal spinner used as Suspense fallback inside the app (not a splash)
 const ViewLoader = () => (
@@ -48,32 +49,46 @@ const ViewLoader = () => (
 );
 
 // Crash recovery screen shown by ErrorBoundary when an uncaught error occurs
-const CrashScreen = ({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => (
-  <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-8 text-center">
-    <div className="w-16 h-16 bg-rose-500/20 border border-rose-500/30 rounded-2xl flex items-center justify-center mb-6">
-      <AlertTriangle className="w-8 h-8 text-rose-400" />
+const CrashScreen = ({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => {
+  const isChunkError = error?.message?.includes('dynamically imported module') || error?.message?.includes('Loading chunk');
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-8 text-center">
+      <div className="w-16 h-16 bg-rose-500/20 border border-rose-500/30 rounded-2xl flex items-center justify-center mb-6">
+        <AlertTriangle className="w-8 h-8 text-rose-400" />
+      </div>
+      <h1 className="text-2xl font-black text-white mb-2">
+        {isChunkError ? 'New Application Version Available' : 'Something went wrong'}
+      </h1>
+      <p className="text-sm text-slate-400 max-w-md mb-2">
+        {isChunkError 
+          ? 'A newer version of the platform was deployed. Please refresh to load the latest update.' 
+          : 'An unexpected error occurred in the application.'}
+      </p>
+      <p className="text-xs text-slate-600 font-mono bg-slate-900 px-4 py-2 rounded-xl mb-6 max-w-lg break-all">
+        {error?.message || 'Unknown error'}
+      </p>
+      <div className="flex gap-3">
+        <button
+          onClick={() => {
+            window.location.reload();
+          }}
+          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all cursor-pointer shadow-lg shadow-blue-900/30"
+        >
+          <RefreshCw className="w-4 h-4" /> Reload Latest Version
+        </button>
+        {!isChunkError && (
+          <button
+            onClick={resetErrorBoundary}
+            className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold rounded-xl transition-all cursor-pointer border border-slate-700"
+          >
+            <RefreshCw className="w-4 h-4" /> Try Again
+          </button>
+        )}
+      </div>
     </div>
-    <h1 className="text-2xl font-black text-white mb-2">Something went wrong</h1>
-    <p className="text-sm text-slate-400 max-w-md mb-2">An unexpected error occurred in the application.</p>
-    <p className="text-xs text-slate-600 font-mono bg-slate-900 px-4 py-2 rounded-xl mb-6 max-w-lg break-all">
-      {error?.message || 'Unknown error'}
-    </p>
-    <div className="flex gap-3">
-      <button
-        onClick={resetErrorBoundary}
-        className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all cursor-pointer"
-      >
-        <RefreshCw className="w-4 h-4" /> Try Again
-      </button>
-      <button
-        onClick={() => { localStorage.removeItem('kss_v1_session'); window.location.reload(); }}
-        className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold rounded-xl transition-all cursor-pointer border border-slate-700"
-      >
-        <RefreshCw className="w-4 h-4" /> Clear & Reload
-      </button>
-    </div>
-  </div>
-);
+  );
+};
 
 // Dismiss the HTML splash screen defined in index.html
 const dismissHtmlSplash = () => {
@@ -172,6 +187,11 @@ const MainLayout: React.FC = () => {
   const handleLandingGetStarted = () => setViewMode('auth');
 
   const renderView = () => {
+    // Hold clean loading state while authentication session is actively resolving
+    if (!isSessionReady) {
+      return <ViewLoader />;
+    }
+
     if (viewMode === 'landing' && (!isAuthenticated || !activeEmployee)) {
       return (
         <Suspense fallback={<ViewLoader />}>

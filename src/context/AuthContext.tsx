@@ -8,7 +8,11 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
-  onSnapshot
+  onSnapshot,
+  query,
+  where,
+  limit,
+  orderBy
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload } from '../lib/firebase';
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
@@ -630,117 +634,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Real-time Firestore listener for KSS notifications
-  useEffect(() => {
-    if (!isFirestoreConnected) return;
-
-    let unsubscribe: () => void = () => {};
-    
-    import('firebase/firestore').then(({ collection, onSnapshot }) => {
-      unsubscribe = onSnapshot(collection(db, 'notifications'), (snapshot: any) => {
-        if (!snapshot.empty) {
-          const notifs: KssNotification[] = snapshot.docs.map((d: any) => {
-            const data = d.data();
-            const createdAtIso = data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (typeof data.createdAt === 'string' ? data.createdAt : new Date().toISOString());
-            return {
-              id: d.id,
-              ...data,
-              createdAt: createdAtIso
-            };
-          });
-          notifs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-          setNotifications(notifs.slice(0, 50));
-        }
-      }, () => {
-        // Silent fallback for notification listener
-      });
-    });
-    
-    return () => unsubscribe();
-  }, [isFirestoreConnected]);
-
-  // Real-time Firestore listener for Attendance Records (Cloud Lock for Check-Ins, Check-Outs & Breaks)
-  useEffect(() => {
-    if (!isFirestoreConnected) return;
-
-    let unsubscribe: () => void = () => {};
-
-    import('firebase/firestore').then(({ collection, onSnapshot }) => {
-      unsubscribe = onSnapshot(collection(db, 'attendance'), (snapshot: any) => {
-        if (!snapshot.empty) {
-          const cloudRecords: AttendanceRecord[] = snapshot.docs.map((d: any) => {
-            const data = d.data();
-            return {
-              id: d.id,
-              ...data
-            };
-          });
-
-          setAttendance(prev => {
-            const recordMap = new Map<string, AttendanceRecord>();
-            // Base existing records
-            prev.forEach(r => {
-              if (r && r.id) recordMap.set(r.id, r);
-            });
-            // Merge in cloud records
-            cloudRecords.forEach(cr => {
-              if (cr && cr.id) recordMap.set(cr.id, cr);
-            });
-            const merged = Array.from(recordMap.values());
-            try {
-              localStorage.setItem('kss_v1_attendance', JSON.stringify(merged.filter(a => a && !a.id.startsWith('att-hist-'))));
-            } catch {}
-            return merged;
-          });
-        }
-      }, (err) => {
-        console.warn('[AuthContext] Attendance cloud listener error:', err);
-      });
-    });
-
-    return () => unsubscribe();
-  }, [isFirestoreConnected]);
-
-  // Real-time Firestore listener for Employees Directory (Syncs Face Biometrics & Profile)
-  useEffect(() => {
-    if (!isFirestoreConnected) return;
-
-    let unsubscribe: () => void = () => {};
-
-    import('firebase/firestore').then(({ collection, onSnapshot }) => {
-      unsubscribe = onSnapshot(collection(db, 'employees'), (snapshot: any) => {
-        if (!snapshot.empty) {
-          const cloudEmployees: Employee[] = snapshot.docs.map((d: any) => {
-            const data = d.data();
-            return {
-              id: d.id,
-              ...data
-            };
-          });
-
-          setEmployees(prev => {
-            const empMap = new Map<string, Employee>();
-            prev.forEach(e => {
-              if (e && e.id) empMap.set(e.id, e);
-            });
-            cloudEmployees.forEach(ce => {
-              if (ce && ce.id) empMap.set(ce.id, ce);
-            });
-            const merged = Array.from(empMap.values());
-            try {
-              localStorage.setItem('kss_v1_employees', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
-        }
-      }, (err) => {
-        console.warn('[AuthContext] Employees cloud listener error:', err);
-      });
-    });
-
-    return () => unsubscribe();
-  }, [isFirestoreConnected]);
-
   // ── DEDICATED real-time listener for Office-Wide WFH dates ──
   // This is the 100% reliable channel — completely independent of settings
   useEffect(() => {
@@ -1039,8 +932,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'employees');
         });
 
-        // Subscribe to attendance records
-        unsubAtt = onSnapshot(collection(db, 'attendance'), (snapshot) => {
+        // Subscribe to attendance records (Bounded to rolling 30-day window to eliminate cost spikes)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+        const attQuery = query(collection(db, 'attendance'), where('date', '>=', thirtyDaysAgoStr));
+
+        unsubAtt = onSnapshot(attQuery, (snapshot) => {
           const fetched: AttendanceRecord[] = [];
           if (!snapshot.empty) {
             snapshot.forEach(docSnap => {
@@ -1201,7 +1099,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'leaveRequests');
         });
 
-        unsubNotifs = onSnapshot(collection(db, 'notifications'), (snapshot) => {
+        const notifsQuery = query(collection(db, 'notifications'), limit(50));
+        unsubNotifs = onSnapshot(notifsQuery, (snapshot) => {
           const fetched: KssNotification[] = [];
           if (!snapshot.empty) {
             snapshot.forEach(docSnap => {
@@ -1300,11 +1199,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Conditionally subscribe to audit logs only for admins
+  // Conditionally subscribe to audit logs only for admins (bounded query to prevent read spikes)
   useEffect(() => {
     let unsubLogs = () => { };
     if (isAuthenticated && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) {
-      unsubLogs = onSnapshot(collection(db, 'auditLogs'), (snapshot) => {
+      const logsQuery = query(collection(db, 'auditLogs'), limit(100));
+      unsubLogs = onSnapshot(logsQuery, (snapshot) => {
         if (!snapshot.empty) {
           const fetched: AuditLog[] = [];
           snapshot.forEach(docSnap => {
