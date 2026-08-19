@@ -122,11 +122,11 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     setSelectedYearMonth(`${newYear}-${String(newMonth).padStart(2, '0')}`);
   };
 
-  // Calculate detailed activity & break time breakdown for selected day
+  // Calculate detailed activity & break time breakdown for selected day (Fixes Root Cause 90% Meal Mismatch)
   const computeActivityBreakdown = (record: AttendanceRecord) => {
     const breaks = record.breaks || [];
+    const isToday = record.date === new Date().toISOString().split('T')[0];
     
-    let workingMins = record.workingMinutes || 0;
     let teaBreakMins = 0;
     let mealBreakMins = 0;
     let teamHuddleMins = 0;
@@ -136,28 +136,55 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     let otherBreakMins = 0;
 
     breaks.forEach(b => {
-      const breakEndTime = b.endAt ? new Date(b.endAt).getTime() : Date.now();
-      const duration = b.durationMinutes || (b.startAt ? Math.max(1, Math.floor((breakEndTime - new Date(b.startAt).getTime()) / 60000)) : 0);
+      let duration = Number(b.durationMinutes) || 0;
+      
+      // If duration is not set or 0, compute from timestamps with strict safeguards
+      if (duration <= 0 && b.startAt) {
+        if (b.endAt) {
+          const diffMs = new Date(b.endAt).getTime() - new Date(b.startAt).getTime();
+          duration = Math.max(1, Math.floor(diffMs / 60000));
+        } else if (record.checkOutAt) {
+          // If shift has checked out, break cannot extend past checkout
+          const diffMs = new Date(record.checkOutAt).getTime() - new Date(b.startAt).getTime();
+          const cap = b.type === 'Meal Break' || (b.type as string) === 'Lunch Break' ? 30 : 15;
+          duration = Math.max(1, Math.min(cap, Math.floor(diffMs / 60000)));
+        } else if (isToday) {
+          // If actively on a break today, calculate live elapsed but cap at 50 mins
+          const diffMs = Date.now() - new Date(b.startAt).getTime();
+          duration = Math.max(1, Math.min(50, Math.floor(diffMs / 60000)));
+        } else {
+          // Default sensible duration for past unclosed records
+          duration = b.type === 'Meal Break' || (b.type as string) === 'Lunch Break' ? 30 : 15;
+        }
+      }
+
+      // Hard cap single break duration to prevent corruption
+      duration = Math.min(60, Math.max(1, duration));
       const type = b.type;
 
       if (type === 'Tea Break') teaBreakMins += duration;
       else if (type === 'Meal Break' || (type as string) === 'Lunch Break') mealBreakMins += duration;
       else if (type === 'Team Huddle') teamHuddleMins += duration;
       else if (type === 'Team Meeting') teamMeetingMins += duration;
-      else if (type === 'Attainment / Training') trainingMins += duration;
+      else if (type === 'Attainment / Training' || (type as string) === 'Training') trainingMins += duration;
       else if (type === 'Activity') activityMins += duration;
       else otherBreakMins += duration;
     });
 
     const totalBreakMins = teaBreakMins + mealBreakMins + teamHuddleMins + teamMeetingMins + trainingMins + activityMins + otherBreakMins;
     
-    if (workingMins === 0 && record.checkInAt) {
-      const shiftEndTime = record.checkOutAt ? new Date(record.checkOutAt).getTime() : Date.now();
+    // Accurate working minutes calculation
+    let workingMins = Number(record.workingMinutes) || 0;
+    if (workingMins <= 0 && record.checkInAt) {
+      const shiftEndTime = record.checkOutAt 
+        ? new Date(record.checkOutAt).getTime() 
+        : (isToday ? Date.now() : new Date(record.checkInAt).getTime() + (8.5 * 3600000));
       const totalShiftMs = shiftEndTime - new Date(record.checkInAt).getTime();
       const totalShiftMins = Math.max(0, Math.floor(totalShiftMs / 60000));
       workingMins = Math.max(0, totalShiftMins - totalBreakMins);
     }
 
+    // Grand total is always working + breaks
     const grandTotalMins = workingMins + totalBreakMins;
 
     return {

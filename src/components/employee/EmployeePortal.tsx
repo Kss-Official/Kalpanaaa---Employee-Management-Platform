@@ -1270,16 +1270,25 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     let activitySecs = 0;
 
                     (todayRecord.breaks || []).forEach(b => {
-                      const durSec = ((b.durationMinutes || 0) * 60) + ((!b.endAt && activeBreak?.startAt === b.startAt) ? breakElapsedSec : 0);
+                      let durSec = 0;
+                      if (!b.endAt && activeBreak?.startAt === b.startAt) {
+                        durSec = breakElapsedSec;
+                      } else if (b.durationMinutes && b.durationMinutes > 0) {
+                        durSec = Math.min(3600, b.durationMinutes * 60);
+                      } else if (b.startAt && b.endAt) {
+                        const diffSec = Math.floor((new Date(b.endAt).getTime() - new Date(b.startAt).getTime()) / 1000);
+                        durSec = Math.min(3600, Math.max(0, diffSec));
+                      }
+
                       if (b.type === 'Tea Break') teaSecs += durSec;
-                      else if (b.type === 'Meal Break' || b.type === 'Lunch Break') mealSecs += durSec;
+                      else if (b.type === 'Meal Break' || (b.type as string) === 'Lunch Break') mealSecs += durSec;
                       else if (b.type === 'Team Huddle') huddleSecs += durSec;
                       else if (b.type === 'Team Meeting') meetingSecs += durSec;
                       else if (b.type === 'Attainment / Training' || b.type === 'Training') trainingSecs += durSec;
-                      else activitySecs += durSec;
+                      else if (b.type === 'Activity') activitySecs += durSec;
                     });
 
-                    if (activeBreak && !(todayRecord.breaks || []).some(b => !b.endAt)) {
+                    if (activeBreak && !(todayRecord.breaks || []).some(b => b.startAt === activeBreak.startAt)) {
                       const dur = breakElapsedSec;
                       if (activeBreak.type === 'Tea Break') teaSecs += dur;
                       else if (activeBreak.type === 'Meal Break' || activeBreak.type === 'Lunch Break') mealSecs += dur;
