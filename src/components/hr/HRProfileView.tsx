@@ -42,7 +42,8 @@ export const HRProfileView: React.FC = () => {
     endBreak, 
     submitLeaveRequest,
     cancelLeaveRequest,
-    companyWorkZone
+    companyWorkZone,
+    updateEmployee
   } = useAuth();
 
   const targetEmployee = activeEmployee || employees.find(e => e.role === 'HR_ADMIN' || e.department === 'Human Resources' || (e.designation || '').toLowerCase().includes('hr')) || employees[0];
@@ -638,6 +639,13 @@ export const HRProfileView: React.FC = () => {
           onSuccess={() => {
             setIsFaceModalOpen(false);
             executeHrCheckInProcess();
+          }}
+          onEnrollSuccess={(descriptorArray) => {
+            updateEmployee(targetEmployee.id, {
+              isFaceEnrolled: true,
+              faceEnrolledAt: new Date().toISOString(),
+              faceDescriptor: descriptorArray
+            });
           }}
           employeeName={targetEmployee.fullName}
           employeeId={targetEmployee.id}

@@ -2462,6 +2462,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         onSuccess={() => {
           executeCheckInProcess();
         }}
+        onEnrollSuccess={(descriptorArray) => {
+          triggerHaptic('success');
+          updateEmployee(activeEmployee.id, {
+            isFaceEnrolled: true,
+            faceEnrolledAt: new Date().toISOString(),
+            faceDescriptor: descriptorArray
+          });
+        }}
         employeeName={activeEmployee.fullName}
         employeeId={activeEmployee.id}
         profilePhotoUrl={activeEmployee.profilePhotoUrl}

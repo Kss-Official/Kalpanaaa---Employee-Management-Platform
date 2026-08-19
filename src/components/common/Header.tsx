@@ -5,12 +5,9 @@ import {
   LogOut, 
   Clock, 
   ChevronDown,
-  QrCode,
   Menu,
   X,
-  Download,
-  LogIn,
-  Coffee
+  Download
 } from 'lucide-react';
 import { UserRole } from '../../types';
 import { NotificationBell } from './NotificationBell';
@@ -26,34 +23,27 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar, 
   isMobileSidebarOpen,
 }) => {
-  const { activeEmployee, attendance, checkIn, checkOut, startBreak, endBreak, role, logout, settings } = useAuth();
+  const { activeEmployee, attendance, checkIn, checkOut, role, logout, settings, updateEmployee } = useAuth();
   const [timeStr, setTimeStr] = useState('');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [headerActionLoading, setHeaderActionLoading] = useState(false);
+  const [, setHeaderActionLoading] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const myTodayRecord = activeEmployee 
     ? attendance.find(a => (a.employeeId === activeEmployee.id || a.employeeCode === activeEmployee.employeeId) && a.date === todayStr) 
     : null;
 
-  const isCheckedIn = !!myTodayRecord?.checkInAt && !myTodayRecord?.checkOutAt;
-  const activeBreak = myTodayRecord?.breaks?.find(b => !b.endAt && !b.endTime);
-
   const [isHeaderFaceModalOpen, setIsHeaderFaceModalOpen] = useState(false);
 
-  const handleHeaderCheckIn = async () => {
-    if (!activeEmployee) return;
-    setIsHeaderFaceModalOpen(true);
-  };
-
   const executeHeaderCheckInProcess = async () => {
+    if (!activeEmployee) return;
     setHeaderActionLoading(true);
 
     let resolved = false;
     const runCheckIn = (lat?: number, lon?: number, accuracy: number = 10) => {
       if (resolved) return;
       resolved = true;
-      checkIn(activeEmployee.id, lat, lon, 'WEB_APP', accuracy).finally(() => setHeaderActionLoading(false));
+      checkIn(activeEmployee.id, lat, lon, 'Facial Recognition', accuracy).finally(() => setHeaderActionLoading(false));
     };
 
     if (navigator.geolocation) {
@@ -73,47 +63,6 @@ export const Header: React.FC<HeaderProps> = ({
     } else {
       runCheckIn();
     }
-  };
-
-  const handleHeaderCheckOut = async () => {
-    if (!activeEmployee) return;
-    setHeaderActionLoading(true);
-
-    let resolved = false;
-    const runCheckOut = (lat?: number, lon?: number) => {
-      if (resolved) return;
-      resolved = true;
-      checkOut(activeEmployee.id, lat, lon).finally(() => setHeaderActionLoading(false));
-    };
-
-    if (navigator.geolocation) {
-      const fallbackTimer = setTimeout(() => runCheckOut(), 1200);
-
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          clearTimeout(fallbackTimer);
-          runCheckOut(pos.coords.latitude, pos.coords.longitude);
-        },
-        () => {
-          clearTimeout(fallbackTimer);
-          runCheckOut();
-        },
-        { enableHighAccuracy: false, timeout: 1200 }
-      );
-    } else {
-      runCheckOut();
-    }
-  };
-
-  const handleHeaderBreakToggle = async () => {
-    if (!activeEmployee) return;
-    setHeaderActionLoading(true);
-    if (activeBreak) {
-      await endBreak(activeEmployee.id);
-    } else {
-      await startBreak(activeEmployee.id, 'Tea Break');
-    }
-    setHeaderActionLoading(false);
   };
 
   useEffect(() => {
@@ -221,7 +170,6 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Notification Bell — visible for all authenticated roles */}
         <NotificationBell />
 
-
         {/* Role badge — hidden on small screens */}
         {(() => {
           const effectiveRole = activeEmployee?.role || role;
@@ -301,6 +249,13 @@ export const Header: React.FC<HeaderProps> = ({
           onSuccess={() => {
             setIsHeaderFaceModalOpen(false);
             executeHeaderCheckInProcess();
+          }}
+          onEnrollSuccess={(descriptorArray) => {
+            updateEmployee(activeEmployee.id, {
+              isFaceEnrolled: true,
+              faceEnrolledAt: new Date().toISOString(),
+              faceDescriptor: descriptorArray
+            });
           }}
           employeeName={activeEmployee.fullName}
           employeeId={activeEmployee.id}
