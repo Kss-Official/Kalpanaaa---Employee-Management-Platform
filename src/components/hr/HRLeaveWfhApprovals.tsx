@@ -289,8 +289,16 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                       ● {isFullyApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending'}
                     </span>
 
-                    {!isFullyApproved && !isRejected ? (
-                      <div className="flex items-center gap-2">
+                    {hrState === 'Approved' || isFullyApproved ? (
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400" /> HR Sanctioned {ceoState === 'Approved' && ctoState === 'Approved' ? '(Completed)' : '(Sent to CEO)'}
+                      </span>
+                    ) : hrState === 'Rejected' || isRejected ? (
+                      <span className="px-2.5 py-1 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[11px] font-bold flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-300">
+                        <X className="w-3.5 h-3.5 text-rose-400" /> Rejected
+                      </span>
+                    ) : (
+                      <div className="flex items-center gap-2 animate-in fade-in duration-300">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -312,11 +320,7 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                           <X className="w-3.5 h-3.5" /> Reject
                         </button>
                       </div>
-                    ) : hrState === 'Approved' && !isFullyApproved && !isRejected ? (
-                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
-                        ✓ HR Approved — Waiting CEO
-                      </span>
-                    ) : null}
+                    )}
                   </div>
                 </div>
               );
@@ -444,8 +448,16 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        {!isFullyApproved && !isRejected ? (
-                          <div className="flex items-center justify-end gap-1.5">
+                        {hrState === 'Approved' || isFullyApproved ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 animate-in fade-in zoom-in-95 duration-300">
+                            <Check className="w-3 h-3 text-emerald-400" /> HR Sanctioned {ceoState === 'Approved' && ctoState === 'Approved' ? '(Completed)' : '(Sent to CEO)'}
+                          </span>
+                        ) : hrState === 'Rejected' || isRejected ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-400 bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 animate-in fade-in zoom-in-95 duration-300">
+                            <X className="w-3 h-3 text-rose-400" /> Rejected
+                          </span>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1.5 animate-in fade-in duration-300">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -467,14 +479,6 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                               <X className="w-3 h-3" /> Reject
                             </button>
                           </div>
-                        ) : hrState === 'Approved' && !isFullyApproved && !isRejected ? (
-                          <span className="text-[10px] font-bold text-emerald-400">
-                            ✓ HR Approved — Waiting CEO
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-semibold text-slate-500">
-                            {isFullyApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending'}
-                          </span>
                         )}
                       </td>
                     </tr>
