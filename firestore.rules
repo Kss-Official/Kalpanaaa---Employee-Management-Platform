@@ -139,13 +139,15 @@ service cloud.firestore {
 
     // ── 9. PM Projects & Kanban Tasks ──
     match /projects/{projectId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read, write: if isSignedIn();
     }
 
     match /projectTasks/{taskId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read, write: if isSignedIn();
+    }
+
+    match /oneOnOneNotes/{noteId} {
+      allow read, write: if isSignedIn();
     }
 
     // ── 10. Audit Logs (Immutable Append-Only) ──

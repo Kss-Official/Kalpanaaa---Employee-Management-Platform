@@ -12,8 +12,7 @@ export type BreakType =
   | 'Team Huddle' 
   | 'Team Meeting' 
   | 'Attainment / Training' 
-  | 'Activity' 
-  | 'Geo-Fence Auto Break';
+  | 'Activity';
 
 export const normalizeBreakType = (type?: string): BreakType | string => {
   if (!type) return 'Meal Break';
@@ -24,7 +23,6 @@ export const normalizeBreakType = (type?: string): BreakType | string => {
   if (lower.includes('tea break') || lower.includes('tea /') || lower.includes('coffee') || lower === 'tea') return 'Tea Break';
   if (lower.includes('attainment') || lower.includes('training')) return 'Attainment / Training';
   if (lower.includes('activity')) return 'Activity';
-  if (lower.includes('geo')) return 'Geo-Fence Auto Break';
   return type;
 };
 

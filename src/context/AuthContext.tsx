@@ -2120,18 +2120,83 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const sDate = startDate || targetReq?.startDate || '';
     const eDate = endDate || targetReq?.endDate || '';
     const revUid = user?.uid || activeEmployee?.uid || 'uid-exec';
+    const nowIso = new Date().toISOString();
+    const isApproved = decision === 'Approved';
 
-    if (stage === 'PM') {
-      await LeaveService.reviewPmStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
-    } else if (stage === 'HR') {
-      await LeaveService.reviewHrStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
-    } else if (stage === 'CEO') {
-      await LeaveService.reviewCeoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
-    } else if (stage === 'CTO') {
-      await LeaveService.reviewCtoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+    // 1. INSTANT 0ms Optimistic State Update for ultra-fast, smooth UI
+    setLeaveRequests(prev => {
+      const updated = prev.map(req => {
+        if (req.id !== id) return req;
+        const copy: LeaveRequest = { 
+          ...req, 
+          updatedAt: nowIso 
+        };
+
+        if (stage === 'PM') {
+          copy.pmStatus = decision;
+          copy.pmRecommendation = decision;
+          copy.pmReviewedBy = revUid;
+          copy.pmReviewedAt = nowIso;
+          copy.pmNotes = notes || '';
+          copy.hrStatus = isApproved ? 'Pending' : (copy.hrStatus || 'Waiting PM');
+          if (!isApproved) copy.status = 'Rejected';
+        } else if (stage === 'HR') {
+          copy.hrStatus = decision;
+          copy.hrReviewedBy = revUid;
+          copy.hrReviewedAt = nowIso;
+          copy.hrNotes = notes || '';
+          copy.ceoStatus = isApproved ? 'Pending' : (copy.ceoStatus || 'Waiting HR');
+          // If PM was pending, mark PM sanctioned as well
+          if (copy.pmStatus === 'Pending' && isApproved) {
+            copy.pmStatus = 'Approved';
+          }
+          if (!isApproved) copy.status = 'Rejected';
+        } else if (stage === 'CEO') {
+          copy.ceoStatus = decision;
+          copy.ceoReviewedBy = revUid;
+          copy.ceoReviewedAt = nowIso;
+          copy.ceoNotes = notes || '';
+          copy.ctoStatus = isApproved ? 'Pending' : (copy.ctoStatus || 'Waiting CEO');
+          if (!isApproved) copy.status = 'Rejected';
+        } else if (stage === 'CTO') {
+          copy.ctoStatus = decision;
+          copy.ctoReviewedBy = revUid;
+          copy.ctoReviewedAt = nowIso;
+          copy.ctoNotes = notes || '';
+          copy.status = isApproved ? 'Approved' : 'Rejected';
+        }
+
+        return copy;
+      });
+
+      localStorage.setItem('kss_v1_leave_requests', JSON.stringify(updated));
+      return updated;
+    });
+
+    // 2. Broadcast across tabs immediately
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const channel = new BroadcastChannel('kss_app_events');
+        channel.postMessage({ type: 'UPDATE_LEAVE_REQUEST', payload: { id, stage, decision } });
+      } catch {}
     }
 
-    // Dispatch real-time in-app notification for stage decision
+    // 3. Persist to Firestore via LeaveService asynchronously
+    try {
+      if (stage === 'PM') {
+        await LeaveService.reviewPmStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+      } else if (stage === 'HR') {
+        await LeaveService.reviewHrStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+      } else if (stage === 'CEO') {
+        await LeaveService.reviewCeoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+      } else if (stage === 'CTO') {
+        await LeaveService.reviewCtoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+      }
+    } catch (fsErr) {
+      console.warn('[AuthContext] Firestore stage update error:', fsErr);
+    }
+
+    // 4. Dispatch real-time in-app notification for stage decision
     sendKssNotification(
       decision === 'Approved' ? 'LEAVE_REQUEST_APPROVED' : 'LEAVE_REQUEST_REJECTED',
       decision === 'Approved' ? `✅ ${targetReq?.type || 'Request'} Approved (${stage} Stage)` : `❌ ${targetReq?.type || 'Request'} Rejected (${stage} Stage)`,
@@ -2151,7 +2216,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
-    // If final CTO approval and WFH, add to approvedWfhDates
+    // If final CTO or Executive approval and WFH, add to approvedWfhDates
     if (stage === 'CTO' && decision === 'Approved' && targetReq?.type === 'WFH') {
       const targetEmp = employees.find(e => e.employeeId === targetReq.employeeId || e.id === targetReq.employeeId);
       if (targetEmp) {

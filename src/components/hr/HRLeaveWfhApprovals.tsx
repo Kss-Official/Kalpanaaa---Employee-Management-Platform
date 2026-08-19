@@ -289,11 +289,7 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                       ● {isFullyApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending'}
                     </span>
 
-                    {pmState === 'Pending' && !isFullyApproved && !isRejected ? (
-                      <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold">
-                        🔒 Awaiting PM Review
-                      </span>
-                    ) : hrState === 'Pending' && !isFullyApproved && !isRejected ? (
+                    {!isFullyApproved && !isRejected ? (
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -448,11 +444,7 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        {pmState === 'Pending' && !isFullyApproved && !isRejected ? (
-                          <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold">
-                            🔒 Awaiting PM Review
-                          </span>
-                        ) : hrState === 'Pending' && !isFullyApproved && !isRejected ? (
+                        {!isFullyApproved && !isRejected ? (
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
@@ -460,9 +452,9 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                                 e.stopPropagation();
                                 updateLeaveRequestStage(req.id, 'HR', 'Approved', activeEmployee?.fullName || 'HR Admin', 'HR Sanction Granted');
                               }}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500/30 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-sm active:scale-95"
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500/30 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1"
                             >
-                              Approve HR
+                              <Check className="w-3 h-3" /> Approve
                             </button>
                             <button
                               type="button"
@@ -470,9 +462,9 @@ export const HRLeaveWfhApprovals: React.FC = () => {
                                 e.stopPropagation();
                                 updateLeaveRequestStage(req.id, 'HR', 'Rejected', activeEmployee?.fullName || 'HR Admin', 'HR Rejected');
                               }}
-                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/30 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-sm active:scale-95"
+                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/30 text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1"
                             >
-                              Reject
+                              <X className="w-3 h-3" /> Reject
                             </button>
                           </div>
                         ) : hrState === 'Approved' && !isFullyApproved && !isRejected ? (

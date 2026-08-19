@@ -22,6 +22,8 @@ import {
   Briefcase
 } from 'lucide-react';
 import { OneOnOneNote, Employee } from '../../types';
+import { db, cleanFirestorePayload } from '../../lib/firebase';
+import { collection, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
 
 export const PMTeamPerformance: React.FC = () => {
   const { employees, activeEmployee } = useAuth();
@@ -29,7 +31,7 @@ export const PMTeamPerformance: React.FC = () => {
   const [selectedDept, setSelectedDept] = useState('ALL');
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.id || '');
 
-  // 1:1 Notes state with LocalStorage persistence
+  // 1:1 Notes state with LocalStorage and Firestore persistence
   const [notes, setNotes] = useState<OneOnOneNote[]>(() => {
     const saved = localStorage.getItem('kss_pm_1on1_notes');
     if (saved) {
@@ -53,6 +55,20 @@ export const PMTeamPerformance: React.FC = () => {
       }
     ];
   });
+
+  // Real-time Firestore sync for 1:1 Notes
+  useEffect(() => {
+    const unsubNotes = onSnapshot(collection(db, 'oneOnOneNotes'), (snapshot) => {
+      if (!snapshot.empty) {
+        const fetched: OneOnOneNote[] = [];
+        snapshot.forEach(d => fetched.push(d.data() as OneOnOneNote));
+        setNotes(fetched);
+        localStorage.setItem('kss_pm_1on1_notes', JSON.stringify(fetched));
+      }
+    }, (err) => console.warn('[PMTeamPerformance] Firestore 1on1 notes listener error:', err));
+
+    return () => unsubNotes();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('kss_pm_1on1_notes', JSON.stringify(notes));
@@ -98,6 +114,9 @@ export const PMTeamPerformance: React.FC = () => {
     };
 
     setNotes(prev => [newNote, ...prev]);
+    setDoc(doc(db, 'oneOnOneNotes', newNote.id), cleanFirestorePayload(newNote))
+      .catch(err => console.error('[PMTeamPerformance] Firestore setDoc error:', err));
+
     setAgenda('');
     setNoteContent('');
     setActionItemInput('');

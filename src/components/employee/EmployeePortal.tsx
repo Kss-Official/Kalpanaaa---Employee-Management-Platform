@@ -502,31 +502,8 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     ? liveDistanceMeters <= companyWorkZone.radiusMeters
     : false;
 
-  // Time-of-Day Break Classifier
-  const getAutoBreakTypeByTime = (): 'Meal Break' | 'Tea Break' | 'Geo-Fence Auto Break' => {
-    const now = new Date();
-    const timeInMins = now.getHours() * 60 + now.getMinutes();
-
-    // Afternoon: 12:00 PM (720 mins) to 3:30 PM (930 mins) -> Meal Break
-    if (timeInMins >= 720 && timeInMins < 930) {
-      return 'Meal Break';
-    }
-    // Evening: 3:30 PM (930 mins) to 6:30 PM (1110 mins) -> Tea Break
-    if (timeInMins >= 930 && timeInMins < 1110) {
-      return 'Tea Break';
-    }
-    return 'Geo-Fence Auto Break';
-  };
-
-  // GPS location verification is active for Check-In & Check-Out.
-  // Auto-break on geofence departure is disabled per configuration.
-
-  // Auto-end any leftover Geo-Fence Auto Break entries and resume shift!
-  useEffect(() => {
-    if (activeBreak?.type === 'Geo-Fence Auto Break' && todayRecord) {
-      handleEndBreak();
-    }
-  }, [activeBreak?.type, todayRecord?.id]);
+  // GPS location verification is active for manual Check-In & Check-Out.
+  // Geofence automated breaks are completely disabled (all breaks & check-ins are manually triggered on laptop).
 
   // Ref flags to prevent repeating break escalation notifications
   const breakEscalationFlagsRef = useRef<{ m25: boolean; m30: boolean; m50: boolean }>({ m25: false, m30: false, m50: false });
@@ -700,20 +677,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       addAuditLog('ATTENDANCE_BREAK_START', todayRecord.id, `${activeEmployee.fullName} started a ${type}.`);
     }
     
-    if (type !== 'Geo-Fence Auto Break') {
-      const emojiMap: Record<string, string> = {
-        'Tea Break': '🍵',
-        'Meal Break': '🍱',
-        'Lunch Break': '🍽️',
-        'Team Huddle': '👥',
-        'Team Meeting': '📅',
-        'Attainment / Training': '🎓',
-        'Activity': '⚡',
-        'Geo-Fence Auto Break': '📍'
-      };
-      const emoji = emojiMap[type] || '⚡';
-      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ${emoji}` });
-    }
+    const emojiMap: Record<string, string> = {
+      'Tea Break': '🍵',
+      'Meal Break': '🍱',
+      'Lunch Break': '🍽️',
+      'Team Huddle': '👥',
+      'Team Meeting': '📅',
+      'Attainment / Training': '🎓',
+      'Activity': '⚡'
+    };
+    const emoji = emojiMap[type] || '⚡';
+    setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ${emoji}` });
   };
 
   const handleEndBreak = () => {
@@ -753,11 +727,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       addAuditLog('ATTENDANCE_BREAK_END', todayRecord.id, `${activeEmployee.fullName} ended their ${activeBreak.type} after ${durationMinutes} minutes.`);
     }
 
-    if (activeBreak.type !== 'Geo-Fence Auto Break') {
-      setActionFeedback({ success: true, message: `${activeBreak.type} ended — ${durationMinutes}m recorded. Welcome back! 👋` });
-    } else {
-      setActionFeedback({ success: true, message: `Welcome back to the office! Shift resumed. Auto-paused for ${durationMinutes}m.` });
-    }
+    setActionFeedback({ success: true, message: `${activeBreak.type} ended — ${durationMinutes}m recorded. Welcome back! 👋` });
   };
 
   const handleToggleWfh = () => {

@@ -21,7 +21,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { ProjectTask, TaskStatus, TaskPriority } from '../../types';
-import { db } from '../../lib/firebase';
+import { db, cleanFirestorePayload } from '../../lib/firebase';
 import { collection, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
 
 const DEFAULT_TASKS: ProjectTask[] = [
@@ -146,7 +146,7 @@ export const PMProjectsView: React.FC = () => {
       const updated = prev.map(t => t.id === taskId ? { ...t, status: newStatus, updatedAt: today } : t);
       const target = updated.find(t => t.id === taskId);
       if (target) {
-        setDoc(doc(db, 'projectTasks', target.id), target).catch(err => console.error('[PMProjectsView] Firestore setDoc error:', err));
+        setDoc(doc(db, 'projectTasks', target.id), cleanFirestorePayload(target)).catch(err => console.error('[PMProjectsView] Firestore setDoc error:', err));
       }
       return updated;
     });
@@ -205,7 +205,7 @@ export const PMProjectsView: React.FC = () => {
         updatedAt: today
       };
       setTasks(prev => prev.map(t => t.id === editingTask.id ? updated : t));
-      setDoc(doc(db, 'projectTasks', updated.id), updated).catch(err => console.error('[PMProjectsView] Firestore setDoc error:', err));
+      setDoc(doc(db, 'projectTasks', updated.id), cleanFirestorePayload(updated)).catch(err => console.error('[PMProjectsView] Firestore setDoc error:', err));
     } else {
       const newTask: ProjectTask = {
         id: `task-${Date.now()}`,
@@ -222,7 +222,7 @@ export const PMProjectsView: React.FC = () => {
         updatedAt: today
       };
       setTasks(prev => [newTask, ...prev]);
-      setDoc(doc(db, 'projectTasks', newTask.id), newTask).catch(err => console.error('[PMProjectsView] Firestore setDoc error:', err));
+      setDoc(doc(db, 'projectTasks', newTask.id), cleanFirestorePayload(newTask)).catch(err => console.error('[PMProjectsView] Firestore setDoc error:', err));
     }
 
     setIsModalOpen(false);

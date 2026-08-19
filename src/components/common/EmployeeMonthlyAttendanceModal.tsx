@@ -271,8 +271,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
           'Team Huddle': '👥',
           'Team Meeting': '📅',
           'Attainment / Training': '🎓',
-          'Activity': '⚡',
-          'Geo-Fence Auto Break': '📍'
+          'Activity': '⚡'
         };
         const icon = typeIcons[b.type] || '☕';
 
