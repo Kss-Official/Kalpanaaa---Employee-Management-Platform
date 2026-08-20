@@ -91,7 +91,7 @@ const AVATAR_PRESETS = [
 ];
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
-  const { activeEmployee, user, attendance, attendanceSyncStatus, leaveRequests, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout, updateCurrentEmployeePassword, companyWideWfhDates, notifications } = useAuth();
+  const { activeEmployee, user, attendance, attendanceSyncStatus, leaveRequests, recordCheckIn, recordCheckOut, startBreak, endBreak, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout, updateCurrentEmployeePassword, companyWideWfhDates, notifications } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   // Time-aware greeting
@@ -498,61 +498,6 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // GPS location verification is active for manual Check-In & Check-Out.
   // Geofence automated breaks are completely disabled (all breaks & check-ins are manually triggered on laptop).
 
-  // Ref flags to prevent repeating break escalation notifications
-  const breakEscalationFlagsRef = useRef<{ m25: boolean; m30: boolean; m50: boolean }>({ m25: false, m30: false, m50: false });
-
-  // Reset escalation flags when activeBreak changes
-  useEffect(() => {
-    breakEscalationFlagsRef.current = { m25: false, m30: false, m50: false };
-  }, [activeBreak?.startAt]);
-
-  // Break Extension Escalation Timers (25m Warning, 30m Alert, 50m Auto-Off Rule)
-  useEffect(() => {
-    if (!activeBreak) return;
-
-    const checkEscalations = () => {
-      const elapsedSec = Math.max(0, Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 1000));
-      const elapsedMins = Math.floor(elapsedSec / 60);
-
-      // Escalation Rule 1: 25 Minutes Warning (5 minutes before 30m limit)
-      if (elapsedMins >= 25 && elapsedMins < 30 && !breakEscalationFlagsRef.current.m25) {
-        breakEscalationFlagsRef.current.m25 = true;
-        triggerHaptic('warning');
-        setActionFeedback({
-          success: false,
-          message: `BREAK WARNING: You have been on ${activeBreak.type} for 25 minutes (5 mins left before 30-min limit).`
-        });
-      }
-
-      // Escalation Rule 2: 30 Minutes Alert (Overtime Break Limit)
-      if (elapsedMins >= 30 && elapsedMins < 50 && !breakEscalationFlagsRef.current.m30) {
-        breakEscalationFlagsRef.current.m30 = true;
-        triggerHaptic('error');
-        setActionFeedback({
-          success: false,
-          message: `BREAK LIMIT REACHED: You have exceeded 30 minutes on ${activeBreak.type}. Please return to work.`
-        });
-        addAuditLog('ATTENDANCE_BREAK_EXTENDED', activeEmployee.id, `${activeEmployee.fullName} extended ${activeBreak.type} past 30 minutes.`);
-      }
-
-      // Escalation Rule 3: 50 Minutes AUTO-OFF RULE (Hard Cutoff & Auto-End Break)
-      if (elapsedMins >= 50 && !breakEscalationFlagsRef.current.m50) {
-        breakEscalationFlagsRef.current.m50 = true;
-        triggerHaptic('error');
-        handleEndBreak();
-        setActionFeedback({
-          success: false,
-          message: `BREAK AUTO-STOPPED: Maximum 50-minute break limit reached for ${activeBreak.type}. Shift resumed.`
-        });
-        addAuditLog('ATTENDANCE_BREAK_AUTO_STOP', activeEmployee.id, `Break auto-stopped at 50-minute maximum limit for ${activeEmployee.fullName}.`);
-      }
-    };
-
-    const interval = setInterval(checkEscalations, 5000);
-    checkEscalations();
-    return () => clearInterval(interval);
-  }, [activeBreak, activeEmployee]);
-
   // Generate Static QR Code for ID Card (Company Website)
   useEffect(() => {
     if (activeEmployee) {
@@ -636,94 +581,40 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     setActionFeedback({ success: res.success, message: res.message });
   };
 
-  const handleStartBreak = (type: BreakType) => {
+  const handleStartBreak = async (type: BreakType) => {
     triggerHaptic('medium');
-    if (!todayRecord) return;
-
-    const startAt = new Date().toISOString();
-    const existingBreaks = (todayRecord.breaks || []).map(b => {
-      if (!b.endAt && !(b as any).endTime) {
-        const bStart = b.startAt || (b as any).startTime || startAt;
-        const startMs = new Date(bStart).getTime();
-        const endMs = new Date(startAt).getTime();
-        const diffMins = !isNaN(startMs) && !isNaN(endMs) && endMs > startMs ? Math.round((endMs - startMs) / 60000) : 1;
-        const dur = Math.max(1, isNaN(diffMins) ? 1 : diffMins);
-        return {
-          type: b.type || 'Break',
-          startAt: bStart,
-          endAt: startAt,
-          durationMinutes: dur
-        };
-      }
-      return {
-        type: b.type || 'Break',
-        startAt: b.startAt || (b as any).startTime || startAt,
-        endAt: b.endAt || null,
-        durationMinutes: isNaN(Number(b.durationMinutes)) ? 0 : Number(b.durationMinutes)
+    if (!activeEmployee) return;
+    const res = await startBreak(activeEmployee.id, type);
+    if (res.success) {
+      triggerHaptic('success');
+      const emojiMap: Record<string, string> = {
+        'Tea Break': '🍵',
+        'Meal Break': '🍱',
+        'Lunch Break': '🍽️',
+        'Team Huddle': '👥',
+        'Team Meeting': '📅',
+        'Attainment / Training': '🎓',
+        'Activity': '⚡'
       };
-    });
-
-    const newBreak: BreakEntry = { type, startAt, endAt: null, durationMinutes: 0 };
-    // Immediately set active break locally for 0ms visual feedback
-    setActiveBreak({ type, startAt });
-
-    updateAttendanceRecord(todayRecord.id, { breaks: [...existingBreaks, newBreak] });
-    
-    if (activeEmployee) {
-      addAuditLog('ATTENDANCE_BREAK_START', todayRecord.id, `${activeEmployee.fullName} started a ${type}.`);
+      const emoji = emojiMap[type] || '⚡';
+      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ${emoji}` });
+    } else {
+      triggerHaptic('error');
+      setActionFeedback({ success: false, message: res.message });
     }
-    
-    const emojiMap: Record<string, string> = {
-      'Tea Break': '🍵',
-      'Meal Break': '🍱',
-      'Lunch Break': '🍽️',
-      'Team Huddle': '👥',
-      'Team Meeting': '📅',
-      'Attainment / Training': '🎓',
-      'Activity': '⚡'
-    };
-    const emoji = emojiMap[type] || '⚡';
-    setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ${emoji}` });
   };
 
-  const handleEndBreak = () => {
-    if (!activeBreak || !todayRecord) return;
-    const endAt = new Date().toISOString();
-    const breakStart = activeBreak.startAt;
-    const durationMinutes = Math.max(1, Math.round((new Date(endAt).getTime() - new Date(breakStart).getTime()) / 60000));
-    
-    const existingBreaks = todayRecord.breaks || [];
-    const updatedBreaks = existingBreaks.map(b => {
-      const isOpen = !b.endAt && !(b as any).endTime;
-      const matchesStart = b.startAt === breakStart || (b as any).startTime === breakStart;
-      if (isOpen || matchesStart) {
-        return {
-          ...b,
-          startAt: b.startAt || (b as any).startTime || breakStart,
-          endAt,
-          endTime: endAt,
-          durationMinutes
-        };
-      }
-      return b;
-    });
-
-    // Calculate total break minutes dynamically
-    const totalMins = updatedBreaks.reduce((acc, b) => acc + (b.durationMinutes || 0), 0);
-
-    // Instantly clear local activeBreak state for 0ms UI response
-    setActiveBreak(null);
-
-    updateAttendanceRecord(todayRecord.id, { 
-      breaks: updatedBreaks, 
-      totalBreakMinutes: totalMins
-    });
-    
-    if (activeEmployee) {
-      addAuditLog('ATTENDANCE_BREAK_END', todayRecord.id, `${activeEmployee.fullName} ended their ${activeBreak.type} after ${durationMinutes} minutes.`);
+  const handleEndBreak = async () => {
+    if (!activeEmployee) return;
+    triggerHaptic('medium');
+    const res = await endBreak(activeEmployee.id);
+    if (res.success) {
+      triggerHaptic('success');
+      setActionFeedback({ success: true, message: res.message || 'Break ended. Welcome back! 👋' });
+    } else {
+      triggerHaptic('error');
+      setActionFeedback({ success: false, message: res.message });
     }
-
-    setActionFeedback({ success: true, message: `${activeBreak.type} ended — ${durationMinutes}m recorded. Welcome back! 👋` });
   };
 
   const handleToggleWfh = () => {
@@ -1063,46 +954,53 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       )}
                     </button>
                   ) : !todayRecord?.checkOutAt ? (
-                    <div className="flex items-center justify-center gap-4 sm:gap-6 flex-wrap">
-                      {/* Circle 1: Checked In Status */}
-                      <button 
-                        onClick={handleSelfCheckOut}
-                        disabled={isCheckingOut || isCheckingIn}
-                        className={`relative flex flex-col items-center justify-center w-[160px] h-[160px] sm:w-[170px] sm:h-[170px] rounded-full border-[3px] border-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] shadow-[var(--shadow-glow-emerald)] transition-all cursor-pointer outline-none ${animations.tap}`}
-                      >
-                        <div className="absolute inset-0 bg-[var(--gradient-success)] opacity-10 rounded-full" />
-                        {isCheckingOut ? (
-                          <>
-                            <Loader2 className="w-10 h-10 mb-2 animate-spin text-[var(--accent-emerald)]" />
-                            <span className="font-semibold text-xs">Checking Out...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="w-10 h-10 mb-2" strokeWidth={2} />
-                            <span className="font-bold text-xs sm:text-sm tracking-wide">Checked In</span>
-                            <span className="text-[10px] font-mono mt-1 opacity-80">
-                              {toISTTimeString(todayRecord.checkInAt)}
-                            </span>
-                          </>
-                        )}
-                      </button>
+                    <div className="flex flex-col items-center justify-center gap-4 w-full">
+                      <div className="flex items-center justify-center gap-4 sm:gap-6 flex-wrap">
+                        {/* Circle 1: Shift Active Status Indicator (Check-in only, never accidental checkout) */}
+                        <div 
+                          className="relative flex flex-col items-center justify-center w-[160px] h-[160px] sm:w-[170px] sm:h-[170px] rounded-full border-[3px] border-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] shadow-[var(--shadow-glow-emerald)]"
+                        >
+                          <div className="absolute inset-0 bg-[var(--gradient-success)] opacity-10 rounded-full" />
+                          <CheckCircle2 className="w-10 h-10 mb-2" strokeWidth={2} />
+                          <span className="font-bold text-xs sm:text-sm tracking-wide">Shift Active</span>
+                          <span className="text-[10px] font-mono mt-1 opacity-80">
+                            Since {toISTTimeString(todayRecord.checkInAt)}
+                          </span>
+                        </div>
 
-                      {/* Circle 2: Active Break Live Timer (Dynamic Color & Icon) */}
-                      {activeBreak && (() => {
-                        const cfg = getBreakColorConfig(activeBreak.type);
-                        const BreakIcon = cfg.icon;
-                        return (
-                          <div className={`relative flex flex-col items-center justify-center w-[160px] h-[160px] sm:w-[170px] sm:h-[170px] rounded-full border-[3px] ${cfg.ringClass}`}>
-                            <BreakIcon className={`w-9 h-9 mb-1 ${cfg.iconClass}`} />
-                            <span className="font-extrabold text-xs sm:text-sm tracking-wide text-white truncate max-w-[130px] text-center">
-                              {activeBreak.type}
-                            </span>
-                            <span className={`text-xs font-mono font-black mt-1 px-3 py-0.5 rounded-full border shadow-inner ${cfg.badgeBg}`}>
-                              {String(Math.floor(breakElapsedSec / 60)).padStart(2, '0')}:{String(breakElapsedSec % 60).padStart(2, '0')}
-                            </span>
-                          </div>
-                        );
-                      })()}
+                        {/* Circle 2: Active Break Live Timer (Dynamic Color & Icon) */}
+                        {activeBreak && (() => {
+                          const cfg = getBreakColorConfig(activeBreak.type);
+                          const BreakIcon = cfg.icon;
+                          return (
+                            <div className={`relative flex flex-col items-center justify-center w-[160px] h-[160px] sm:w-[170px] sm:h-[170px] rounded-full border-[3px] ${cfg.ringClass}`}>
+                              <BreakIcon className={`w-9 h-9 mb-1 ${cfg.iconClass}`} />
+                              <span className="font-extrabold text-xs sm:text-sm tracking-wide text-white truncate max-w-[130px] text-center">
+                                {activeBreak.type}
+                              </span>
+                              <span className={`text-xs font-mono font-black mt-1 px-3 py-0.5 rounded-full border shadow-inner ${cfg.badgeBg}`}>
+                                {String(Math.floor(breakElapsedSec / 60)).padStart(2, '0')}:{String(breakElapsedSec % 60).padStart(2, '0')}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Separate, Clearly-Labeled Check Out Button (Requires Confirmation) */}
+                      <div className="pt-2 flex justify-center">
+                        <button
+                          onClick={handleSelfCheckOut}
+                          disabled={isCheckingOut || isCheckingIn}
+                          className={`px-5 py-2.5 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-rose-950/40 ${animations.tap}`}
+                        >
+                          {isCheckingOut ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-white" />
+                          ) : (
+                            <LogOut className="w-4 h-4" />
+                          )}
+                          <span>{isCheckingOut ? 'Checking Out...' : 'Check Out (End Shift)'}</span>
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] border-purple-500/50 bg-purple-950/20 text-purple-300 shadow-lg shadow-purple-950/50 text-center p-3">
@@ -2464,7 +2362,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         }}
         onDecline={() => {
           setIsConsentModalOpen(false);
-          executeCheckInProcess();
+          setActionFeedback({ success: false, message: 'Check-in canceled: Biometric consent was declined.' });
         }}
       />
 

@@ -29,10 +29,14 @@ import { initializeApp } from 'firebase/app';
 import { 
   evaluateAttendanceScan, 
   calculateGpsDistanceMeters,
+  getWorkDate,
   getEmployeeWorkDate,
+  getEmployeeKey,
   getAttendanceDocId,
   getCanonicalEmployeeUid,
   formatTimestampToISO,
+  safeGetTimestampMillis,
+  isAttendanceForEmployee,
   COMPANY_TIMEZONE
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
@@ -943,7 +947,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 employeeId: data.employeeCode || data.employeeId
               });
 
-              const dateStr = getEmployeeWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || new Date());
+              const dateStr = getWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (recId.includes('_') ? recId.split('_')[1] : new Date()));
               const checkInISO = formatTimestampToISO(data.checkInAt);
               const checkOutISO = formatTimestampToISO(data.checkOutAt);
               const createdISO = formatTimestampToISO(data.createdAt) || checkInISO || new Date().toISOString();
@@ -1969,57 +1973,111 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const startBreak = async (employeeId: string, breakType: string = 'Tea / Lunch Break') => {
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
-    const empUid = getCanonicalEmployeeUid(emp || employeeId, user?.uid);
-    const todayStr = getEmployeeWorkDate(new Date());
+    const empUid = getEmployeeKey(emp || employeeId, user?.uid);
+    const todayStr = getWorkDate(new Date());
     const recordId = getAttendanceDocId(empUid, todayStr);
+    const docRef = doc(db, 'attendance', recordId);
 
-    const rec = attendance.find(a => (a.id === recordId || a.employeeUid === empUid || a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
-    if (!rec || !rec.checkInAt) return { success: false, message: 'You must check in first before starting a break.' };
-    if (rec.checkOutAt) return { success: false, message: 'You have already checked out for today.' };
+    try {
+      const res = await runTransaction(db, async (transaction) => {
+        const docSnap = await transaction.get(docRef);
+        if (!docSnap.exists()) {
+          throw new Error('You must check in first before starting a break.');
+        }
+        const data = docSnap.data();
+        if (!data.checkInAt) {
+          throw new Error('You must check in first before starting a break.');
+        }
+        if (data.checkOutAt) {
+          throw new Error('You have already checked out for today.');
+        }
 
-    const existingBreaks = rec.breaks || [];
-    const openBreak = existingBreaks.find(b => !b.endAt && !(b as any).endTime);
-    if (openBreak) return { success: false, message: 'You already have an active break in progress.' };
+        const existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
+        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime);
+        if (openBreak) {
+          throw new Error('You already have an active break in progress.');
+        }
 
-    const nowISO = new Date().toISOString();
-    const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO };
-    const updatedBreaks = [...existingBreaks, newBreak];
+        const nowISO = new Date().toISOString();
+        const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO };
+        const updatedBreaks = [...existingBreaks, newBreak];
 
-    updateAttendanceRecord(rec.id, { breaks: updatedBreaks as any });
-    addAuditLog('ATTENDANCE_BREAK_START', rec.employeeName, `Started ${breakType}`);
-    return { success: true, message: `${breakType} started!` };
+        transaction.update(docRef, cleanFirestorePayload({
+          breaks: updatedBreaks,
+          updatedAt: serverTimestamp()
+        }));
+
+        return { success: true, message: `${breakType} started!` };
+      });
+
+      addAuditLog('ATTENDANCE_BREAK_START', emp?.fullName || empUid, `Started ${breakType}`);
+      return res;
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
+      return { success: false, message: err.message || 'Failed to start break.' };
+    }
   };
 
   const endBreak = async (employeeId: string) => {
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
-    const empUid = getCanonicalEmployeeUid(emp || employeeId, user?.uid);
-    const todayStr = getEmployeeWorkDate(new Date());
+    const empUid = getEmployeeKey(emp || employeeId, user?.uid);
+    const todayStr = getWorkDate(new Date());
     const recordId = getAttendanceDocId(empUid, todayStr);
+    const docRef = doc(db, 'attendance', recordId);
 
-    const rec = attendance.find(a => (a.id === recordId || a.employeeUid === empUid || a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
-    if (!rec || !rec.checkInAt) return { success: false, message: 'No active check-in record found.' };
+    try {
+      const res = await runTransaction(db, async (transaction) => {
+        const docSnap = await transaction.get(docRef);
+        if (!docSnap.exists()) {
+          throw new Error('No active check-in record found.');
+        }
+        const data = docSnap.data();
+        if (!data.checkInAt) {
+          throw new Error('No active check-in record found.');
+        }
 
-    const existingBreaks = rec.breaks || [];
-    const openBreak = existingBreaks.find(b => !b.endAt && !(b as any).endTime);
-    if (!openBreak) return { success: false, message: 'No active break found to end.' };
+        const existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
+        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime);
+        if (!openBreak) {
+          return { success: true, message: 'No active break found to end.' };
+        }
 
-    const nowISO = new Date().toISOString();
-    const startIso = openBreak.startAt || (openBreak as any).startTime || nowISO;
-    const breakMins = Math.max(1, Math.floor((new Date(nowISO).getTime() - new Date(startIso).getTime()) / 60000));
+        const nowMs = Date.now();
+        const nowISO = new Date(nowMs).toISOString();
+        const startIso = formatTimestampToISO(openBreak.startAt || (openBreak as any).startTime) || nowISO;
+        const breakMins = Math.max(1, Math.floor((nowMs - new Date(startIso).getTime()) / 60000));
 
-    const updatedBreaks = existingBreaks.map(b => {
-      const isOpen = !b.endAt && !(b as any).endTime;
-      if (isOpen) {
-        return { ...b, startAt: b.startAt || (b as any).startTime || startIso, endAt: nowISO, endTime: nowISO, durationMinutes: breakMins };
-      }
-      return b;
-    });
+        const updatedBreaks = existingBreaks.map((b: any) => {
+          const isOpen = !b.endAt && !(b as any).endTime;
+          if (isOpen) {
+            return {
+              ...b,
+              startAt: formatTimestampToISO(b.startAt || (b as any).startTime) || startIso,
+              endAt: nowISO,
+              endTime: nowISO,
+              durationMinutes: breakMins
+            };
+          }
+          return b;
+        });
 
-    const totalBreakMins = updatedBreaks.reduce((acc, b) => acc + (b.durationMinutes || 0), 0);
+        const totalBreakMins = updatedBreaks.reduce((acc: number, b: any) => acc + (Number(b.durationMinutes) || 0), 0);
 
-    updateAttendanceRecord(rec.id, { breaks: updatedBreaks as any, totalBreakMinutes: totalBreakMins });
-    addAuditLog('ATTENDANCE_BREAK_END', rec.employeeName, `Ended break (${breakMins} mins)`);
-    return { success: true, message: `Break completed! (${breakMins} mins total)` };
+        transaction.update(docRef, cleanFirestorePayload({
+          breaks: updatedBreaks,
+          totalBreakMinutes: totalBreakMins,
+          updatedAt: serverTimestamp()
+        }));
+
+        return { success: true, message: `Break completed! (${breakMins} mins total)` };
+      });
+
+      addAuditLog('ATTENDANCE_BREAK_END', emp?.fullName || empUid, res.message);
+      return res;
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
+      return { success: false, message: err.message || 'Failed to end break.' };
+    }
   };
 
   const updateAttendanceRecord = (recordId: string, updates: Partial<AttendanceRecord>) => {

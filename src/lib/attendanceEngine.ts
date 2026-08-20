@@ -6,45 +6,89 @@ import { CompanySettings, Employee, AttendanceRecord } from '../types';
 export const COMPANY_TIMEZONE = 'Asia/Kolkata';
 
 /**
- * Resolves the work-day date string (YYYY-MM-DD) strictly in the target employee timezone.
- * Canonical single helper used across all portals (Employee, Admin, HR, PM).
+ * Canonical helper resolving work-day date string (YYYY-MM-DD) strictly in the employee's timezone.
+ * Handles Firestore Timestamp, ISO datetime string, Date object, or epoch number.
  */
-export function getEmployeeWorkDate(
-  dateInput: Date | string | number = new Date(),
+export function getWorkDate(
+  dateInput: any = new Date(),
   timeZone: string = COMPANY_TIMEZONE
 ): string {
+  if (!dateInput) {
+    return getWorkDate(new Date(), timeZone);
+  }
+
+  // Handle Firestore Timestamp objects
+  if (dateInput && typeof dateInput.toDate === 'function') {
+    return getWorkDate(dateInput.toDate(), timeZone);
+  }
+  if (dateInput && typeof dateInput.toMillis === 'function') {
+    return getWorkDate(new Date(dateInput.toMillis()), timeZone);
+  }
+  if (dateInput && typeof dateInput.seconds === 'number') {
+    return getWorkDate(new Date(dateInput.seconds * 1000 + (dateInput.nanoseconds || 0) / 1e6), timeZone);
+  }
+
+  // If already clean YYYY-MM-DD string
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+  }
+
   const d = typeof dateInput === 'string' || typeof dateInput === 'number'
     ? new Date(dateInput)
     : dateInput;
 
-  // Format YYYY-MM-DD in employee's operational timezone
-  const formatter = new Intl.DateTimeFormat('en-CA', {
+  if (d instanceof Date && !isNaN(d.getTime())) {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return formatter.format(d);
+  }
+
+  // Fallback to current date in operational timezone
+  const fallback = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   });
-  return formatter.format(d);
+  return fallback.format(new Date());
 }
+
+/**
+ * Backwards-compatible alias for getWorkDate
+ */
+export const getEmployeeWorkDate = getWorkDate;
 
 /**
  * Deterministic Doc ID generator: attendance/{uid}_{YYYY-MM-DD}
  */
 export function getAttendanceDocId(uid: string, dateStr: string): string {
   const cleanUid = String(uid || '').trim();
-  const cleanDate = String(dateStr || '').trim();
+  const cleanDate = getWorkDate(dateStr);
   return `${cleanUid}_${cleanDate}`;
 }
 
 /**
- * Universal canonical employee UID resolver
+ * Universal canonical employee Key resolver
+ * Matches across id, uid, employeeUid, employeeId, employeeCode, or fullName.
  */
-export function getCanonicalEmployeeUid(empOrUid: any, fallbackUserUid?: string): string {
+export function getEmployeeKey(empOrUid: any, fallbackUserUid?: string): string {
   if (!empOrUid && fallbackUserUid) return fallbackUserUid.trim();
   if (typeof empOrUid === 'string') return empOrUid.trim();
-  const uid = empOrUid?.uid || empOrUid?.employeeUid || fallbackUserUid || empOrUid?.id || empOrUid?.employeeId || '';
-  return String(uid).trim();
+  const key = empOrUid?.uid || empOrUid?.employeeUid || fallbackUserUid || empOrUid?.id || empOrUid?.employeeId || empOrUid?.employeeCode || '';
+  return String(key).trim();
 }
+
+/**
+ * Backwards-compatible alias for getEmployeeKey
+ */
+export const getCanonicalEmployeeUid = getEmployeeKey;
 
 /**
  * Safe parser to convert any Firestore Timestamp / Date / ISO string / number into standard ISO string.
@@ -77,7 +121,6 @@ export function formatTimestampToISO(val: any): string | null {
   }
   if (typeof val === 'number') {
     if (isNaN(val) || val <= 0) return null;
-    // Handle seconds vs milliseconds
     const millis = val < 1e11 ? val * 1000 : val;
     return new Date(millis).toISOString();
   }
@@ -140,7 +183,11 @@ export function isAttendanceForEmployee(
 ): boolean {
   if (!rec || !employeeOrUid) return false;
 
-  if (targetDate && rec.date !== targetDate) return false;
+  if (targetDate) {
+    const normalizedRecDate = getWorkDate(rec.date || rec.checkInAt || rec.createdAt);
+    const normalizedTargetDate = getWorkDate(targetDate);
+    if (normalizedRecDate !== normalizedTargetDate) return false;
+  }
 
   const targetUid = getCanonicalEmployeeUid(employeeOrUid);
   const targetCode = String(
@@ -167,10 +214,10 @@ export function isAttendanceForEmployee(
   if (targetUid && (recUid === targetUid || rec.id === `${targetUid}_${rec.date}` || rec.id.startsWith(`${targetUid}_`))) {
     return true;
   }
-  if (targetCode && (recEmpCode === targetCode || recEmpId === targetCode)) {
+  if (targetCode && (recEmpCode === targetCode || recEmpId === targetCode || rec.id.includes(targetCode))) {
     return true;
   }
-  if (targetId && (recEmpId === targetId || recEmpCode === targetId)) {
+  if (targetId && (recEmpId === targetId || recEmpCode === targetId || rec.id.includes(targetId))) {
     return true;
   }
   if (targetName && recName && targetName === recName) {

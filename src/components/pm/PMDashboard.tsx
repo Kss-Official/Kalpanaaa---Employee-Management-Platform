@@ -366,7 +366,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
           </div>
         ))}
       </div>
-
       {/* Zone 3: Team Workload Heatmap Grid */}
       {(() => {
         // Pure role-based filter: Super Admins & HR Admins excluded; EMPLOYEE and PROJECT_MANAGER included
@@ -424,8 +423,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                         {weekDays.map(d => {
                           const rec = attendance.find(a => isAttendanceForEmployee(a, emp, d.dateStr));
 
-                          let hours = 0;
-                          if (rec) {
+                          let hours: number | null = null;
+                          if (rec && (rec.checkInAt || (rec.workingMinutes && rec.workingMinutes > 0))) {
                             if (rec.workingMinutes && rec.workingMinutes > 0) {
                               hours = Math.round((rec.workingMinutes / 60) * 10) / 10;
                             } else {
@@ -440,15 +439,21 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                             }
                           }
 
+                          const hasCheckIn = hours !== null;
+
                           return (
                             <td key={d.dateStr} className="py-3 px-2 text-center">
-                              <span className={`inline-block min-w-[36px] px-1.5 h-8 rounded-lg font-mono font-bold text-xs leading-8 ${
-                                hours >= 8.5 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
-                                hours >= 7.5 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                                hours > 0 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
-                                'bg-slate-950 text-slate-600 border border-slate-800'
-                              }`}>
-                                {hours > 0 ? `${hours}h` : '0h'}
+                              <span 
+                                title={hasCheckIn ? `${hours}h worked on ${d.dateStr}` : `No check-in on ${d.dateStr}`}
+                                className={`inline-block min-w-[36px] px-1.5 h-8 rounded-lg font-mono font-bold text-xs leading-8 ${
+                                  hasCheckIn && hours! >= 8.5 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
+                                  hasCheckIn && hours! >= 7.5 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                  hasCheckIn && hours! > 0 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                                  hasCheckIn ? 'bg-slate-800/60 text-slate-400 border border-slate-700' :
+                                  'bg-slate-950/60 text-slate-600 border border-slate-900'
+                                }`}
+                              >
+                                {hasCheckIn ? `${hours}h` : '--'}
                               </span>
                             </td>
                           );

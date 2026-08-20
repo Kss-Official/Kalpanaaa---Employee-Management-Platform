@@ -49,6 +49,10 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
       const targetCanonicalId = getAttendanceDocId(canonicalUid, dateStr);
 
       if (legacyId === targetCanonicalId) {
+        // If doc is already at canonical ID but date field is a Timestamp or non-string, normalize in place
+        if (typeof data.date !== 'string' || data.date !== dateStr) {
+          await setDoc(doc(db, 'attendance', targetCanonicalId), { date: dateStr, updatedAt: formatTimestampToISO(data.updatedAt) || new Date().toISOString() }, { merge: true });
+        }
         result.alreadyCanonical++;
         continue;
       }
