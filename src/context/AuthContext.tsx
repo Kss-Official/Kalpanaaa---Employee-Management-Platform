@@ -765,11 +765,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const autoCheckOutDate = new Date(`${record.date}T19:30:00`);
           const forceCheckOutTime = autoCheckOutDate.toISOString();
 
+          // Atomically close any open break on auto-checkout
+          const existingBreaks = Array.isArray(record.breaks) ? record.breaks : [];
+          let updatedBreaks = existingBreaks;
+          const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime);
+          if (openBreak) {
+            const bStartIso = formatTimestampToISO(openBreak.startAt || (openBreak as any).startTime) || forceCheckOutTime;
+            const bStartMs = new Date(bStartIso).getTime();
+            const cutoffMs = autoCheckOutDate.getTime();
+            const breakMins = Math.max(1, Math.floor(Math.max(0, cutoffMs - bStartMs) / 60000));
+            updatedBreaks = existingBreaks.map((b: any) => {
+              const isOpen = !b.endAt && !(b as any).endTime;
+              if (isOpen) {
+                return {
+                  ...b,
+                  startAt: formatTimestampToISO(b.startAt || (b as any).startTime) || bStartIso,
+                  endAt: forceCheckOutTime,
+                  endTime: forceCheckOutTime,
+                  durationMinutes: breakMins
+                };
+              }
+              return b;
+            });
+          }
+
+          const totalBreakMins = updatedBreaks.reduce((acc: number, b: any) => acc + (Number(b.durationMinutes) || 0), 0);
+
           let totalMins = 0;
           if (record.checkInAt) {
-            totalMins = Math.floor((autoCheckOutDate.getTime() - new Date(record.checkInAt).getTime()) / 60000);
-            if (record.totalBreakMinutes) {
-              totalMins = Math.max(0, totalMins - record.totalBreakMinutes);
+            const checkInMs = new Date(record.checkInAt).getTime();
+            totalMins = Math.floor((autoCheckOutDate.getTime() - checkInMs) / 60000);
+            if (totalBreakMins > 0) {
+              totalMins = Math.max(0, totalMins - totalBreakMins);
             }
           }
           totalMins = Math.max(0, totalMins);
@@ -780,9 +807,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'attendance', record.id), {
             checkOutAt: forceCheckOutTime,
             workingMinutes: totalMins,
+            breaks: updatedBreaks,
+            totalBreakMinutes: totalBreakMins,
             notes: updatedNotes,
             updatedAt: serverTimestamp()
-          }, { merge: true }).catch(() => { });
+          }, { merge: true }).catch((err) => {
+            // Requirement 10: Unblock on failed write so retry can succeed on next 30s interval
+            processedIds.delete(record.id);
+            console.warn('[AuthContext] Auto-checkout write failed for record:', record.id, err);
+          });
 
           addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Auto-checked out at 7:30 PM for ${record.date}`);
         }
@@ -1905,11 +1938,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const empUid = getCanonicalEmployeeUid(emp, user?.uid);
     const todayStr = customDate || getEmployeeWorkDate(new Date());
+    const canonicalId = getAttendanceDocId(empUid, todayStr);
 
-    const existingRec = attendance.find(a => 
-      isAttendanceForEmployee(a, emp, todayStr)
-    );
-    const recordId = existingRec?.id || getAttendanceDocId(empUid, todayStr);
+    // Canonical ID lookup first (O(1), no fuzzy matching), fall back to isAttendanceForEmployee for legacy IDs
+    const existingRec = attendance.find(a => a.id === canonicalId)
+      ?? attendance.find(a => isAttendanceForEmployee(a, emp, todayStr));
+    const recordId = existingRec?.id ?? canonicalId;
 
     const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
@@ -1955,23 +1989,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const checkInMs = new Date(checkInISO).getTime();
         const nowMs = Date.now();
 
-        const existingBreaks = existingData.breaks || [];
+        const existingBreaks = Array.isArray(existingData.breaks) ? existingData.breaks : [];
         let updatedBreaks = existingBreaks;
         let additionalBreakMins = 0;
-        const openBreak = existingBreaks.find((b: any) => !b.endAt && !b.endTime);
+        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime);
 
         if (openBreak) {
-          const bStartIso = formatTimestampToISO(openBreak.startAt || openBreak.startTime) || new Date(nowMs).toISOString();
+          const bStartIso = formatTimestampToISO(openBreak.startAt || (openBreak as any).startTime) || new Date(nowMs).toISOString();
           additionalBreakMins = Math.max(1, Math.floor((nowMs - new Date(bStartIso).getTime()) / 60000));
           const nowIso = new Date(nowMs).toISOString();
-          updatedBreaks = existingBreaks.map((b: any) =>
-            (b.startAt === openBreak.startAt && (!b.endAt && !b.endTime))
-              ? { ...b, endAt: nowIso, endTime: nowIso, durationMinutes: additionalBreakMins }
-              : b
-          );
+          updatedBreaks = existingBreaks.map((b: any) => {
+            const isOpen = !b.endAt && !(b as any).endTime;
+            return isOpen
+              ? {
+                  ...b,
+                  startAt: formatTimestampToISO(b.startAt || (b as any).startTime) || bStartIso,
+                  endAt: nowIso,
+                  endTime: nowIso,
+                  durationMinutes: additionalBreakMins
+                }
+              : b;
+          });
         }
 
-        const finalTotalBreakMinutes = (existingData.totalBreakMinutes || 0) + additionalBreakMins;
+        const finalTotalBreakMinutes = updatedBreaks.reduce((acc: number, b: any) => acc + (Number(b.durationMinutes) || 0), 0);
         let durationMins = Math.floor((nowMs - checkInMs) / 60000);
         if (finalTotalBreakMinutes > 0) {
           durationMins = Math.max(0, durationMins - finalTotalBreakMinutes);

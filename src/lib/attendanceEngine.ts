@@ -214,14 +214,14 @@ export function isAttendanceForEmployee(
 
   // 1. Direct Employee Code matching (e.g. KSS2407005)
   if (targetCode) {
-    if (recEmpCode === targetCode || recEmpId === targetCode || recDocId.includes(targetCode)) {
+    if (recEmpCode === targetCode || recEmpId === targetCode || recDocId.startsWith(`${targetCode}_`)) {
       return true;
     }
   }
 
   // 2. Database ID matching (e.g. emp-KSS2407005 or emp-1)
   if (targetId) {
-    if (recEmpId === targetId || recEmpCode === targetId || recDocId.includes(targetId)) {
+    if (recEmpId === targetId || recEmpCode === targetId || recDocId.startsWith(`${targetId}_`)) {
       return true;
     }
   }
@@ -233,12 +233,11 @@ export function isAttendanceForEmployee(
     }
   }
 
-  // 4. Normalized Name matching (handles extra spaces, initials, and formatting variations)
+  // 4. Normalized Full Name matching (exact normalized match only, never substring)
   if (targetName && recName) {
-    if (targetName === recName) return true;
     const cleanTarget = targetName.replace(/[^a-z0-9]/g, '');
     const cleanRec = recName.replace(/[^a-z0-9]/g, '');
-    if (cleanTarget && cleanRec && (cleanTarget === cleanRec || cleanTarget.includes(cleanRec) || cleanRec.includes(cleanTarget))) {
+    if (cleanTarget && cleanRec && cleanTarget === cleanRec) {
       return true;
     }
   }
