@@ -28,12 +28,16 @@ const IST_TZ = 'Asia/Kolkata';
  * Format a timestamp string or Date to IST time only.
  * e.g. "10:00 AM"
  */
+import { formatTimestampToISO } from './attendanceEngine';
+
 export const toISTTimeString = (
-  value: string | Date | null | undefined,
+  value: any,
   hour12 = true
 ): string => {
   if (!value) return '--';
-  const d = typeof value === 'string' ? new Date(value) : value;
+  const isoStr = formatTimestampToISO(value);
+  if (!isoStr) return '--';
+  const d = new Date(isoStr);
   if (isNaN(d.getTime())) return '--';
   return d.toLocaleTimeString(IST_LOCALE, {
     hour: '2-digit',
@@ -48,10 +52,12 @@ export const toISTTimeString = (
  * e.g. "15 Aug 2026"
  */
 export const toISTDateString = (
-  value: string | Date | null | undefined
+  value: any
 ): string => {
   if (!value) return '--';
-  const d = typeof value === 'string' ? new Date(value) : value;
+  const isoStr = formatTimestampToISO(value);
+  if (!isoStr) return '--';
+  const d = new Date(isoStr);
   if (isNaN(d.getTime())) return '--';
   return d.toLocaleDateString(IST_LOCALE, {
     day: '2-digit',
@@ -66,10 +72,12 @@ export const toISTDateString = (
  * e.g. "15 Aug 2026, 10:00 AM"
  */
 export const toISTDateTimeString = (
-  value: string | Date | null | undefined
+  value: any
 ): string => {
   if (!value) return '--';
-  const d = typeof value === 'string' ? new Date(value) : value;
+  const isoStr = formatTimestampToISO(value);
+  if (!isoStr) return '--';
+  const d = new Date(isoStr);
   if (isNaN(d.getTime())) return '--';
   return d.toLocaleString(IST_LOCALE, {
     day: '2-digit',

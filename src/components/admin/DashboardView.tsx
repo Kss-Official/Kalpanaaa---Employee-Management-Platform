@@ -38,6 +38,7 @@ import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
+import { toISTTimeString } from '../../lib/absoluteTime';
 import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
 import { Employee, AttendanceRecord } from '../../types';
 
@@ -379,8 +380,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                           {rec?.checkInAt && (
                             <div className="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] mt-0.5 font-mono">
                               <Timer className="w-3 h-3" />
-                              In: {new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              {rec.checkOutAt && <span className="ml-1">· Out: {new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+                              In: {toISTTimeString(rec.checkInAt)}
+                              {rec.checkOutAt && <span className="ml-1">· Out: {toISTTimeString(rec.checkOutAt)}</span>}
                             </div>
                           )}
                         </div>
@@ -548,7 +549,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                     </div>
                   </div>
                   <div className="px-6 py-4 text-xs text-[var(--text-secondary)] font-mono font-bold text-center">
-                    {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                    {rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--'}
                   </div>
                   <div className="px-6 py-4 text-right flex justify-end">
                     {rec.isWfh || 

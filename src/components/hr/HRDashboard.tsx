@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
+import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface HRDashboardProps {
   onNavigateTab: (tab: string, filters?: { dateFilter?: 'today' | 'yesterday' | 'all'; statusFilter?: string }) => void;
@@ -199,7 +200,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-3 py-2 rounded-xl border border-emerald-500/20">
-                In: {hrAttendanceRecord?.checkInAt ? new Date(hrAttendanceRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                In: {hrAttendanceRecord?.checkInAt ? toISTTimeString(hrAttendanceRecord.checkInAt) : 'Active'}
               </span>
 
               <button
@@ -405,7 +406,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
                     </div>
                   </div>
                   <span className="text-xs font-mono font-bold text-slate-300">
-                    {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                    {rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--'}
                   </span>
                 </div>
               ))

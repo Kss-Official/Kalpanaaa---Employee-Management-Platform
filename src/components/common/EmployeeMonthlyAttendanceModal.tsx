@@ -18,6 +18,7 @@ import {
   Coffee
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
+import { toISTTimeString, toISTDateString } from '../../lib/absoluteTime';
 
 interface EmployeeMonthlyAttendanceModalProps {
   employee: Employee;
@@ -286,7 +287,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
     if (record.checkInAt) {
       events.push({
-        time: new Date(record.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: toISTTimeString(record.checkInAt),
         title: 'Checked In',
         subtitle: record.isWfh ? 'Work From Home' : record.locationVerified ? 'Office GPS Verified' : 'Standard Check-In',
         color: 'bg-emerald-400',
@@ -572,7 +573,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                         <span className="text-[8px] sm:text-[10px] font-bold block truncate">{statusLabel}</span>
                         {rec?.checkInAt && (
                           <span className="text-[7.5px] sm:text-[9px] font-mono text-slate-300 block truncate leading-none">
-                            {new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {toISTTimeString(rec.checkInAt)}
                           </span>
                         )}
                         {(() => {
@@ -618,14 +619,14 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   <div className="bg-slate-900 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-800">
                     <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Check-In Time</span>
                     <span className="font-mono text-xs sm:text-sm font-black text-emerald-400 block mt-0.5 sm:mt-1">
-                      {selectedDayRecord.checkInAt ? new Date(selectedDayRecord.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Not Checked In'}
+                      {selectedDayRecord.checkInAt ? toISTTimeString(selectedDayRecord.checkInAt) : 'Not Checked In'}
                     </span>
                   </div>
 
                   <div className="bg-slate-900 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-slate-800">
                     <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Check-Out Time</span>
                     <span className="font-mono text-xs sm:text-sm font-black text-rose-400 block mt-0.5 sm:mt-1">
-                      {selectedDayRecord.checkOutAt ? new Date(selectedDayRecord.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'In Progress'}
+                      {selectedDayRecord.checkOutAt ? toISTTimeString(selectedDayRecord.checkOutAt) : 'In Progress'}
                     </span>
                   </div>
 

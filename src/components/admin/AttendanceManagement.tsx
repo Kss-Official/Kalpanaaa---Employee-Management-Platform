@@ -21,6 +21,7 @@ import {
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { getEmployeeWorkDate, safeGetTimestampMillis } from '../../lib/attendanceEngine';
+import { toISTTimeString, toISTDateString } from '../../lib/absoluteTime';
 
 interface AttendanceManagementProps {
   initialDateFilter?: 'today' | 'yesterday' | 'all';
@@ -278,14 +279,14 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                   <div>
                     <span className="text-[10px] text-slate-500 font-mono block">Check In</span>
                     <span className="font-bold text-white whitespace-nowrap">
-                      {rec.checkInAt ? new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                      {rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--:--'}
                     </span>
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-500 font-mono block">Check Out</span>
                     {rec.checkOutAt ? (
                       <span className="font-bold text-white whitespace-nowrap">
-                        {new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {toISTTimeString(rec.checkOutAt)}
                       </span>
                     ) : rec.checkInAt ? (
                       <span className="text-emerald-400 font-bold text-[10px] whitespace-nowrap">Active Now</span>
@@ -388,7 +389,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                     <td className="py-3 px-4 whitespace-nowrap">
                       {rec.checkInAt ? (
                         <span className="font-semibold text-white bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 whitespace-nowrap inline-block">
-                          {new Date(rec.checkInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {toISTTimeString(rec.checkInAt)}
                         </span>
                       ) : (
                         <span className="text-slate-500 font-mono">--:--</span>
@@ -397,12 +398,13 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
 
                     <td className="py-3 px-4 whitespace-nowrap">
                       {rec.checkOutAt ? (
-                        <span className="font-semibold text-white bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 whitespace-nowrap inline-block">
-                          {new Date(rec.checkOutAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <span className="font-semibold text-slate-300 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 whitespace-nowrap inline-block">
+                          {toISTTimeString(rec.checkOutAt)}
                         </span>
                       ) : rec.checkInAt ? (
-                        <span className="inline-flex items-center font-semibold text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md border border-emerald-500/30 animate-pulse whitespace-nowrap">
-                          Active Now
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>Active Shift</span>
                         </span>
                       ) : (
                         <span className="text-slate-500 font-mono">--:--</span>

@@ -28,6 +28,7 @@ import {
   safeGetTimestampMillis, 
   formatTimestampToISO 
 } from '../../lib/attendanceEngine';
+import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface PMDashboardProps {
   onNavigateTab: (tab: string) => void;
@@ -472,20 +473,20 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                             }
                           }
 
-                          const hasCheckIn = hours !== null && hours > 0;
+                          const hasCheckIn = (hours !== null && hours > 0) || (isLive && hours !== null) || (d.dateStr === todayStr && !!rec?.checkInAt);
 
                           return (
                             <td key={d.dateStr} className="py-3 px-2 text-center">
                               <span 
-                                title={hasCheckIn ? `${hours}h worked on ${d.dateStr}${isLive ? ' (Live)' : ''}` : `No check-in on ${d.dateStr}`}
+                                title={hasCheckIn ? `${hours || 0}h worked on ${d.dateStr}${isLive ? ` (Live • In: ${toISTTimeString(rec?.checkInAt)})` : rec?.checkInAt ? ` (In: ${toISTTimeString(rec.checkInAt)})` : ''}` : `No check-in on ${d.dateStr}`}
                                 className={`inline-block min-w-[36px] px-1.5 h-8 rounded-lg font-mono font-bold text-xs leading-8 ${
-                                  hasCheckIn && hours! >= 8.5 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
-                                  hasCheckIn && hours! >= 7.5 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                                  hasCheckIn && hours! > 0 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                                  hasCheckIn && (hours || 0) >= 8.5 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
+                                  hasCheckIn && (hours || 0) >= 7.5 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                  hasCheckIn && ((hours || 0) > 0 || isLive) ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
                                   'bg-slate-950/60 text-slate-600 border border-slate-900'
                                 }`}
                               >
-                                {hasCheckIn ? `${hours}h` : '--'}
+                                {hasCheckIn ? `${hours || 0}h` : '--'}
                               </span>
                             </td>
                           );
@@ -494,11 +495,11 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                         <td className="py-3 px-3 text-right">
                           {isWfh ? (
                             <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20">
-                              WFH Active
+                              WFH Active {empAtt?.checkInAt ? `• ${toISTTimeString(empAtt.checkInAt)}` : ''}
                             </span>
                           ) : isCheckedIn ? (
                             <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-                              On Duty (Office)
+                              On Duty (Office) {empAtt?.checkInAt ? `• ${toISTTimeString(empAtt.checkInAt)}` : ''}
                             </span>
                           ) : (
                             <span className="text-[10px] font-bold text-slate-500 bg-slate-800/50 px-2.5 py-1 rounded-lg border border-slate-700/50">
