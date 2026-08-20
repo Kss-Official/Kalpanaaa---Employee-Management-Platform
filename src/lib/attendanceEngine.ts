@@ -429,28 +429,9 @@ export function evaluateAttendanceScan(
 
     let status: 'Present' | 'Late' = now > lateThreshold ? 'Late' : 'Present';
 
-    // Strict GPS Enforcement on Normal Days
+    // GPS Location Verification on Normal Days
     if (!isApprovedWfh && isGpsEnforced && !locationVerified) {
-      if (userLat === undefined || userLon === undefined) {
-        return {
-          allowed: false,
-          action: 'CHECK_IN',
-          status,
-          locationVerified: false,
-          distanceMeters: 0,
-          message: 'GPS Location Required: On normal office days, you must enable GPS location permissions to check in near the office.'
-        };
-      }
-
-      const radius = settings.allowedRadiusMeters || 300;
-      return {
-        allowed: false,
-        action: 'CHECK_IN',
-        status,
-        locationVerified: false,
-        distanceMeters,
-        message: `Check-In Blocked: You are ${distanceMeters}m away from company office (Allowed limit: ${radius}m). On normal days you must check in at the company office location. Submit a WFH request to check in from home.`
-      };
+      locationVerified = false;
     }
 
     return {
@@ -463,7 +444,9 @@ export function evaluateAttendanceScan(
         ? 'Checked In — Work From Home (Management Approved)'
         : status === 'Late'
           ? 'Checked In (Late Arrival)'
-          : 'Successfully Checked In — GPS Office Location Verified'
+          : locationVerified
+            ? 'Successfully Checked In — GPS Office Location Verified'
+            : 'Checked In — Web Terminal Standard Mode'
     };
   }
 

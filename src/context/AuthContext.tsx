@@ -1773,7 +1773,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       officeLatitude: companyWorkZone.latitude,
       officeLongitude: companyWorkZone.longitude,
       allowedRadiusMeters: companyWorkZone.radiusMeters,
-      gpsRequired: true
+      gpsRequired: settings.gpsRequired !== false
     };
 
     const evalResult = evaluateAttendanceScan(emp, existingRec, effectiveSettings, lat, lon, isApprovedWfh);
