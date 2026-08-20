@@ -304,6 +304,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // employeesRef always mirrors the current employees state for use in one-time effects
   const employeesRef = useRef<Employee[]>([]);
 
+  // attendanceRef mirrors live attendance for the auto-checkout effect.
+  // Using a ref (instead of a closure over `attendance` state) prevents the
+  // effect from being re-registered on every Firestore snapshot, which would
+  // create a snapshot → write → snapshot feedback loop.
+  const attendanceRef = useRef<AttendanceRecord[]>([]);
+
   // SINGLE SOURCE OF TRUTH: Firestore only. Initial state starts empty; hydrated via real-time onSnapshot
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
 
@@ -564,6 +570,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     employeesRef.current = employees;
   }, [employees]);
 
+  // Keep attendanceRef current so the stable auto-checkout interval always
+  // reads the latest data without being in the effect's dep array.
+  useEffect(() => {
+    attendanceRef.current = attendance;
+  }, [attendance]);
+
   // Debounced localStorage persistence — batches all non-attendance state saves
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -721,8 +733,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [employees, activeEmployee?.id, activeEmployee?.role, role]);
 
 
-  // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
+  // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees.
+  //
+  // BUG 3 FIX: This effect previously had `[attendance]` as its dep, causing
+  // it to re-register on every Firestore onSnapshot. The cycle was:
+  //   snapshot arrives → attendance state updates → effect re-runs immediately
+  //   → checkAutoCheckout() fires → setDoc write → new snapshot → repeat.
+  // Fix: use attendanceRef (always current, zero re-registration) + a
+  // processedIds Set so each record is written at most once per session.
   useEffect(() => {
+    // Tracks records already written this browser session to prevent duplicate
+    // Firestore writes when the 30-second interval fires repeatedly.
+    const processedIds = new Set<string>();
+
     const checkAutoCheckout = () => {
       const now = new Date();
       const todayStr = getEmployeeWorkDate(now);
@@ -730,11 +753,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const currentMinutes = now.getMinutes();
       const isPastSevenThirtyPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 30);
 
-      attendance.forEach(record => {
+      attendanceRef.current.forEach(record => {
+        if (processedIds.has(record.id)) return; // already handled this session
         const isPastDay = record.date < todayStr;
         const isTodayPastCutoff = record.date === todayStr && isPastSevenThirtyPm;
 
         if (!record.checkOutAt && (isPastDay || isTodayPastCutoff)) {
+          processedIds.add(record.id); // mark before async write to prevent double-write
+
           // Construct 7:30 PM ISO cutoff timestamp for the record date
           const autoCheckOutDate = new Date(`${record.date}T19:30:00`);
           const forceCheckOutTime = autoCheckOutDate.toISOString();
@@ -750,7 +776,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:30 PM (Default Shift End)';
 
-          // Auto close the record in Firestore with serverTimestamp
+          // Auto close the record in Firestore
           setDoc(doc(db, 'attendance', record.id), {
             checkOutAt: forceCheckOutTime,
             workingMinutes: totalMins,
@@ -764,10 +790,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const interval = setInterval(checkAutoCheckout, 30000); // Check every 30s
-    checkAutoCheckout(); // Check immediately on mount/update
+    checkAutoCheckout(); // Check immediately on mount
 
     return () => clearInterval(interval);
-  }, [attendance]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally stable; reads live data via attendanceRef
 
 
   // Sync to & from Firestore
@@ -1005,10 +1031,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
 
-          // Deduplicate by canonical UID + date (preferring records with checkInAt / checkOutAt)
+          // Deduplicate by canonical UID + date (preferring records with checkInAt / checkOutAt).
+          // BUG 6 FIX: old records may have empty employeeUid AND employeeId, making the key
+          // collapse to `_date` and incorrectly merging unrelated records. Fall back to `rec.id`
+          // (the Firestore document ID, always unique) so each real document is preserved.
           const deduplicatedMap = new Map<string, AttendanceRecord>();
           fetched.forEach(rec => {
-            const empKey = `${rec.employeeUid || rec.employeeId}_${rec.date}`;
+            const empKey = `${rec.employeeUid || rec.employeeId || rec.id}_${rec.date}`;
             const existing = deduplicatedMap.get(empKey);
             if (!existing) {
               deduplicatedMap.set(empKey, rec);
@@ -1975,6 +2004,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       addAuditLog('ATTENDANCE_CHECKOUT', `${emp.employeeId} (${emp.fullName})`, `Duration: ${Math.floor((txResult.data.workingMinutes || 0) / 60)}h ${(txResult.data.workingMinutes || 0) % 60}m`);
 
+      // BUG 5 FIX: Optimistic local state update — the UI reflects "Shift Complete"
+      // immediately without waiting for the Firestore onSnapshot (~200–500 ms).
+      // The subsequent real snapshot will reconcile any minor timestamp drift.
+      const checkOutIso = new Date().toISOString();
+      setAttendance(prev => prev.map(a => {
+        if (a.id !== recordId) return a;
+        return {
+          ...a,
+          checkOutAt: checkOutIso,
+          workingMinutes: typeof txResult.data.workingMinutes === 'number'
+            ? txResult.data.workingMinutes
+            : a.workingMinutes,
+          breaks: Array.isArray(txResult.data.breaks)
+            ? txResult.data.breaks.map((b: any) => ({
+                type: b.type,
+                startAt: formatTimestampToISO(b.startAt || b.startTime) || '',
+                endAt: formatTimestampToISO(b.endAt || b.endTime),
+                durationMinutes: Number(b.durationMinutes) || 0
+              }))
+            : a.breaks,
+          totalBreakMinutes: typeof txResult.data.totalBreakMinutes === 'number'
+            ? txResult.data.totalBreakMinutes
+            : a.totalBreakMinutes,
+          updatedAt: checkOutIso
+        };
+      }));
+
       return {
         success: true,
         message: txResult.message,
@@ -1988,11 +2044,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const startBreak = async (employeeId: string, breakType: string = 'Tea / Lunch Break') => {
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
-    const empUid = getEmployeeKey(emp || employeeId, user?.uid);
+    // BUG 4 FIX: Use the same canonical UID derivation as recordCheckIn so
+    // startBreak always targets the exact same Firestore document.
+    const empUid = getCanonicalEmployeeUid(emp, user?.uid);
     const todayStr = getWorkDate(new Date());
+    // Canonical doc ID — deterministic, matches recordCheckIn output
+    const canonicalId = getAttendanceDocId(empUid, todayStr);
 
-    const existingRec = attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
-    const recordId = existingRec?.id || getAttendanceDocId(empUid, todayStr);
+    // Check canonical ID first (O(1), no fuzzy matching), fall back to
+    // isAttendanceForEmployee only for legacy records with a different ID format.
+    const existingRec = attendance.find(a => a.id === canonicalId)
+      ?? attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
+    const recordId = existingRec?.id ?? canonicalId;
     const docRef = doc(db, 'attendance', recordId);
 
     try {
@@ -2016,7 +2079,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const nowISO = new Date().toISOString();
-        const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO };
+        // BUG 1 FIX: include durationMinutes: 0 and endAt: null so the
+        // onSnapshot re-hydration always has a clean numeric baseline and the
+        // proficiency bar can detect an open break via `!b.endAt` reliably.
+        const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO, endAt: null, durationMinutes: 0 };
         const updatedBreaks = [...existingBreaks, newBreak];
 
         transaction.update(docRef, cleanFirestorePayload({
@@ -2037,11 +2103,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const endBreak = async (employeeId: string) => {
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
-    const empUid = getEmployeeKey(emp || employeeId, user?.uid);
+    // BUG 4 FIX: Same canonical UID as recordCheckIn/startBreak — single doc target.
+    const empUid = getCanonicalEmployeeUid(emp, user?.uid);
     const todayStr = getWorkDate(new Date());
+    const canonicalId = getAttendanceDocId(empUid, todayStr);
 
-    const existingRec = attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
-    const recordId = existingRec?.id || getAttendanceDocId(empUid, todayStr);
+    // Canonical ID first — avoids "No active check-in record found" when
+    // isAttendanceForEmployee fails due to UID format mismatches.
+    const existingRec = attendance.find(a => a.id === canonicalId)
+      ?? attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
+    const recordId = existingRec?.id ?? canonicalId;
     const docRef = doc(db, 'attendance', recordId);
 
     try {

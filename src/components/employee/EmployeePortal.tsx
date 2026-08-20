@@ -209,23 +209,38 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [breakElapsedSec, setBreakElapsedSec] = useState(0);
   const [isWfh, setIsWfh] = useState(false);
 
-  // Sync activeBreak from today's record (Fixes E36 Break Type Aliasing & Latest Break Selection)
+  // ── BUG 7 FIX — Stable scalar derived from the open (in-progress) break. ──
+  // Computing JSON of {startAt, endAt} pairs as the memo dep means this value
+  // only changes when a break actually starts or ends — NOT on every Firestore
+  // write (e.g. `updatedAt`) which previously reset the work timer every ~50 min.
+  const openBreakStartAt = React.useMemo<string | null>(() => {
+    const ob = (todayRecord?.breaks ?? []).find(
+      (b) => !b.endAt && !(b as any).endTime
+    );
+    return ob ? (ob.startAt || (ob as any).startTime || null) : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    // Stable dep: only re-compute when the set of {start, end} pairs changes
+    JSON.stringify((todayRecord?.breaks ?? []).map(b => ({ s: b.startAt, e: b.endAt }))),
+  ]);
+
+  // Sync activeBreak UI state only when the open-break identity changes.
+  // Avoids re-running on every Firestore write (e.g. updatedAt).
   useEffect(() => {
-    if (todayRecord?.breaks && todayRecord.breaks.length > 0) {
-      const openBreak = todayRecord.breaks.find(b => !b.endAt && !(b as any).endTime);
-      if (openBreak) {
-        setActiveBreak({
-          type: openBreak.type,
-          startAt: openBreak.startAt || (openBreak as any).startTime || new Date().toISOString()
-        });
-      } else {
-        setActiveBreak(null);
-      }
+    const breaks = todayRecord?.breaks ?? [];
+    const ob = breaks.find((b) => !b.endAt && !(b as any).endTime);
+    if (ob) {
+      const startAt = ob.startAt || (ob as any).startTime || new Date().toISOString();
+      setActiveBreak(prev =>
+        prev?.startAt === startAt && prev?.type === ob.type
+          ? prev // keep stable reference — prevents unnecessary downstream re-renders
+          : { type: ob.type, startAt }
+      );
     } else {
       setActiveBreak(null);
     }
     setIsWfh(!!todayRecord?.isWfh || todayRecord?.status === 'Work From Home');
-  }, [todayRecord]);
+  }, [openBreakStartAt, todayRecord?.isWfh, todayRecord?.status]);
 
   // Multi-Device Real-Time Live Shift Sync (Fixes E37 Contract)
   const [, setLiveSyncTick] = useState(0);
@@ -236,10 +251,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     return () => clearInterval(syncInterval);
   }, []);
 
-  // Break live timer ticker
+  // Break live timer — driven by the stable openBreakStartAt scalar.
+  // Resets cleanly when a new break starts or the current break ends.
   useEffect(() => {
-    if (!activeBreak) { setBreakElapsedSec(0); return; }
-    const startMs = safeGetTimestampMillis(activeBreak.startAt);
+    if (!openBreakStartAt) { setBreakElapsedSec(0); return; }
+    const startMs = safeGetTimestampMillis(openBreakStartAt);
     if (!startMs) { setBreakElapsedSec(0); return; }
     const calc = () => {
       setBreakElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
@@ -247,9 +263,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     calc();
     const interval = setInterval(calc, 1000);
     return () => clearInterval(interval);
-  }, [activeBreak]);
+  }, [openBreakStartAt]);
 
-  // Live WORK seconds ticker — pauses when on a break, resumes when break ends
+  // Live WORK seconds ticker.
+  // BUG 7 FIX: Deps use only stable scalar values — never JSON.stringify(todayRecord)
+  // which fired on every Firestore field write and reset the counter mid-shift.
+  // Also reads the active break directly from openBreakStartAt (stable scalar)
+  // instead of from the activeBreak React state, which could lag one render behind.
   const [liveWorkSec, setLiveWorkSec] = useState(0);
   useEffect(() => {
     const startMs = safeGetTimestampMillis(todayRecord?.checkInAt);
@@ -258,21 +278,28 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       setLiveWorkSec(0);
       return;
     }
+    const completedBreakMs = (todayRecord?.totalBreakMinutes ?? 0) * 60000;
+    const activeBreakStartMs = safeGetTimestampMillis(openBreakStartAt);
+
     const computeWorkSec = () => {
       const totalElapsedMs = Date.now() - startMs;
-      const completedBreakMs = (todayRecord?.totalBreakMinutes || 0) * 60000;
-      const activeBreakStartMs = safeGetTimestampMillis(activeBreak?.startAt);
-      const activeBreakMs = activeBreak && activeBreakStartMs
+      const activeBreakMs = openBreakStartAt && activeBreakStartMs
         ? Math.max(0, Date.now() - activeBreakStartMs)
         : 0;
       const workMs = Math.max(0, totalElapsedMs - completedBreakMs - activeBreakMs);
       setLiveWorkSec(Math.floor(workMs / 1000));
     };
+
     computeWorkSec();
-    if (activeBreak) return;
+    if (openBreakStartAt) return; // interval pauses while a break is active
     const interval = setInterval(computeWorkSec, 1000);
     return () => clearInterval(interval);
-  }, [todayRecord?.checkInAt, todayRecord?.checkOutAt, todayRecord?.totalBreakMinutes, activeBreak, JSON.stringify(todayRecord)]);
+  }, [
+    todayRecord?.checkInAt,
+    todayRecord?.checkOutAt,
+    todayRecord?.totalBreakMinutes,
+    openBreakStartAt, // scalar — only changes on break start/end events
+  ]);
 
   const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list'>('cards');
   const [editingProfileField, setEditingProfileField] = useState<string | null>(null);
@@ -521,7 +548,21 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     );
   }
 
+  // BUG 9 FIX: Ref guard prevents handleSelfCheckIn from re-entering the face-modal
+  // flow while a modal is already open. Without this, certain React re-render cycles
+  // (modal state changes causing parent re-renders) could re-invoke this function
+  // and open a second modal on top of the first one.
+  const selfCheckInInProgressRef = useRef(false);
+
   const handleSelfCheckIn = () => {
+    // Block if any face/consent modal is already open, or if we're mid-flow
+    if (
+      selfCheckInInProgressRef.current ||
+      isConsentModalOpen ||
+      isFaceModalOpen ||
+      isEnrollFaceModalOpen
+    ) return;
+    selfCheckInInProgressRef.current = true;
     triggerHaptic('medium');
     const hasConsent = localStorage.getItem('kss_biometric_consent') === 'true';
     if (!hasConsent) {
@@ -534,6 +575,8 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         setIsFaceModalOpen(true);
       }
     }
+    // Release after React has settled the state update
+    setTimeout(() => { selfCheckInInProgressRef.current = false; }, 100);
   };
 
   const executeCheckInProcess = async () => {
@@ -557,8 +600,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  // BUG 8 FIX: Synchronous ref guard prevents window.confirm from being shown
+  // a second time before the first async checkout call completes.
+  // React state (isCheckingOut) is async and cannot guard the confirm dialog.
+  const checkingOutRef = useRef(false);
 
   const handleSelfCheckOut = async () => {
+    if (checkingOutRef.current) return; // block before the confirm dialog
+    checkingOutRef.current = true;
     triggerHaptic('warning');
     const isFinal = window.confirm(
       "Are you sure you want to Check Out for the day?\n\n" +
@@ -566,7 +615,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       "If you are just going on a break, please use the 'Tea Break' or 'Lunch Break' options instead.\n\n" +
       "Click OK to permanently end your shift today."
     );
-    if (!isFinal) return;
+    if (!isFinal) {
+      checkingOutRef.current = false;
+      return;
+    }
 
     setIsCheckingOut(true);
     triggerHaptic('medium');
@@ -575,6 +627,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const res = await recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     
     setIsCheckingOut(false);
+    checkingOutRef.current = false;
     if (res.success) triggerHaptic('success');
     else triggerHaptic('error');
     
@@ -1182,13 +1235,19 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
                     (todayRecord.breaks || []).forEach(b => {
                       let durSec = 0;
-                      if (!b.endAt && activeBreak?.startAt === b.startAt) {
+                      // BUG 2 FIX: Detect active break via !b.endAt (canonical, matches
+                      // Firestore schema) instead of `activeBreak?.startAt === b.startAt`
+                      // which failed when Firestore re-hydrated the ISO string slightly
+                      // differently, causing the bar to always report 100% Work.
+                      const isOngoing = !b.endAt && !(b as any).endTime;
+                      if (isOngoing) {
+                        // Use live elapsed seconds for the active (in-progress) break
                         durSec = breakElapsedSec;
                       } else if (b.durationMinutes && b.durationMinutes > 0) {
-                        durSec = Math.min(3600, b.durationMinutes * 60);
+                        durSec = Math.min(7200, b.durationMinutes * 60);
                       } else if (b.startAt && b.endAt) {
                         const diffSec = Math.floor((new Date(b.endAt).getTime() - new Date(b.startAt).getTime()) / 1000);
-                        durSec = Math.min(3600, Math.max(0, diffSec));
+                        durSec = Math.min(7200, Math.max(0, diffSec));
                       }
 
                       if (b.type === 'Tea Break') teaSecs += durSec;
@@ -1199,15 +1258,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       else if (b.type === 'Activity') activitySecs += durSec;
                     });
 
-                    if (activeBreak && !(todayRecord.breaks || []).some(b => b.startAt === activeBreak.startAt)) {
-                      const dur = breakElapsedSec;
-                      if (activeBreak.type === 'Tea Break') teaSecs += dur;
-                      else if (activeBreak.type === 'Meal Break' || activeBreak.type === 'Lunch Break') mealSecs += dur;
-                      else if (activeBreak.type === 'Team Huddle') huddleSecs += dur;
-                      else if (activeBreak.type === 'Team Meeting') meetingSecs += dur;
-                      else if (activeBreak.type === 'Attainment / Training' || activeBreak.type === 'Training') trainingSecs += dur;
-                      else activitySecs += dur;
-                    }
+                    // No fallback block needed: activeBreak is always derived from
+                    // todayRecord.breaks via openBreakStartAt, so every open break
+                    // is already captured by the `isOngoing` check above.
 
                     const totalBreakSecs = teaSecs + mealSecs + huddleSecs + meetingSecs + trainingSecs + activitySecs;
                     const grandTotalSecs = liveWorkSec + totalBreakSecs;

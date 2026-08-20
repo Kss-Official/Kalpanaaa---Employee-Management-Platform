@@ -22,7 +22,8 @@ import {
   runTransaction,
   Timestamp,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentMultipleTabManager,
+  memoryLocalCache
 } from "firebase/firestore";
 
 export { runTransaction, serverTimestamp, Timestamp };
@@ -42,11 +43,27 @@ export const firebaseConfig = {
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-});
+
+// BUG 6 FIX: Wrap persistent multi-tab cache in try/catch.
+// Safari private browsing and some mobile environments block IndexedDB,
+// causing `persistentMultipleTabManager` to fail. Without a fallback the
+// local cache is silently left in an inconsistent state, making mobile and
+// desktop show divergent data. We fall back to in-memory cache so the
+// Firestore real-time listeners always work correctly.
+function createFirestore() {
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    });
+  } catch {
+    console.warn('[Firebase] Persistent multi-tab cache unavailable (Safari/private mode?), falling back to memory cache.');
+    return initializeFirestore(app, { localCache: memoryLocalCache() });
+  }
+}
+
+export const db = createFirestore();
 
 // Error Handling Helper as per Firebase skill guidelines
 export enum OperationType {
