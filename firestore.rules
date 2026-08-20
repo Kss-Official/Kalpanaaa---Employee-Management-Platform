@@ -20,7 +20,10 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isSignedIn() && getRole() == 'SUPER_ADMIN';
+      return isSignedIn() && (
+        getUserDoc().role == 'SUPER_ADMIN' || 
+        (request.auth.token.role != null && (request.auth.token.role == 'SUPER_ADMIN' || request.auth.token.role == 'superadmin'))
+      );
     }
 
     function isCeo() {
@@ -32,11 +35,25 @@ service cloud.firestore {
     }
 
     function isHrAdmin() {
-      return isSignedIn() && (getRole() == 'HR_ADMIN' || isSuperAdmin());
+      return isSignedIn() && (
+        getUserDoc().role == 'HR_ADMIN' || 
+        isSuperAdmin() || 
+        (request.auth.token.role != null && (request.auth.token.role == 'HR_ADMIN' || request.auth.token.role == 'hr_admin' || request.auth.token.role == 'hr' || request.auth.token.role == 'SUPER_ADMIN' || request.auth.token.role == 'superadmin'))
+      );
     }
 
     function isProjectManager() {
-      return isSignedIn() && (getRole() == 'PROJECT_MANAGER' || isSuperAdmin());
+      return isSignedIn() && (
+        getUserDoc().role == 'PROJECT_MANAGER' || 
+        isSuperAdmin() ||
+        (request.auth.token.role != null && (request.auth.token.role == 'PROJECT_MANAGER' || request.auth.token.role == 'project_manager' || request.auth.token.role == 'pm'))
+      );
+    }
+
+    function isAttendanceOwner(recordId) {
+      return recordId.matches('^' + request.auth.uid + '_.*') ||
+        (resource != null && (resource.data.uid == request.auth.uid || resource.data.employeeUid == request.auth.uid)) ||
+        (request.resource != null && (request.resource.data.uid == request.auth.uid || request.resource.data.employeeUid == request.auth.uid));
     }
 
     // Default Deny All
@@ -79,11 +96,34 @@ service cloud.firestore {
       }
     }
 
-    // ── 3. Attendance Records ──
+    // ── 3. Attendance Records (Atomic Owner-Scoped & Field Restricted) ──
     match /attendance/{recordId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      
+      // (a) Forbid creating duplicate doc; employee can create only their own doc
+      allow create: if isSignedIn() && (
+        isSuperAdmin() || isHrAdmin() || (
+          isAttendanceOwner(recordId) && !exists(/databases/$(database)/documents/attendance/$(recordId))
+        )
+      );
+      
+      // (b) & (c) Forbid modifying checkInAt or overwriting existing checkOutAt
+      // Employees are restricted to updating ONLY checkout, break, and duration fields
+      allow update: if isSignedIn() && (
+        isSuperAdmin() || isHrAdmin() || (
+          isAttendanceOwner(recordId) &&
+          // Immutable checkInAt once recorded
+          (!('checkInAt' in resource.data) || resource.data.checkInAt == null || request.resource.data.checkInAt == resource.data.checkInAt) &&
+          // Immutable checkOutAt once recorded (cannot re-checkout or overwrite)
+          (!('checkOutAt' in resource.data) || resource.data.checkOutAt == null || request.resource.data.checkOutAt == resource.data.checkOutAt) &&
+          // Field-level modification restriction for regular employees
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'checkOutAt', 'updatedAt', 'breaks', 'totalBreakMinutes', 'workingMinutes',
+            'notes', 'locationAccuracy', 'distanceFromOffice', 'locationVerified', 'isWfh', 'status'
+          ])
+        )
+      );
+      
       allow delete: if isSuperAdmin();
     }
 

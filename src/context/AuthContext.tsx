@@ -12,7 +12,9 @@ import {
   query,
   where,
   limit,
-  orderBy
+  orderBy,
+  runTransaction,
+  serverTimestamp
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload } from '../lib/firebase';
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
@@ -24,7 +26,16 @@ import {
   INITIAL_LEAVE_REQUESTS
 } from '../lib/demoData';
 import { initializeApp } from 'firebase/app';
-import { evaluateAttendanceScan, calculateGpsDistanceMeters } from '../lib/attendanceEngine';
+import { 
+  evaluateAttendanceScan, 
+  calculateGpsDistanceMeters,
+  getEmployeeWorkDate,
+  getAttendanceDocId,
+  getCanonicalEmployeeUid,
+  formatTimestampToISO,
+  COMPANY_TIMEZONE
+} from '../lib/attendanceEngine';
+import { runAttendanceMigration } from '../lib/attendanceMigration';
 import { fetchAbsoluteTime, toISTTimeString } from '../lib/absoluteTime';
 import { sendKssNotification, sendAdminBroadcast, registerFcmToken, KssNotification } from '../lib/notifications';
 import { clearAllFaceEngineState } from '../lib/faceRecognitionEngine';
@@ -125,6 +136,7 @@ interface AuthContextType {
   isDemoMode: boolean;
   isFirestoreConnected: boolean;
   isSessionReady: boolean;
+  attendanceSyncStatus: 'loading' | 'synced';
   employees: Employee[];
   attendance: AttendanceRecord[];
   auditLogs: AuditLog[];
@@ -146,10 +158,10 @@ interface AuthContextType {
   addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => Promise<{ success: boolean; message?: string } | Employee>;
   updateEmployee: (id: string, updates: Partial<Employee>) => void;
   deleteEmployee: (id: string) => void;
-  recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
-  recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
-  checkIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
-  checkOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  checkIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
+  checkOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   startBreak: (employeeId: string, breakType?: string) => Promise<{ success: boolean; message: string }>;
   endBreak: (employeeId: string) => Promise<{ success: boolean; message: string }>;
   updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => void;
@@ -283,27 +295,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
   // Session is always ready immediately — activeEmployee is restored synchronously above
   const [isSessionReady, setIsSessionReady] = useState<boolean>(true);
+  const [attendanceSyncStatus, setAttendanceSyncStatus] = useState<'loading' | 'synced'>('loading');
 
   // employeesRef always mirrors the current employees state for use in one-time effects
   const employeesRef = useRef<Employee[]>([]);
 
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
-    const saved = localStorage.getItem('kss_v1_attendance');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as AttendanceRecord[];
-        if (Array.isArray(parsed)) {
-          // Strictly keep real user check-in records (purge all synthetic mock records)
-          const realOnly = parsed.filter(a => a && !a.id.startsWith('att-hist-'));
-          localStorage.setItem('kss_v1_attendance', JSON.stringify(realOnly));
-          return realOnly;
-        }
-      } catch (e) {
-        console.warn('[AuthContext] Failed to parse saved attendance from localStorage', e);
-      }
-    }
-    return [];
-  });
+  // SINGLE SOURCE OF TRUTH: Firestore only. Initial state starts empty; hydrated via real-time onSnapshot
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
     const saved = localStorage.getItem('kss_v1_audit_logs');
@@ -562,11 +560,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     employeesRef.current = employees;
   }, [employees]);
 
-  // Debounced localStorage persistence — batches all state saves into one write per 500ms
+  // Debounced localStorage persistence — batches all non-attendance state saves
   useEffect(() => {
     const handler = setTimeout(() => {
       localStorage.setItem('kss_v1_employees', JSON.stringify(employees));
-      localStorage.setItem('kss_v1_attendance', JSON.stringify(attendance));
+      // NOTE: Attendance is Firestore-only. Never cached in localStorage.
       localStorage.setItem('kss_v1_audit_logs', JSON.stringify(auditLogs));
       localStorage.setItem('kss_v1_settings', JSON.stringify(settings));
       localStorage.setItem('kss_v1_work_zone', JSON.stringify(companyWorkZone));
@@ -721,12 +719,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees
   useEffect(() => {
-    const checkAutoCheckout = async () => {
-      if (attendance.length === 0) return;
-      const absoluteNow = await fetchAbsoluteTime();
-      const todayStr = absoluteNow.toISOString().split('T')[0];
-      const currentHours = absoluteNow.getHours();
-      const currentMinutes = absoluteNow.getMinutes();
+    const checkAutoCheckout = () => {
+      const now = new Date();
+      const todayStr = getEmployeeWorkDate(now);
+      const currentHours = now.getHours();
+      const currentMinutes = now.getMinutes();
       const isPastSevenThirtyPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 30);
 
       attendance.forEach(record => {
@@ -749,19 +746,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:30 PM (Default Shift End)';
 
-          // Update local state
-          setAttendance(prev => prev.map(a => a.id === record.id ? {
-            ...a,
-            checkOutAt: forceCheckOutTime,
-            workingMinutes: totalMins,
-            notes: updatedNotes
-          } : a));
-
-          // Auto close the record in Firestore
+          // Auto close the record in Firestore with serverTimestamp
           setDoc(doc(db, 'attendance', record.id), {
             checkOutAt: forceCheckOutTime,
             workingMinutes: totalMins,
-            notes: updatedNotes
+            notes: updatedNotes,
+            updatedAt: serverTimestamp()
           }, { merge: true }).catch(() => { });
 
           addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Auto-checked out at 7:30 PM for ${record.date}`);
@@ -932,79 +922,89 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'employees');
         });
 
-        // Subscribe to attendance records (Bounded to rolling 30-day window to eliminate cost spikes)
+        // Subscribe to attendance records (Single Source of Truth: Firestore only)
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+        const thirtyDaysAgoStr = getEmployeeWorkDate(thirtyDaysAgo);
         const attQuery = query(collection(db, 'attendance'), where('date', '>=', thirtyDaysAgoStr));
+
+        let hasRunMigration = false;
 
         unsubAtt = onSnapshot(attQuery, (snapshot) => {
           const fetched: AttendanceRecord[] = [];
           if (!snapshot.empty) {
             snapshot.forEach(docSnap => {
-              const data = { id: docSnap.id, ...docSnap.data() } as AttendanceRecord;
-              
-              // LIVE MIGRATION FOR ATTENDANCE CODE KSS2707 -> KSS2407 and KS -> KSS
-              if (data.employeeCode) {
-                let newCode = data.employeeCode;
-                if (newCode.includes('KSS2707')) {
-                  newCode = newCode.replace('KSS2707', 'KSS2407');
-                } else if (newCode.startsWith('KS2407') || newCode.startsWith('KS2707')) {
-                  newCode = newCode.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407');
-                }
-                
-                if (newCode !== data.employeeCode) {
-                  data.employeeCode = newCode;
-                  setDoc(doc(db, 'attendance', data.id), { employeeCode: newCode }, { merge: true }).catch(() => { });
-                }
-              }
+              const data = docSnap.data();
+              const recId = docSnap.id;
 
-              fetched.push(data);
+              const canonicalUid = getCanonicalEmployeeUid({
+                uid: data.uid || data.employeeUid,
+                id: data.employeeId,
+                employeeId: data.employeeCode || data.employeeId
+              });
+
+              const dateStr = getEmployeeWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || new Date());
+              const checkInISO = formatTimestampToISO(data.checkInAt);
+              const checkOutISO = formatTimestampToISO(data.checkOutAt);
+              const createdISO = formatTimestampToISO(data.createdAt) || checkInISO || new Date().toISOString();
+              const updatedISO = formatTimestampToISO(data.updatedAt) || checkOutISO || createdISO;
+
+              const cleanRec: AttendanceRecord = {
+                id: recId,
+                uid: canonicalUid,
+                employeeUid: canonicalUid,
+                employeeId: data.employeeId || canonicalUid,
+                employeeCode: data.employeeCode || data.employeeId || canonicalUid,
+                employeeName: data.employeeName || '',
+                department: data.department || 'Engineering',
+                pmUid: data.pmUid || '',
+                date: dateStr,
+                checkInAt: checkInISO,
+                checkOutAt: checkOutISO,
+                workingMinutes: typeof data.workingMinutes === 'number' ? data.workingMinutes : 0,
+                status: data.status || 'Present',
+                attendanceMethod: data.attendanceMethod || 'Self Portal',
+                officeLatitude: data.officeLatitude,
+                officeLongitude: data.officeLongitude,
+                officeRadiusMeters: data.officeRadiusMeters,
+                distanceFromOffice: data.distanceFromOffice,
+                locationAccuracy: data.locationAccuracy,
+                locationVerified: !!data.locationVerified,
+                latitude: data.latitude,
+                longitude: data.longitude,
+                deviceInfo: data.deviceInfo,
+                notes: data.notes,
+                breaks: Array.isArray(data.breaks) ? data.breaks.map((b: any) => ({
+                  type: b.type,
+                  startAt: formatTimestampToISO(b.startAt || b.startTime) || '',
+                  endAt: formatTimestampToISO(b.endAt || b.endTime),
+                  durationMinutes: Number(b.durationMinutes) || 0
+                })) : [],
+                totalBreakMinutes: typeof data.totalBreakMinutes === 'number' ? data.totalBreakMinutes : 0,
+                isWfh: !!data.isWfh,
+                createdAt: createdISO,
+                updatedAt: updatedISO
+              };
+
+              fetched.push(cleanRec);
             });
           }
 
-          // Read local storage to ensure real user check-ins are NEVER lost when Firestore snapshot is empty or initializing
-          let existingLocal: AttendanceRecord[] = [];
-          try {
-            const saved = localStorage.getItem('kss_v1_attendance');
-            if (saved) existingLocal = JSON.parse(saved);
-          } catch {}
-
-          const realLiveRecords = [...fetched, ...existingLocal].filter(a => a && a.id && !a.id.startsWith('att-hist-'));
-
+          // Deduplicate by canonical UID + date (preferring records with checkInAt / checkOutAt)
           const deduplicatedMap = new Map<string, AttendanceRecord>();
-          realLiveRecords.forEach(rec => {
-            const empKey = `${rec.employeeCode || rec.employeeId}_${rec.date}`;
+          fetched.forEach(rec => {
+            const empKey = `${rec.employeeUid || rec.employeeId}_${rec.date}`;
             const existing = deduplicatedMap.get(empKey);
             if (!existing) {
               deduplicatedMap.set(empKey, rec);
             } else {
-              const combinedBreaks = [...(existing.breaks || []), ...(rec.breaks || [])];
-              const breakMap = new Map<string, any>();
-              combinedBreaks.forEach(b => {
-                const key = b.startAt || (b as any).startTime;
-                if (!key) return;
-                const curr = breakMap.get(key);
-                if (!curr) {
-                  breakMap.set(key, b);
-                } else {
-                  // CRITICAL FIX: Always prefer a closed break (has endAt/endTime) over a stale open break (endAt is null)
-                  const isNewClosed = !!(b.endAt || (b as any).endTime);
-                  const isCurrClosed = !!(curr.endAt || (curr as any).endTime);
-                  if (isNewClosed && !isCurrClosed) {
-                    breakMap.set(key, b);
-                  }
-                }
-              });
-              const uniqueBreaks = Array.from(breakMap.values());
-              
               const merged: AttendanceRecord = {
                 ...existing,
                 ...rec,
                 checkInAt: rec.checkInAt || existing.checkInAt,
                 checkOutAt: rec.checkOutAt || existing.checkOutAt,
                 status: rec.status || existing.status,
-                breaks: uniqueBreaks as any,
+                workingMinutes: Math.max(existing.workingMinutes || 0, rec.workingMinutes || 0),
                 totalBreakMinutes: Math.max(existing.totalBreakMinutes || 0, rec.totalBreakMinutes || 0)
               };
               deduplicatedMap.set(empKey, merged);
@@ -1012,15 +1012,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
 
           const consolidated = Array.from(deduplicatedMap.values());
-          if (consolidated.length > 0) {
-            consolidated.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
-            setAttendance(consolidated);
-            try {
-              localStorage.setItem('kss_v1_attendance', JSON.stringify(consolidated.filter(a => a && !a.id.startsWith('att-hist-'))));
-            } catch {}
+          consolidated.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+          
+          // Pure Firestore state derivation
+          setAttendance(consolidated);
+          setAttendanceSyncStatus('synced');
+
+          // Run one-time background migration on initial snapshot
+          if (!hasRunMigration) {
+            hasRunMigration = true;
+            runAttendanceMigration().catch(() => {});
           }
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'attendance');
+          setAttendanceSyncStatus('synced');
         });
 
         // Subscribe to leave requests with real-time cross-device sync
@@ -1705,10 +1710,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     lat?: number, 
     lon?: number, 
     arg4?: number | AttendanceMethod, 
-    arg5?: number | AttendanceMethod
-  ) => {
+    arg5?: number | AttendanceMethod,
+    customDate?: string
+  ): Promise<{ success: boolean; message: string; record?: AttendanceRecord }> => {
     let accuracy = 8;
-    let method: AttendanceMethod = 'Facial Recognition';
+    let method: AttendanceMethod = 'Self Portal';
 
     if (typeof arg4 === 'number') {
       accuracy = arg4;
@@ -1722,14 +1728,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-In blocked.' };
     }
 
-    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId);
+    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
     if (!emp) {
       return { success: false, message: 'Employee not found.' };
     }
 
-    const absoluteNow = await fetchAbsoluteTime();
-    const todayStr = absoluteNow.toISOString().split('T')[0];
-    const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
+    const empUid = getCanonicalEmployeeUid(emp, user?.uid);
+    const todayStr = customDate || getEmployeeWorkDate(new Date());
+    const recordId = getAttendanceDocId(empUid, todayStr);
+
+    const existingRec = attendance.find(a => 
+      (a.id === recordId || a.employeeUid === empUid || a.employeeId === emp.id || a.employeeCode === emp.employeeId) && 
+      a.date === todayStr
+    );
 
     const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
@@ -1741,22 +1752,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         todayStr >= r.startDate && 
         todayStr <= r.endDate
       );
-
-    // TOP 1% SECURITY: Strict Office Wi-Fi IP Whitelisting
-    if (settings.officeStaticIp && !isApprovedWfh) {
-      try {
-        const ipController = new AbortController();
-        const ipTimeout = setTimeout(() => ipController.abort(), 1000);
-        const ipRes = await fetch('https://api.ipify.org?format=json', { signal: ipController.signal });
-        clearTimeout(ipTimeout);
-        const ipData = await ipRes.json();
-        if (ipData.ip !== settings.officeStaticIp) {
-          return { success: false, message: `SECURITY ALERT: Unrecognized Network. You must be connected to the Office Wi-Fi to check in (Expected: ${settings.officeStaticIp}, Got: ${ipData.ip}).` };
-        }
-      } catch (e) {
-        return { success: false, message: 'SECURITY ALERT: Unable to securely verify your network IP address. Please check your connection.' };
-      }
-    }
 
     const effectiveSettings: CompanySettings = {
       ...settings,
@@ -1772,82 +1767,101 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: evalResult.message };
     }
 
-    if (existingRec && existingRec.checkInAt) {
-      if (existingRec.checkOutAt) {
-        return { success: false, message: 'You have already completed your shift and checked out for today.' };
-      }
-      return { success: false, message: 'Employee is already checked in for today.' };
-    }
-
     const distMeters = (lat !== undefined && lon !== undefined)
       ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
       : 0;
 
-    const nowISO = absoluteNow.toISOString();
-    const newRecord: AttendanceRecord = {
-      id: existingRec ? existingRec.id : `att-${emp.employeeId}-${todayStr}`,
-      employeeId: emp.id,
-      employeeCode: emp.employeeId,
-      employeeName: emp.fullName,
-      department: emp.department,
-      date: todayStr,
-      checkInAt: nowISO,
-      checkOutAt: null,
-      workingMinutes: 0,
-      status: evalResult.status,
-      attendanceMethod: method,
+    // ATOMIC IDEMPOTENT TRANSACTION
+    const docRef = doc(db, 'attendance', recordId);
+    try {
+      const txResult = await runTransaction(db, async (transaction) => {
+        const docSnap = await transaction.get(docRef);
+        if (docSnap.exists()) {
+          const existingData = docSnap.data();
+          if (existingData.checkInAt) {
+            // Idempotent: already checked in!
+            return {
+              alreadyCheckedIn: true,
+              data: existingData,
+              message: 'Already checked in for today.'
+            };
+          }
+        }
 
-      // Work Zone Location Snapshot fields
-      officeLatitude: companyWorkZone.latitude,
-      officeLongitude: companyWorkZone.longitude,
-      officeRadiusMeters: companyWorkZone.radiusMeters,
-      distanceFromOffice: distMeters,
-      locationAccuracy: accuracy,
-      locationVerified: evalResult.locationVerified,
+        const payload = {
+          id: recordId,
+          uid: empUid,
+          employeeUid: empUid,
+          employeeId: emp.id,
+          employeeCode: emp.employeeId,
+          employeeName: emp.fullName,
+          department: emp.department || 'Engineering',
+          pmUid: emp.pmUid || emp.reportingManagerUid || '',
+          date: todayStr,
+          checkInAt: serverTimestamp(),
+          checkOutAt: null,
+          workingMinutes: 0,
+          status: evalResult.status,
+          attendanceMethod: method,
+          officeLatitude: companyWorkZone.latitude,
+          officeLongitude: companyWorkZone.longitude,
+          officeRadiusMeters: companyWorkZone.radiusMeters,
+          distanceFromOffice: distMeters,
+          locationAccuracy: accuracy,
+          locationVerified: evalResult.locationVerified,
+          latitude: lat !== undefined ? lat : null,
+          longitude: lon !== undefined ? lon : null,
+          deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent : 'Browser Scanner Terminal',
+          breaks: [],
+          totalBreakMinutes: 0,
+          isWfh: !!isApprovedWfh,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
 
-      latitude: lat !== undefined ? lat : null,
-      longitude: lon !== undefined ? lon : null,
-      deviceInfo: 'Browser Scanner Terminal',
-      createdAt: nowISO,
-      updatedAt: nowISO
-    };
+        transaction.set(docRef, cleanFirestorePayload(payload), { merge: true });
+        return {
+          alreadyCheckedIn: false,
+          data: payload,
+          message: evalResult.message
+        };
+      });
 
-    // TOP 1% SECURITY: Clean payload to prevent Firestore undefined errors
-    const cleanedRecord = JSON.parse(JSON.stringify(newRecord));
+      addAuditLog('ATTENDANCE_CHECKIN', `${emp.employeeId} (${emp.fullName})`, `Status: ${evalResult.status}, GPS: ${evalResult.locationVerified ? 'Verified' : 'Unverified'} (${distMeters}m from office)`);
 
-    setAttendance(prev => [newRecord, ...prev.filter(a => a.id !== newRecord.id)]);
-
-    // Write to Firestore
-    setDoc(doc(db, 'attendance', newRecord.id), cleanedRecord).catch(err => {
-      handleFirestoreError(err, OperationType.WRITE, `attendance/${newRecord.id}`);
-    });
-
-    addAuditLog('ATTENDANCE_CHECKIN', `${emp.employeeId} (${emp.fullName})`, `Status: ${evalResult.status}, GPS: ${evalResult.locationVerified ? 'Verified' : 'Unverified'} (${distMeters}m from office)`);
-
-    return { success: true, message: evalResult.message, record: newRecord };
+      return { 
+        success: true, 
+        message: txResult.message, 
+        record: {
+          ...txResult.data,
+          checkInAt: formatTimestampToISO(txResult.data.checkInAt) || new Date().toISOString()
+        } as AttendanceRecord
+      };
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.WRITE, `attendance/${recordId}`);
+      return { success: false, message: `Check-In Transaction failed: ${err.message}` };
+    }
   };
 
-  const recordCheckOut = async (employeeId: string, lat?: number, lon?: number, accuracy: number = 8) => {
+  const recordCheckOut = async (
+    employeeId: string, 
+    lat?: number, 
+    lon?: number, 
+    accuracy: number = 8,
+    customDate?: string
+  ): Promise<{ success: boolean; message: string; record?: AttendanceRecord }> => {
     if (!navigator.onLine) {
       return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-Out blocked.' };
     }
 
-    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId);
+    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
     if (!emp) {
       return { success: false, message: 'Employee not found.' };
     }
 
-    const absoluteNow = await fetchAbsoluteTime();
-    const todayStr = absoluteNow.toISOString().split('T')[0];
-    const existingRec = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
-
-    if (!existingRec || !existingRec.checkInAt) {
-      return { success: false, message: 'No active check-in record found for today.' };
-    }
-
-    if (existingRec.checkOutAt) {
-      return { success: false, message: 'Employee has already checked out for today.' };
-    }
+    const empUid = getCanonicalEmployeeUid(emp, user?.uid);
+    const todayStr = customDate || getEmployeeWorkDate(new Date());
+    const recordId = getAttendanceDocId(empUid, todayStr);
 
     const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
@@ -1859,75 +1873,107 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         todayStr >= r.startDate && 
         todayStr <= r.endDate
       );
-    const evalResult = evaluateAttendanceScan(emp, existingRec, settings, lat, lon, isApprovedWfh);
-    if (!evalResult.allowed) {
-      return { success: false, message: evalResult.message };
+
+    // ATOMIC IDEMPOTENT TRANSACTION
+    const docRef = doc(db, 'attendance', recordId);
+
+    try {
+      const txResult = await runTransaction(db, async (transaction) => {
+        const docSnap = await transaction.get(docRef);
+        if (!docSnap.exists()) {
+          throw new Error('No attendance record found for today. Please check in first.');
+        }
+
+        const existingData = docSnap.data();
+        if (!existingData.checkInAt) {
+          throw new Error('No active check-in record found for today.');
+        }
+
+        if (existingData.checkOutAt) {
+          // Idempotent: already checked out!
+          return {
+            alreadyCheckedOut: true,
+            data: existingData,
+            message: 'Employee has already checked out for today.'
+          };
+        }
+
+        const distMeters = (lat !== undefined && lon !== undefined)
+          ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
+          : (existingData.distanceFromOffice || 0);
+
+        // Compute workingMinutes inside checkout transaction from the read snapshot
+        const checkInISO = formatTimestampToISO(existingData.checkInAt) || new Date().toISOString();
+        const checkInMs = new Date(checkInISO).getTime();
+        const nowMs = Date.now();
+
+        const existingBreaks = existingData.breaks || [];
+        let updatedBreaks = existingBreaks;
+        let additionalBreakMins = 0;
+        const openBreak = existingBreaks.find((b: any) => !b.endAt && !b.endTime);
+
+        if (openBreak) {
+          const bStartIso = formatTimestampToISO(openBreak.startAt || openBreak.startTime) || new Date(nowMs).toISOString();
+          additionalBreakMins = Math.max(1, Math.floor((nowMs - new Date(bStartIso).getTime()) / 60000));
+          const nowIso = new Date(nowMs).toISOString();
+          updatedBreaks = existingBreaks.map((b: any) =>
+            (b.startAt === openBreak.startAt && (!b.endAt && !b.endTime))
+              ? { ...b, endAt: nowIso, endTime: nowIso, durationMinutes: additionalBreakMins }
+              : b
+          );
+        }
+
+        const finalTotalBreakMinutes = (existingData.totalBreakMinutes || 0) + additionalBreakMins;
+        let durationMins = Math.floor((nowMs - checkInMs) / 60000);
+        if (finalTotalBreakMinutes > 0) {
+          durationMins = Math.max(0, durationMins - finalTotalBreakMinutes);
+        }
+        durationMins = Math.max(1, durationMins);
+
+        const updates = {
+          checkOutAt: serverTimestamp(),
+          workingMinutes: durationMins,
+          breaks: updatedBreaks,
+          totalBreakMinutes: finalTotalBreakMinutes,
+          officeLatitude: existingData.officeLatitude || companyWorkZone.latitude,
+          officeLongitude: existingData.officeLongitude || companyWorkZone.longitude,
+          officeRadiusMeters: existingData.officeRadiusMeters || companyWorkZone.radiusMeters,
+          distanceFromOffice: distMeters,
+          locationAccuracy: accuracy || existingData.locationAccuracy || 8,
+          locationVerified: existingData.locationVerified !== undefined ? existingData.locationVerified : true,
+          updatedAt: serverTimestamp()
+        };
+
+        transaction.update(docRef, cleanFirestorePayload(updates));
+        return {
+          alreadyCheckedOut: false,
+          data: { ...existingData, ...updates, checkOutAt: new Date().toISOString() },
+          message: isApprovedWfh
+            ? 'Checked Out Successfully — Work From Home Completed'
+            : 'Checked Out Successfully — Shift Completed'
+        };
+      });
+
+      addAuditLog('ATTENDANCE_CHECKOUT', `${emp.employeeId} (${emp.fullName})`, `Duration: ${Math.floor((txResult.data.workingMinutes || 0) / 60)}h ${(txResult.data.workingMinutes || 0) % 60}m`);
+
+      return {
+        success: true,
+        message: txResult.message,
+        record: txResult.data as AttendanceRecord
+      };
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
+      return { success: false, message: err.message || 'Check-Out failed.' };
     }
-
-    const distMeters = (lat !== undefined && lon !== undefined)
-      ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
-      : (existingRec.distanceFromOffice || 0);
-
-    const nowISO = new Date().toISOString();
-    
-    // Auto-close open break if any
-    let additionalBreakMins = 0;
-    const existingBreaks = existingRec.breaks || [];
-    let updatedBreaks = existingBreaks;
-    const openBreak = existingBreaks.find(b => !b.endAt);
-    
-    if (openBreak) {
-      additionalBreakMins = Math.floor((new Date(nowISO).getTime() - new Date(openBreak.startAt).getTime()) / 60000);
-      updatedBreaks = existingBreaks.map(b => 
-        (b.startAt === openBreak.startAt && !b.endAt) 
-          ? { ...b, endAt: nowISO, durationMinutes: additionalBreakMins } 
-          : b
-      );
-    }
-
-    const finalTotalBreakMinutes = (existingRec.totalBreakMinutes || 0) + additionalBreakMins;
-
-    const startTime = new Date(existingRec.checkInAt).getTime();
-    let durationMins = Math.floor((new Date(nowISO).getTime() - startTime) / 60000);
-    
-    if (finalTotalBreakMinutes > 0) {
-      durationMins = Math.max(0, durationMins - finalTotalBreakMinutes);
-    }
-    durationMins = Math.max(1, durationMins);
-
-    const updatedRecord: AttendanceRecord = {
-      ...existingRec,
-      checkOutAt: nowISO,
-      workingMinutes: durationMins,
-      breaks: updatedBreaks,
-      totalBreakMinutes: finalTotalBreakMinutes,
-      officeLatitude: existingRec.officeLatitude || companyWorkZone.latitude,
-      officeLongitude: existingRec.officeLongitude || companyWorkZone.longitude,
-      officeRadiusMeters: existingRec.officeRadiusMeters || companyWorkZone.radiusMeters,
-      distanceFromOffice: distMeters,
-      locationAccuracy: accuracy || existingRec.locationAccuracy || 8,
-      locationVerified: evalResult.locationVerified,
-      updatedAt: nowISO
-    };
-
-    setAttendance(prev => prev.map(a => a.id === updatedRecord.id ? updatedRecord : a));
-
-    // TOP 1% SECURITY: Clean payload to prevent Firestore undefined errors
-    const cleanedRecord = JSON.parse(JSON.stringify(updatedRecord));
-
-    // Write to Firestore
-    setDoc(doc(db, 'attendance', updatedRecord.id), cleanedRecord, { merge: true }).catch(err => {
-      handleFirestoreError(err, OperationType.UPDATE, `attendance/${updatedRecord.id}`);
-    });
-
-    addAuditLog('ATTENDANCE_CHECKOUT', `${emp.employeeId} (${emp.fullName})`, `Duration: ${Math.floor(durationMins / 60)}h ${durationMins % 60}m`);
-
-    return { success: true, message: 'Checked Out Successfully', record: updatedRecord };
   };
 
   const startBreak = async (employeeId: string, breakType: string = 'Tea / Lunch Break') => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const rec = attendance.find(a => (a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
+    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
+    const empUid = getCanonicalEmployeeUid(emp || employeeId, user?.uid);
+    const todayStr = getEmployeeWorkDate(new Date());
+    const recordId = getAttendanceDocId(empUid, todayStr);
+
+    const rec = attendance.find(a => (a.id === recordId || a.employeeUid === empUid || a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
     if (!rec || !rec.checkInAt) return { success: false, message: 'You must check in first before starting a break.' };
     if (rec.checkOutAt) return { success: false, message: 'You have already checked out for today.' };
 
@@ -1945,8 +1991,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const endBreak = async (employeeId: string) => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const rec = attendance.find(a => (a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
+    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
+    const empUid = getCanonicalEmployeeUid(emp || employeeId, user?.uid);
+    const todayStr = getEmployeeWorkDate(new Date());
+    const recordId = getAttendanceDocId(empUid, todayStr);
+
+    const rec = attendance.find(a => (a.id === recordId || a.employeeUid === empUid || a.employeeId === employeeId || a.employeeCode === employeeId) && a.date === todayStr);
     if (!rec || !rec.checkInAt) return { success: false, message: 'No active check-in record found.' };
 
     const existingBreaks = rec.breaks || [];
@@ -1973,16 +2023,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateAttendanceRecord = (recordId: string, updates: Partial<AttendanceRecord>) => {
-    setAttendance(prev => {
-      const updated = prev.map(a => a.id === recordId ? { ...a, ...updates, updatedAt: new Date().toISOString() } : a);
-      try {
-        localStorage.setItem('kss_v1_attendance', JSON.stringify(updated.filter(a => a && !a.id.startsWith('att-hist-'))));
-      } catch {}
-      return updated;
-    });
-
-    // Update in Firestore (clean any undefined/NaN values)
-    const cleanUpdates = cleanFirestorePayload({ ...updates, updatedAt: new Date().toISOString() });
+    // Write directly to Firestore with serverTimestamp — real-time onSnapshot updates UI seamlessly
+    const cleanUpdates = cleanFirestorePayload({ ...updates, updatedAt: serverTimestamp() });
     setDoc(doc(db, 'attendance', recordId), cleanUpdates, { merge: true }).catch(err => {
       handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
     });
@@ -2529,6 +2571,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isDemoMode,
       isFirestoreConnected,
       isSessionReady,
+      attendanceSyncStatus,
       employees,
       attendance,
       auditLogs,

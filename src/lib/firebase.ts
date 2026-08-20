@@ -17,13 +17,15 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  query, 
-  where, 
-  orderBy, 
-  limit, 
   serverTimestamp,
-  getDocFromServer
+  getDocFromServer,
+  runTransaction,
+  Timestamp,
+  persistentLocalCache,
+  persistentMultipleTabManager
 } from "firebase/firestore";
+
+export { runTransaction, serverTimestamp, Timestamp };
 
 // Config explicitly targeting kalpanaaa-employees-website
 export const firebaseConfig = {
@@ -40,7 +42,11 @@ export const firebaseConfig = {
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {});
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
 
 // Error Handling Helper as per Firebase skill guidelines
 export enum OperationType {

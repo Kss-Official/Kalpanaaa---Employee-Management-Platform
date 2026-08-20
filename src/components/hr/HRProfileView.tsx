@@ -28,6 +28,7 @@ import {
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 import { useHaptic } from '../../hooks/useHaptic';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
 
 export const HRProfileView: React.FC = () => {
   const { triggerHaptic } = useHaptic();
@@ -53,15 +54,16 @@ export const HRProfileView: React.FC = () => {
 
   // WFH / Leave Request Form State
   const [reqType, setReqType] = useState<'WFH' | 'Leave'>('WFH');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(getEmployeeWorkDate(new Date()));
+  const [endDate, setEndDate] = useState(getEmployeeWorkDate(new Date()));
   const [reason, setReason] = useState('');
   const [formSubmitted, setFormSubmitted] = useState(false);
 
-  // Today's Date & Attendance Record (IST-safe via date-fns)
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  // Today's Date & Attendance Record (Canonical timezone)
+  const todayStr = getEmployeeWorkDate(new Date());
+  const hrUid = getCanonicalEmployeeUid(targetEmployee);
   const myTodayRecord = targetEmployee 
-    ? attendance.find(a => (a.employeeId === targetEmployee.id || a.employeeCode === targetEmployee.employeeId) && a.date === todayStr) 
+    ? attendance.find(a => (a.id === getAttendanceDocId(hrUid, todayStr) || a.employeeUid === hrUid || a.employeeId === targetEmployee.id || a.employeeCode === targetEmployee.employeeId) && a.date === todayStr) 
     : null;
 
   const isCheckedIn = !!myTodayRecord?.checkInAt && !myTodayRecord?.checkOutAt;
@@ -137,7 +139,6 @@ export const HRProfileView: React.FC = () => {
     setLoading(true);
 
     try {
-      // 1. Instant Check-Out Execution (0ms delay)
       const res = await checkOut(targetEmployee.id);
       if (res.success) {
         toast.success(res.message || 'Check-Out recorded successfully!');
@@ -148,17 +149,6 @@ export const HRProfileView: React.FC = () => {
       toast.error(err?.message || 'Check-Out failed.');
     } finally {
       setLoading(false);
-    }
-
-    // 2. Asynchronous background GPS enrichment
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          checkOut(targetEmployee.id, pos.coords.latitude, pos.coords.longitude);
-        },
-        () => {},
-        { enableHighAccuracy: false, timeout: 2000 }
-      );
     }
   };
 

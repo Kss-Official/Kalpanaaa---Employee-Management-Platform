@@ -56,7 +56,7 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
-import { generateEmployeeQrToken, calculateGpsDistanceMeters } from '../../lib/attendanceEngine';
+import { generateEmployeeQrToken, calculateGpsDistanceMeters, getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
@@ -83,7 +83,7 @@ const AVATAR_PRESETS = [
 ];
 
 export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setActiveTab }) => {
-  const { activeEmployee, attendance, leaveRequests, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout, updateCurrentEmployeePassword, companyWideWfhDates, notifications } = useAuth();
+  const { activeEmployee, user, attendance, attendanceSyncStatus, leaveRequests, recordCheckIn, recordCheckOut, settings, updateEmployee, companyWorkZone, updateAttendanceRecord, addAuditLog, logout, updateCurrentEmployeePassword, companyWideWfhDates, notifications } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   // Time-aware greeting
@@ -185,18 +185,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     activeEmployee?.employeeId === 'CEO001' ||
     activeEmployee?.employeeId === 'CTO001';
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayRecords = attendance.filter(a => 
-    (a.employeeId === activeEmployee?.id || a.employeeId === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.employeeId || a.employeeCode === activeEmployee?.id) && 
+  // Canonical Work-day date in employee timezone
+  const todayStr = getEmployeeWorkDate(new Date());
+  const activeUid = getCanonicalEmployeeUid(activeEmployee, user?.uid);
+  const todayRecord = attendance.find(a => 
+    (a.id === getAttendanceDocId(activeUid, todayStr) || 
+     a.employeeUid === activeUid || 
+     a.uid === activeUid || 
+     a.employeeId === activeEmployee?.id || 
+     a.employeeCode === activeEmployee?.employeeId) && 
     a.date === todayStr
   );
-  // Sort by latest updated record first
-  const sortedTodayRecords = [...todayRecords].sort((a, b) => {
-    const timeA = new Date((a as any).updatedAt || a.checkInAt || (a as any).createdAt || 0).getTime();
-    const timeB = new Date((b as any).updatedAt || b.checkInAt || (b as any).createdAt || 0).getTime();
-    return timeB - timeA;
-  });
-  const todayRecord = sortedTodayRecords[0];
 
   const rawHistory = attendance.filter(a => 
     a.employeeId === activeEmployee?.id || 
@@ -618,6 +617,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   };
 
   const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   const handleSelfCheckOut = async () => {
     triggerHaptic('warning');
@@ -629,11 +629,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     );
     if (!isFinal) return;
 
+    setIsCheckingOut(true);
     triggerHaptic('medium');
     setActionFeedback(null);
     
     const res = await recordCheckOut(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     
+    setIsCheckingOut(false);
     if (res.success) triggerHaptic('success');
     else triggerHaptic('error');
     
@@ -1026,7 +1028,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     );
                   })()}
 
-                  {isCeoOrCto ? (
+                  {/* Loading Guard: Never flash 'Tap to Check In' until Firestore emits initial snapshot */}
+                  {attendanceSyncStatus === 'loading' ? (
+                    <div className="relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] border-slate-700 bg-slate-900 text-slate-400 text-center p-4">
+                      <Loader2 className="w-10 h-10 mb-2 animate-spin text-blue-400" />
+                      <span className="font-bold text-xs tracking-wide text-white">Syncing Shift...</span>
+                      <span className="text-[10px] text-slate-500 mt-1">Live Firestore</span>
+                    </div>
+                  ) : isCeoOrCto ? (
                     <div className="relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] border-purple-500/50 bg-gradient-to-b from-purple-950/40 to-slate-900 text-purple-300 shadow-xl shadow-purple-950/50 text-center p-4">
                       <ShieldCheck className="w-10 h-10 mb-2 text-purple-400 animate-pulse" />
                       <span className="font-extrabold text-sm tracking-wide text-white">Executive Officer</span>
@@ -1037,7 +1046,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   ) : !todayRecord?.checkInAt ? (
                     <button 
                       onClick={handleSelfCheckIn} 
-                      disabled={isCheckingIn}
+                      disabled={isCheckingIn || isCheckingOut}
                       className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] transition-all cursor-pointer outline-none ${
                         isCheckingIn 
                           ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
@@ -1064,14 +1073,24 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       {/* Circle 1: Checked In Status */}
                       <button 
                         onClick={handleSelfCheckOut}
+                        disabled={isCheckingOut || isCheckingIn}
                         className={`relative flex flex-col items-center justify-center w-[160px] h-[160px] sm:w-[170px] sm:h-[170px] rounded-full border-[3px] border-[var(--accent-emerald)] bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] shadow-[var(--shadow-glow-emerald)] transition-all cursor-pointer outline-none ${animations.tap}`}
                       >
                         <div className="absolute inset-0 bg-[var(--gradient-success)] opacity-10 rounded-full" />
-                        <CheckCircle2 className="w-10 h-10 mb-2" strokeWidth={2} />
-                        <span className="font-bold text-xs sm:text-sm tracking-wide">Checked In</span>
-                        <span className="text-[10px] font-mono mt-1 opacity-80">
-                          {toISTTimeString(todayRecord.checkInAt)}
-                        </span>
+                        {isCheckingOut ? (
+                          <>
+                            <Loader2 className="w-10 h-10 mb-2 animate-spin text-[var(--accent-emerald)]" />
+                            <span className="font-semibold text-xs">Checking Out...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-10 h-10 mb-2" strokeWidth={2} />
+                            <span className="font-bold text-xs sm:text-sm tracking-wide">Checked In</span>
+                            <span className="text-[10px] font-mono mt-1 opacity-80">
+                              {toISTTimeString(todayRecord.checkInAt)}
+                            </span>
+                          </>
+                        )}
                       </button>
 
                       {/* Circle 2: Active Break Live Timer (Dynamic Color & Icon) */}

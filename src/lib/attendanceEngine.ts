@@ -1,6 +1,74 @@
 import { CompanySettings, Employee, AttendanceRecord } from '../types';
 
 /**
+ * Standard Company Timezone for Attendance & Work-Day calculations (IST)
+ */
+export const COMPANY_TIMEZONE = 'Asia/Kolkata';
+
+/**
+ * Resolves the work-day date string (YYYY-MM-DD) strictly in the target employee timezone.
+ * Canonical single helper used across all portals (Employee, Admin, HR, PM).
+ */
+export function getEmployeeWorkDate(
+  dateInput: Date | string | number = new Date(),
+  timeZone: string = COMPANY_TIMEZONE
+): string {
+  const d = typeof dateInput === 'string' || typeof dateInput === 'number'
+    ? new Date(dateInput)
+    : dateInput;
+
+  // Format YYYY-MM-DD in employee's operational timezone
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return formatter.format(d);
+}
+
+/**
+ * Deterministic Doc ID generator: attendance/{uid}_{YYYY-MM-DD}
+ */
+export function getAttendanceDocId(uid: string, dateStr: string): string {
+  const cleanUid = String(uid || '').trim();
+  const cleanDate = String(dateStr || '').trim();
+  return `${cleanUid}_${cleanDate}`;
+}
+
+/**
+ * Universal canonical employee UID resolver
+ */
+export function getCanonicalEmployeeUid(empOrUid: any, fallbackUserUid?: string): string {
+  if (!empOrUid && fallbackUserUid) return fallbackUserUid.trim();
+  if (typeof empOrUid === 'string') return empOrUid.trim();
+  const uid = empOrUid?.uid || empOrUid?.employeeUid || fallbackUserUid || empOrUid?.id || empOrUid?.employeeId || '';
+  return String(uid).trim();
+}
+
+/**
+ * Safe parser to convert any Firestore Timestamp / Date / ISO string into standard ISO string.
+ * Returns null if absent, undefined, or empty (preventing crashes on checkOutAt).
+ */
+export function formatTimestampToISO(val: any): string | null {
+  if (!val) return null;
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    return trimmed === '' ? null : trimmed;
+  }
+  if (val && typeof val.toDate === 'function') {
+    return val.toDate().toISOString();
+  }
+  if (val && typeof val.seconds === 'number') {
+    return new Date(val.seconds * 1000 + (val.nanoseconds || 0) / 1e6).toISOString();
+  }
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return val.toISOString();
+  }
+  return null;
+}
+
+/**
  * Haversine formula to calculate distance between two GPS points in meters
  */
 export function calculateGpsDistanceMeters(

@@ -173,6 +173,7 @@ export interface WorkZone {
 
 export interface AttendanceRecord {
   id: string;
+  uid?: string; // Canonical Employee UID anchor
   employeeUid?: string; // Linked Firebase Auth UID
   employeeId: string;
   employeeCode: string;

@@ -38,6 +38,7 @@ import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
 import { Employee, AttendanceRecord } from '../../types';
 
 interface DashboardViewProps {
@@ -177,7 +178,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
             onClick={async () => {
               if (isRestoringLogs) return;
               triggerHaptic();
-              const todayStr = new Date().toISOString().split('T')[0];
+              const todayStr = getEmployeeWorkDate(new Date());
               const checkinLogs = auditLogs.filter(log => log.action === 'ATTENDANCE_CHECKIN' && log.timestamp.startsWith(todayStr));
               if (checkinLogs.length === 0) {
                 alert('No check-ins found in Audit Logs for today.');
@@ -195,10 +196,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                   const empCode = match ? match[1] : log.target;
                   const emp = employees.find(e => e.employeeId === empCode || e.id === empCode);
                   if (emp) {
-                    const recordId = `att-${emp.employeeId}-${todayStr}`;
+                    const empUid = getCanonicalEmployeeUid(emp);
+                    const recordId = getAttendanceDocId(empUid, todayStr);
                     const status = log.details.includes('Status: Late') ? 'Late' : 'Present';
                     const newRecord = {
                       id: recordId,
+                      uid: empUid,
+                      employeeUid: empUid,
                       employeeId: emp.id,
                       employeeCode: emp.employeeId,
                       employeeName: emp.fullName,
@@ -213,7 +217,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                       createdAt: log.timestamp,
                       updatedAt: new Date().toISOString()
                     };
-                    await setDoc(doc(db, 'attendance', recordId), newRecord);
+                    await setDoc(doc(db, 'attendance', recordId), newRecord, { merge: true });
                     restored++;
                   }
                   setRestoreProgress({ current: i + 1, total: checkinLogs.length });

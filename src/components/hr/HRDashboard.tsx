@@ -20,6 +20,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
 
 interface HRDashboardProps {
   onNavigateTab: (tab: string, filters?: { dateFilter?: 'today' | 'yesterday' | 'all'; statusFilter?: string }) => void;
@@ -28,7 +29,7 @@ interface HRDashboardProps {
 export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   const { employees, attendance, leaveRequests, activeEmployee, checkIn, checkOut, startBreak, endBreak } = useAuth();
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getEmployeeWorkDate(new Date());
   const todayAttendance = (attendance || []).filter(a => a.date === todayStr);
 
   const targetEmployee = activeEmployee || employees.find(e => e.department?.toLowerCase().includes('hr') || e.role === 'HR_ADMIN') || employees[0];
@@ -54,9 +55,12 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   const pendingApprovalsCount = hrPendingRequests.length;
 
   // HR Personal Attendance Record for today
-  const hrAttendanceRecord = targetEmployee ? todayAttendance.find(a => a.employeeId === targetEmployee.id || a.employeeCode === targetEmployee.employeeId) : null;
+  const hrUid = getCanonicalEmployeeUid(targetEmployee);
+  const hrAttendanceRecord = targetEmployee 
+    ? todayAttendance.find(a => a.id === getAttendanceDocId(hrUid, todayStr) || a.employeeUid === hrUid || a.employeeId === targetEmployee.id || a.employeeCode === targetEmployee.employeeId) 
+    : null;
   const isHrCheckedIn = !!hrAttendanceRecord?.checkInAt && !hrAttendanceRecord?.checkOutAt;
-  const hrActiveBreak = hrAttendanceRecord?.breaks?.find(b => !b.endTime);
+  const hrActiveBreak = hrAttendanceRecord?.breaks?.find(b => !b.endAt && !b.endTime);
 
   const [hrActionLoading, setHrActionLoading] = useState(false);
   const [hrStatusMessage, setHrStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -129,7 +133,6 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     setHrStatusMessage(null);
 
     try {
-      // 1. Instant Check-Out Execution (0ms delay)
       const res = await checkOut(targetEmployee.id);
       if (res.success) {
         setHrStatusMessage({ type: 'success', text: res.message || 'HR Check-Out recorded successfully!' });
@@ -140,17 +143,6 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
       setHrStatusMessage({ type: 'error', text: err?.message || 'Check-Out failed.' });
     } finally {
       setHrActionLoading(false);
-    }
-
-    // 2. Asynchronous background GPS enrichment
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          checkOut(targetEmployee.id, pos.coords.latitude, pos.coords.longitude);
-        },
-        () => {},
-        { enableHighAccuracy: false, timeout: 2000 }
-      );
     }
   };
 

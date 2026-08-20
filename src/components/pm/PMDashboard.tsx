@@ -18,6 +18,7 @@ import {
 import { Project, LeaveRequest } from '../../types';
 import { db } from '../../lib/firebase';
 import { collection, onSnapshot, setDoc, doc } from 'firebase/firestore';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
 
 interface PMDashboardProps {
   onNavigateTab: (tab: string) => void;
@@ -71,7 +72,7 @@ const DEFAULT_PROJECTS: Project[] = [
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage } = useAuth();
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getEmployeeWorkDate(new Date());
 
   // Real-time Firestore Sync for PM Projects (Fixes P14 Contract)
   const [projects, setProjects] = useState<Project[]>(() => {

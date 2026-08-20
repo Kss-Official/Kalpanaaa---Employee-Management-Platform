@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
+import { getEmployeeWorkDate } from '../../lib/attendanceEngine';
 
 interface AttendanceManagementProps {
   initialDateFilter?: 'today' | 'yesterday' | 'all';
@@ -50,10 +51,10 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
   const [historyEmployee, setHistoryEmployee] = useState<Employee | null>(null);
   const [historyInitialRecord, setHistoryInitialRecord] = useState<AttendanceRecord | null>(null);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getEmployeeWorkDate(new Date());
   const yesterdayObj = new Date();
   yesterdayObj.setDate(yesterdayObj.getDate() - 1);
-  const yesterdayStr = yesterdayObj.toISOString().split('T')[0];
+  const yesterdayStr = getEmployeeWorkDate(yesterdayObj);
 
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
