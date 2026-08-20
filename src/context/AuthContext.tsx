@@ -927,10 +927,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         // Subscribe to attendance records (Single Source of Truth: Firestore only)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const thirtyDaysAgoStr = getEmployeeWorkDate(thirtyDaysAgo);
-        const attQuery = query(collection(db, 'attendance'), where('date', '>=', thirtyDaysAgoStr));
+        const attQuery = collection(db, 'attendance');
 
         let hasRunMigration = false;
 
@@ -1838,12 +1835,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         message: txResult.message, 
         record: {
           ...txResult.data,
-          checkInAt: formatTimestampToISO(txResult.data.checkInAt) || new Date().toISOString()
+          checkInAt: new Date().toISOString()
         } as AttendanceRecord
       };
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.WRITE, `attendance/${recordId}`);
-      return { success: false, message: `Check-In Transaction failed: ${err.message}` };
+      handleFirestoreError(err, OperationType.CREATE, `attendance/${recordId}`);
+      return { success: false, message: err.message || 'Check-In failed.' };
     }
   };
 
@@ -1851,10 +1848,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     employeeId: string, 
     lat?: number, 
     lon?: number, 
-    accuracy: number = 8,
+    accuracy?: number,
     customDate?: string
   ): Promise<{ success: boolean; message: string; record?: AttendanceRecord }> => {
-    if (!navigator.onLine) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
       return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-Out blocked.' };
     }
 
@@ -1865,7 +1862,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const empUid = getCanonicalEmployeeUid(emp, user?.uid);
     const todayStr = customDate || getEmployeeWorkDate(new Date());
-    const recordId = getAttendanceDocId(empUid, todayStr);
+
+    const existingRec = attendance.find(a => 
+      isAttendanceForEmployee(a, emp, todayStr)
+    );
+    const recordId = existingRec?.id || getAttendanceDocId(empUid, todayStr);
 
     const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
@@ -1975,7 +1976,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
     const empUid = getEmployeeKey(emp || employeeId, user?.uid);
     const todayStr = getWorkDate(new Date());
-    const recordId = getAttendanceDocId(empUid, todayStr);
+
+    const existingRec = attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
+    const recordId = existingRec?.id || getAttendanceDocId(empUid, todayStr);
     const docRef = doc(db, 'attendance', recordId);
 
     try {
@@ -2022,7 +2025,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
     const empUid = getEmployeeKey(emp || employeeId, user?.uid);
     const todayStr = getWorkDate(new Date());
-    const recordId = getAttendanceDocId(empUid, todayStr);
+
+    const existingRec = attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
+    const recordId = existingRec?.id || getAttendanceDocId(empUid, todayStr);
     const docRef = doc(db, 'attendance', recordId);
 
     try {

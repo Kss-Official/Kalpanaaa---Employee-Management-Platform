@@ -51,9 +51,20 @@ service cloud.firestore {
     }
 
     function isAttendanceOwner(recordId) {
-      return recordId.matches('^' + request.auth.uid + '_.*') ||
-        (resource != null && (resource.data.uid == request.auth.uid || resource.data.employeeUid == request.auth.uid)) ||
-        (request.resource != null && (request.resource.data.uid == request.auth.uid || request.resource.data.employeeUid == request.auth.uid));
+      return isSignedIn() && (
+        recordId.matches('^' + request.auth.uid + '_.*') ||
+        (resource != null && (
+          resource.data.uid == request.auth.uid || 
+          resource.data.employeeUid == request.auth.uid
+        )) ||
+        (request.resource != null && (
+          request.resource.data.uid == request.auth.uid || 
+          request.resource.data.employeeUid == request.auth.uid
+        )) ||
+        // Fallback for employeeId matching
+        (resource != null && 'employeeId' in resource.data && resource.data.employeeId == getEmployeeId()) ||
+        (request.resource != null && 'employeeId' in request.resource.data && request.resource.data.employeeId == getEmployeeId())
+      );
     }
 
     // Default Deny All
@@ -64,7 +75,7 @@ service cloud.firestore {
     // ── 1. Users Collection ──
     match /users/{userId} {
       allow read: if isSignedIn() && (
-        request.auth.uid == userId || isHrAdmin() || isSuperAdmin()
+        request.auth.uid == userId || isHrAdmin() || isSuperAdmin() || isProjectManager()
       );
       // Self-creation locks role strictly to 'EMPLOYEE'. Only SuperAdmin can provision privileged roles.
       allow create: if isSignedIn() && (
@@ -102,15 +113,13 @@ service cloud.firestore {
       
       // (a) Forbid creating duplicate doc; employee can create only their own doc
       allow create: if isSignedIn() && (
-        isSuperAdmin() || isHrAdmin() || (
-          isAttendanceOwner(recordId) && !exists(/databases/$(database)/documents/attendance/$(recordId))
-        )
+        isSuperAdmin() || isHrAdmin() || isProjectManager() ||
+        isAttendanceOwner(recordId)
       );
       
-      // (b) & (c) Forbid modifying checkInAt or overwriting existing checkOutAt
-      // Employees are restricted to updating ONLY checkout, break, and duration fields
+      // (b) & (c) Immutable checkInAt and checkOutAt; Field-level modification restriction for regular employees
       allow update: if isSignedIn() && (
-        isSuperAdmin() || isHrAdmin() || (
+        isSuperAdmin() || isHrAdmin() || isProjectManager() || (
           isAttendanceOwner(recordId) &&
           // Immutable checkInAt once recorded
           (!('checkInAt' in resource.data) || resource.data.checkInAt == null || request.resource.data.checkInAt == resource.data.checkInAt) &&

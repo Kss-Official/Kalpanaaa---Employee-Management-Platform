@@ -424,32 +424,51 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                           const rec = attendance.find(a => isAttendanceForEmployee(a, emp, d.dateStr));
 
                           let hours: number | null = null;
-                          if (rec && (rec.checkInAt || (rec.workingMinutes && rec.workingMinutes > 0))) {
-                            if (rec.workingMinutes && rec.workingMinutes > 0) {
+                          let isLive = false;
+
+                          if (rec) {
+                            // 1. Explicit workingMinutes stored and > 0
+                            if (typeof rec.workingMinutes === 'number' && rec.workingMinutes > 0) {
                               hours = Math.round((rec.workingMinutes / 60) * 10) / 10;
                             } else {
                               const startMs = safeGetTimestampMillis(rec.checkInAt);
-                              if (startMs) {
-                                const endMs = safeGetTimestampMillis(rec.checkOutAt) || Date.now();
-                                const diffMins = Math.max(0, Math.floor((endMs - startMs) / 60000));
-                                const breakMins = rec.totalBreakMinutes || (rec.breaks || []).reduce((acc, b) => acc + (b.durationMinutes || 0), 0) || 0;
-                                const netMins = Math.max(0, diffMins - breakMins);
-                                hours = Math.round((netMins / 60) * 10) / 10;
+                              const endMs = safeGetTimestampMillis(rec.checkOutAt);
+                              const totalBreakMins = rec.totalBreakMinutes || (rec.breaks || []).reduce((acc, b) => acc + (b.durationMinutes || 0), 0) || 0;
+
+                              if (startMs && endMs && endMs > startMs) {
+                                // Both check-in and check-out exist
+                                const diffMins = Math.max(0, Math.floor((endMs - startMs) / 60000) - totalBreakMins);
+                                hours = Math.round((diffMins / 60) * 10) / 10;
+                              } else if (startMs && d.dateStr === todayStr && !endMs) {
+                                // Live shift in progress today
+                                isLive = true;
+                                const liveMins = Math.max(0, Math.floor((Date.now() - startMs) / 60000) - totalBreakMins);
+                                hours = Math.round((liveMins / 60) * 10) / 10;
+                              } else if (startMs && d.dateStr < todayStr) {
+                                // Past workday check-in: standard shift hours (10:00 to 19:30 IST minus 1h break = 8.5h or actual diff)
+                                const autoShiftEndMs = new Date(`${d.dateStr}T19:30:00+05:30`).getTime();
+                                const effectiveEndMs = !isNaN(autoShiftEndMs) && autoShiftEndMs > startMs ? autoShiftEndMs : (startMs + 9.5 * 3600000);
+                                const diffMins = Math.max(0, Math.floor((effectiveEndMs - startMs) / 60000) - Math.max(60, totalBreakMins));
+                                hours = Math.max(7.5, Math.round((diffMins / 60) * 10) / 10);
+                              } else if (rec.status === 'Present' || rec.status === 'Work From Home' || rec.isWfh) {
+                                // Marked present or WFH on past day without timestamp
+                                hours = 8.5;
+                              } else if (rec.status === 'Half Day') {
+                                hours = 4.5;
                               }
                             }
                           }
 
-                          const hasCheckIn = hours !== null;
+                          const hasCheckIn = hours !== null && hours > 0;
 
                           return (
                             <td key={d.dateStr} className="py-3 px-2 text-center">
                               <span 
-                                title={hasCheckIn ? `${hours}h worked on ${d.dateStr}` : `No check-in on ${d.dateStr}`}
+                                title={hasCheckIn ? `${hours}h worked on ${d.dateStr}${isLive ? ' (Live)' : ''}` : `No check-in on ${d.dateStr}`}
                                 className={`inline-block min-w-[36px] px-1.5 h-8 rounded-lg font-mono font-bold text-xs leading-8 ${
                                   hasCheckIn && hours! >= 8.5 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
                                   hasCheckIn && hours! >= 7.5 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
                                   hasCheckIn && hours! > 0 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
-                                  hasCheckIn ? 'bg-slate-800/60 text-slate-400 border border-slate-700' :
                                   'bg-slate-950/60 text-slate-600 border border-slate-900'
                                 }`}
                               >
