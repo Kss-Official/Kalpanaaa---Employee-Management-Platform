@@ -107,32 +107,11 @@ service cloud.firestore {
       }
     }
 
-    // ── 3. Attendance Records (Atomic Owner-Scoped & Field Restricted) ──
+    // ── 3. Attendance Records (Live Workforce & Single Source of Truth) ──
     match /attendance/{recordId} {
       allow read: if isSignedIn();
-      
-      // (a) Forbid creating duplicate doc; employee can create only their own doc
-      allow create: if isSignedIn() && (
-        isSuperAdmin() || isHrAdmin() || isProjectManager() ||
-        isAttendanceOwner(recordId)
-      );
-      
-      // (b) & (c) Immutable checkInAt and checkOutAt; Field-level modification restriction for regular employees
-      allow update: if isSignedIn() && (
-        isSuperAdmin() || isHrAdmin() || isProjectManager() || (
-          isAttendanceOwner(recordId) &&
-          // Immutable checkInAt once recorded
-          (!('checkInAt' in resource.data) || resource.data.checkInAt == null || request.resource.data.checkInAt == resource.data.checkInAt) &&
-          // Immutable checkOutAt once recorded (cannot re-checkout or overwrite)
-          (!('checkOutAt' in resource.data) || resource.data.checkOutAt == null || request.resource.data.checkOutAt == resource.data.checkOutAt) &&
-          // Field-level modification restriction for regular employees
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'checkOutAt', 'updatedAt', 'breaks', 'totalBreakMinutes', 'workingMinutes',
-            'notes', 'locationAccuracy', 'distanceFromOffice', 'locationVerified', 'isWfh', 'status'
-          ])
-        )
-      );
-      
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
       allow delete: if isSuperAdmin();
     }
 

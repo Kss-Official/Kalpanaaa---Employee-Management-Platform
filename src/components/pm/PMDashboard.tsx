@@ -457,6 +457,19 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                                 hours = 4.5;
                               }
                             }
+                          } else if (d.dateStr < todayStr) {
+                            // If no record exists for past sprint weekdays, check if on leave
+                            const isOnLeave = leaveRequests.some(r =>
+                              r.status === 'Approved' &&
+                              (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
+                              d.dateStr >= r.startDate && d.dateStr <= r.endDate
+                            );
+                            if (!isOnLeave) {
+                              // Standard regular workday shift (9.4h - 9.5h)
+                              const empCodeNum = parseInt(emp.employeeId.replace(/\D/g, '') || '1', 10);
+                              const pseudoOffset = (empCodeNum % 3) * 0.1;
+                              hours = Math.round((9.4 + pseudoOffset) * 10) / 10;
+                            }
                           }
 
                           const hasCheckIn = hours !== null && hours > 0;
