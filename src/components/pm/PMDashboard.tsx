@@ -13,12 +13,21 @@ import {
   ChevronRight,
   Flame,
   FileText,
-  UserCheck
+  UserCheck,
+  Coffee,
+  Loader2
 } from 'lucide-react';
 import { Project, LeaveRequest } from '../../types';
 import { db } from '../../lib/firebase';
 import { collection, onSnapshot, setDoc, doc } from 'firebase/firestore';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
+import { 
+  getEmployeeWorkDate, 
+  getAttendanceDocId, 
+  getCanonicalEmployeeUid, 
+  isAttendanceForEmployee, 
+  safeGetTimestampMillis, 
+  formatTimestampToISO 
+} from '../../lib/attendanceEngine';
 
 interface PMDashboardProps {
   onNavigateTab: (tab: string) => void;
@@ -45,9 +54,9 @@ const DEFAULT_PROJECTS: Project[] = [
     description: 'Client-side TinyFaceDetector and MediaPipe liveness mesh.',
     client: 'Enterprise HRMS',
     startDate: '2026-07-15',
-    deadline: '2026-08-15',
-    status: 'On Track',
-    progressPercent: 88,
+    deadline: '2026-08-25',
+    status: 'In Progress',
+    progressPercent: 58,
     teamMemberIds: ['emp-3', 'emp-4'],
     managerId: 'pm-1',
     createdAt: '2026-07-15',
@@ -70,9 +79,35 @@ const DEFAULT_PROJECTS: Project[] = [
 ];
 
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
-  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage } = useAuth();
+  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak } = useAuth();
 
   const todayStr = getEmployeeWorkDate(new Date());
+
+  // PM's own live attendance record
+  const pmTodayRecord = attendance.find(a => isAttendanceForEmployee(a, activeEmployee, todayStr));
+  const isPmCheckedIn = !!pmTodayRecord?.checkInAt && !pmTodayRecord?.checkOutAt;
+  const activePmBreak = pmTodayRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
+  const [isBreakActionLoading, setIsBreakActionLoading] = useState(false);
+
+  const handlePmBreakToggle = async () => {
+    if (!activeEmployee) return;
+    if (!isPmCheckedIn) {
+      alert("You are not checked in yet today. Please check in first before taking a break.");
+      return;
+    }
+    setIsBreakActionLoading(true);
+    try {
+      if (activePmBreak) {
+        await endBreak(activeEmployee.id);
+      } else {
+        await startBreak(activeEmployee.id, 'Tea / Lunch Break');
+      }
+    } catch (e) {
+      console.error('Break action error:', e);
+    } finally {
+      setIsBreakActionLoading(false);
+    }
+  };
 
   // Real-time Firestore Sync for PM Projects (Fixes P14 Contract)
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -135,7 +170,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     for (let i = 0; i < 5; i++) {
       const d = new Date(mon);
       d.setDate(mon.getDate() + i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = getEmployeeWorkDate(d);
       const label = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][i];
       days.push({ label, dateStr });
     }
@@ -149,7 +184,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     if (r.pmStatus !== 'Pending' && r.pmStatus !== undefined) return false;
     if (r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') return false;
 
-    // Self-request check: PM cannot approve/reject their own request!
     if (
       r.employeeUid === activeEmployee?.uid ||
       r.employeeId === activeEmployee?.id ||
@@ -159,7 +193,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
       return false;
     }
 
-    // Exclude HR employees and PM/Executive applicants from PM leave approval pipeline
     const isHrOrPmEmployee = (r.department || '').toLowerCase().includes('hr') ||
       r.employeeRole === 'HR_ADMIN' ||
       r.employeeRole === 'PROJECT_MANAGER' ||
@@ -186,17 +219,38 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full lg:w-auto shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto shrink-0">
+          {/* PM Break & Duty Status Widget */}
+          <button
+            onClick={handlePmBreakToggle}
+            disabled={isBreakActionLoading || !isPmCheckedIn}
+            className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md ${
+              activePmBreak 
+                ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 animate-pulse font-extrabold'
+                : isPmCheckedIn
+                  ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30'
+                  : 'bg-slate-800/60 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-70'
+            }`}
+            title={!isPmCheckedIn ? 'Check in first to take a break' : activePmBreak ? 'End your active break' : 'Take a break'}
+          >
+            {isBreakActionLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Coffee className="w-4 h-4 text-amber-400" />
+            )}
+            <span>{activePmBreak ? 'End Break (Active)' : 'Take Break'}</span>
+          </button>
+
           <button
             onClick={() => onNavigateTab('leave_approvals')}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-purple-900/30 transition-all cursor-pointer w-full"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-purple-900/30 transition-all cursor-pointer flex-1 sm:flex-initial"
           >
             <FileText className="w-4 h-4" />
             <span>Leave Approvals ({pendingTeamRequests.length})</span>
           </button>
           <button
             onClick={() => onNavigateTab('pm_projects')}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-blue-900/30 transition-all cursor-pointer w-full"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-blue-900/30 transition-all cursor-pointer flex-1 sm:flex-initial"
           >
             <Kanban className="w-4 h-4" />
             <span>Open Task Kanban Board</span>
@@ -218,85 +272,79 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
         <div className="space-y-3 pt-1">
           {pendingTeamRequests.length === 0 ? (
-            <div className="py-8 px-4 text-center rounded-2xl bg-slate-950/50 border border-slate-800/80 space-y-2">
-              <UserCheck className="w-8 h-8 text-purple-400/60 mx-auto" />
-              <p className="text-xs font-bold text-slate-300">No Pending Approvals</p>
-              <p className="text-[11px] text-slate-400 max-w-sm mx-auto">There are no team leave or WFH requests requiring PM review right now.</p>
+            <div className="text-center py-6 text-slate-500 text-xs">
+              <CheckCircle2 className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+              <p className="font-semibold text-slate-400">All caught up!</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">No pending employee leave or WFH requests requiring PM review.</p>
             </div>
           ) : (
-            pendingTeamRequests.map(req => {
-              const recStatus = req.pmRecommendation || req.pmStatus;
-
-              return (
-                <div key={req.id} className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:border-slate-700">
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-bold text-white">{req.employeeName}</span>
-                      <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md font-mono font-bold">
-                        {req.type}
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-medium">({req.department || 'Engineering'})</span>
-                    </div>
-                    <p className="text-xs text-slate-300 font-medium">{req.reason}</p>
-                    <p className="text-[11px] text-slate-400 font-mono">Duration: {req.startDate} → {req.endDate}</p>
+            pendingTeamRequests.map(req => (
+              <div 
+                key={req.id}
+                className="bg-slate-950/70 border border-slate-800 hover:border-purple-500/40 rounded-2xl p-3.5 sm:p-4 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-white">{req.employeeName}</span>
+                    <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                      {req.department}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      req.type === 'WFH' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    }`}>
+                      {req.type}
+                    </span>
                   </div>
-
-                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                    {recStatus === 'Approved' ? (
-                      <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> PM Approved
-                      </span>
-                    ) : recStatus === 'Rejected' || recStatus === 'Flagged' ? (
-                      <span className="text-xs font-bold text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-xl border border-rose-500/30 flex items-center gap-1.5">
-                        <XCircle className="w-3.5 h-3.5" /> PM Rejected
-                      </span>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => handleRecommend(req.id, 'Approved')}
-                          className="px-3.5 py-1.5 bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Approve
-                        </button>
-                        <button
-                          onClick={() => {
-                            setRejectModalReq(req);
-                            setCustomRejectReason('Sprint 14 Deadline Conflict — Key deliverable scheduled during request dates');
-                          }}
-                          className="px-3.5 py-1.5 bg-rose-600/20 text-rose-300 hover:bg-rose-600/30 border border-rose-500/30 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
-                        >
-                          <XCircle className="w-3.5 h-3.5" /> Reject (Sprint Conflict)
-                        </button>
-                      </>
-                    )}
-                  </div>
+                  <p className="text-xs text-slate-300">
+                    <span className="font-semibold text-purple-300">{req.startDate}</span> to <span className="font-semibold text-purple-300">{req.endDate}</span> ({req.durationDays || 1} day{(req.durationDays || 1) > 1 ? 's' : ''})
+                  </p>
+                  <p className="text-[11px] text-slate-400 italic bg-slate-900/60 p-2 rounded-lg border border-slate-800/60 mt-1">
+                    "{req.reason}"
+                  </p>
                 </div>
-              );
-            })
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleRecommend(req.id, 'Approved')}
+                    className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-950/40 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Recommend</span>
+                  </button>
+                  <button
+                    onClick={() => setRejectModalReq(req)}
+                    className="flex-1 sm:flex-initial px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    <span>Flag Conflict</span>
+                  </button>
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>
 
       {/* Zone 2: Project Health Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {projects.map(proj => (
-          <div
+          <div 
             key={proj.id}
-            onClick={() => onNavigateTab('pm_projects')}
-            className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 p-4 sm:p-5 rounded-2xl shadow-md transition-all cursor-pointer group space-y-3.5"
+            className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-3xl p-5 shadow-lg flex flex-col justify-between space-y-4 group transition-all"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                proj.status === 'On Track' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
-                proj.status === 'In Progress' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
-                'bg-amber-500/10 border-amber-500/30 text-amber-400'
-              }`}>
-                ● {proj.status}
-              </span>
-              <span className="text-[10px] font-mono text-slate-400">Due {proj.deadline}</span>
-            </div>
-
             <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  {proj.client}
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                  proj.status === 'In Progress' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                  proj.status === 'At Risk' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                  'bg-slate-800 text-slate-400'
+                }`}>
+                  {proj.status}
+                </span>
+              </div>
               <h3 className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors leading-snug">{proj.name}</h3>
               <p className="text-xs text-slate-400 line-clamp-2 mt-1 leading-relaxed">{proj.description}</p>
             </div>
@@ -321,18 +369,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
       {/* Zone 3: Team Workload Heatmap Grid */}
       {(() => {
+        // Pure role-based filter: Super Admins & HR Admins excluded; EMPLOYEE and PROJECT_MANAGER included
         const teamMembersOnly = employees.filter(emp => {
-          const empName = (emp.fullName || '').toLowerCase();
-          const empDesig = (emp.designation || '').toLowerCase();
-          const empId = (emp.employeeId || '').toUpperCase();
-
-          const isExecutive = empId === 'CEO001' || empId === 'CTO001' || empId === 'KSS2407001' || empId === 'KSS2407002' || empId === 'KSS2407014' ||
-            empName.includes('gaurav') || empName.includes('akshit') ||
-            empDesig.includes('ceo') || empDesig.includes('cto') || empDesig.includes('founder') || empDesig.includes('cio');
-
-          const isHr = emp.role === 'HR_ADMIN' || empName.includes('abhinaya') || (emp.department || '').toLowerCase().includes('hr');
-
-          return !isExecutive && !isHr;
+          return emp.role !== 'SUPER_ADMIN' && emp.role !== 'HR_ADMIN';
         });
 
         return (
@@ -346,11 +385,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-slate-800/80 custom-scrollbar">
-              {/* Mobile Scroll Helper Indicator */}
-              <div className="sm:hidden px-3.5 py-2 bg-slate-950 border-b border-slate-800 text-[10px] text-slate-400 font-mono flex items-center justify-between">
-                <span>← Swipe table left/right to view weekly hours →</span>
-                <span className="text-blue-400 font-bold">5 Days</span>
-              </div>
               <table className="w-full text-left text-xs min-w-[720px]">
                 <thead>
                   <tr className="text-slate-500 font-bold uppercase text-[10px] bg-slate-950/50">
@@ -364,7 +398,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                 </thead>
                 <tbody className="divide-y divide-slate-800/50 font-semibold">
                   {teamMembersOnly.map(emp => {
-                    const empAtt = attendance.find(a => (a.employeeId === emp.id || a.employeeCode === emp.employeeId) && a.date === todayStr);
+                    const empAtt = attendance.find(a => isAttendanceForEmployee(a, emp, todayStr));
                     const isCheckedIn = !!empAtt?.checkInAt;
                     const isWfh = isCheckedIn && (empAtt?.isWfh === true || empAtt?.status === 'Work From Home');
 
@@ -386,25 +420,23 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                           <span className="text-[10px] text-slate-500">{emp.designation}</span>
                         </td>
 
-                        {/* Real Hours Calculated per Date */}
+                        {/* Real Hours Calculated per Date via Safe Parsing */}
                         {weekDays.map(d => {
-                          const rec = attendance.find(a => 
-                            (a.employeeId === emp.id || 
-                             a.employeeCode === emp.employeeId || 
-                             (a.employeeName && emp.fullName && a.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
-                            a.date === d.dateStr
-                          );
+                          const rec = attendance.find(a => isAttendanceForEmployee(a, emp, d.dateStr));
 
                           let hours = 0;
                           if (rec) {
                             if (rec.workingMinutes && rec.workingMinutes > 0) {
                               hours = Math.round((rec.workingMinutes / 60) * 10) / 10;
-                            } else if (rec.checkInAt) {
-                              const end = rec.checkOutAt ? new Date(rec.checkOutAt).getTime() : Date.now();
-                              const diffMins = Math.max(0, Math.floor((end - new Date(rec.checkInAt).getTime()) / 60000));
-                              const breakMins = rec.totalBreakMinutes || 0;
-                              const netMins = Math.max(0, diffMins - breakMins);
-                              hours = Math.round((netMins / 60) * 10) / 10;
+                            } else {
+                              const startMs = safeGetTimestampMillis(rec.checkInAt);
+                              if (startMs) {
+                                const endMs = safeGetTimestampMillis(rec.checkOutAt) || Date.now();
+                                const diffMins = Math.max(0, Math.floor((endMs - startMs) / 60000));
+                                const breakMins = rec.totalBreakMinutes || (rec.breaks || []).reduce((acc, b) => acc + (b.durationMinutes || 0), 0) || 0;
+                                const netMins = Math.max(0, diffMins - breakMins);
+                                hours = Math.round((netMins / 60) * 10) / 10;
+                              }
                             }
                           }
 
@@ -429,11 +461,11 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                             </span>
                           ) : isCheckedIn ? (
                             <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-                              On Duty
+                              On Duty (Office)
                             </span>
                           ) : (
-                            <span className="text-[10px] font-bold text-slate-400 bg-slate-800/60 px-2.5 py-1 rounded-lg border border-slate-700">
-                              Offline
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-800/50 px-2.5 py-1 rounded-lg border border-slate-700/50">
+                              Off Duty
                             </span>
                           )}
                         </td>
@@ -447,60 +479,46 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         );
       })()}
 
-      {/* PM Sprint Conflict / Rejection Reason Modal (Fixes P16) */}
+      {/* Modal for Custom Rejection Reason */}
       {rejectModalReq && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-md bg-[#0f172a] border border-rose-500/30 rounded-3xl shadow-2xl overflow-hidden text-white p-6 space-y-4"
-          >
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="font-bold text-white text-base flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
-                  <span>PM Sprint Conflict Rejection</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Specify the exact sprint conflict reason for rejecting <strong className="text-white">{rejectModalReq.employeeName}</strong>'s {rejectModalReq.type} request.
-                </p>
-              </div>
-            </div>
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl space-y-4">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+              <span>Flag Sprint / Workload Conflict</span>
+            </h3>
+            <p className="text-xs text-slate-400">
+              Provide a sprint conflict note for <strong className="text-white">{rejectModalReq.employeeName}</strong>. This will be transmitted directly to HR.
+            </p>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5">Sprint Conflict Reason / Notes:</label>
-              <textarea
-                rows={3}
-                value={customRejectReason}
-                onChange={(e) => setCustomRejectReason(e.target.value)}
-                className="w-full bg-[#0b1324] border border-slate-800 focus:border-rose-500 rounded-xl p-3 text-xs text-white font-medium focus:outline-none"
-                placeholder="Enter sprint conflict details..."
-              />
-            </div>
+            <textarea
+              rows={3}
+              value={customRejectReason}
+              onChange={(e) => setCustomRejectReason(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-rose-500/50"
+              placeholder="e.g. Critical release milestone during requested dates..."
+            />
 
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="flex justify-end gap-2 pt-2">
               <button
-                type="button"
                 onClick={() => setRejectModalReq(null)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                type="button"
                 onClick={() => {
                   handleRecommend(rejectModalReq.id, 'Flagged', customRejectReason);
                   setRejectModalReq(null);
                 }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-rose-950/40"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-rose-950/50 cursor-pointer"
               >
-                Confirm Rejection
+                Submit Conflict to HR
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
     </div>
   );
 };
-// Clean HMR trigger

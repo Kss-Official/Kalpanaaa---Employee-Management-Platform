@@ -47,25 +47,136 @@ export function getCanonicalEmployeeUid(empOrUid: any, fallbackUserUid?: string)
 }
 
 /**
- * Safe parser to convert any Firestore Timestamp / Date / ISO string into standard ISO string.
- * Returns null if absent, undefined, or empty (preventing crashes on checkOutAt).
+ * Safe parser to convert any Firestore Timestamp / Date / ISO string / number into standard ISO string.
+ * Returns null if absent, undefined, or empty (preventing crashes or NaNs on checkOutAt/checkInAt).
  */
 export function formatTimestampToISO(val: any): string | null {
-  if (!val) return null;
+  if (val === null || val === undefined) return null;
   if (typeof val === 'string') {
     const trimmed = val.trim();
-    return trimmed === '' ? null : trimmed;
+    if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
+    const d = new Date(trimmed);
+    return isNaN(d.getTime()) ? null : d.toISOString();
   }
   if (val && typeof val.toDate === 'function') {
-    return val.toDate().toISOString();
+    try {
+      return val.toDate().toISOString();
+    } catch {
+      return null;
+    }
+  }
+  if (val && typeof val.toMillis === 'function') {
+    try {
+      return new Date(val.toMillis()).toISOString();
+    } catch {
+      return null;
+    }
   }
   if (val && typeof val.seconds === 'number') {
     return new Date(val.seconds * 1000 + (val.nanoseconds || 0) / 1e6).toISOString();
+  }
+  if (typeof val === 'number') {
+    if (isNaN(val) || val <= 0) return null;
+    // Handle seconds vs milliseconds
+    const millis = val < 1e11 ? val * 1000 : val;
+    return new Date(millis).toISOString();
   }
   if (val instanceof Date && !isNaN(val.getTime())) {
     return val.toISOString();
   }
   return null;
+}
+
+/**
+ * Returns epoch timestamp in milliseconds, never NaN.
+ * Returns null if invalid or absent.
+ */
+export function safeGetTimestampMillis(val: any): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number') {
+    if (isNaN(val) || val <= 0) return null;
+    return val < 1e11 ? val * 1000 : val;
+  }
+  if (val && typeof val.toMillis === 'function') {
+    try {
+      const ms = val.toMillis();
+      return isNaN(ms) ? null : ms;
+    } catch {
+      return null;
+    }
+  }
+  if (val && typeof val.toDate === 'function') {
+    try {
+      const ms = val.toDate().getTime();
+      return isNaN(ms) ? null : ms;
+    } catch {
+      return null;
+    }
+  }
+  if (val && typeof val.seconds === 'number') {
+    return val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1e6);
+  }
+  if (val instanceof Date) {
+    const ms = val.getTime();
+    return isNaN(ms) ? null : ms;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
+    const ms = new Date(trimmed).getTime();
+    return isNaN(ms) ? null : ms;
+  }
+  return null;
+}
+
+/**
+ * Canonical record identity matcher to check if an AttendanceRecord belongs to an employee.
+ * Resolves Firebase Auth UID, employee code (e.g. KSS2407014), database id, and names across all portals.
+ */
+export function isAttendanceForEmployee(
+  rec: AttendanceRecord | undefined | null,
+  employeeOrUid: any,
+  targetDate?: string
+): boolean {
+  if (!rec || !employeeOrUid) return false;
+
+  if (targetDate && rec.date !== targetDate) return false;
+
+  const targetUid = getCanonicalEmployeeUid(employeeOrUid);
+  const targetCode = String(
+    typeof employeeOrUid === 'string'
+      ? employeeOrUid
+      : (employeeOrUid?.employeeId || employeeOrUid?.employeeCode || employeeOrUid?.id || '')
+  ).trim().toLowerCase();
+  const targetId = String(
+    typeof employeeOrUid === 'string'
+      ? employeeOrUid
+      : (employeeOrUid?.id || employeeOrUid?.employeeId || '')
+  ).trim().toLowerCase();
+  const targetName = String(
+    typeof employeeOrUid === 'object' && employeeOrUid?.fullName
+      ? employeeOrUid.fullName
+      : ''
+  ).trim().toLowerCase();
+
+  const recUid = String(rec.uid || rec.employeeUid || '').trim();
+  const recEmpId = String(rec.employeeId || '').trim().toLowerCase();
+  const recEmpCode = String(rec.employeeCode || '').trim().toLowerCase();
+  const recName = String(rec.employeeName || '').trim().toLowerCase();
+
+  if (targetUid && (recUid === targetUid || rec.id === `${targetUid}_${rec.date}` || rec.id.startsWith(`${targetUid}_`))) {
+    return true;
+  }
+  if (targetCode && (recEmpCode === targetCode || recEmpId === targetCode)) {
+    return true;
+  }
+  if (targetId && (recEmpId === targetId || recEmpCode === targetId)) {
+    return true;
+  }
+  if (targetName && recName && targetName === recName) {
+    return true;
+  }
+  return false;
 }
 
 /**

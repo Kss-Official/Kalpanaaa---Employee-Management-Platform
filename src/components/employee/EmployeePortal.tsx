@@ -56,7 +56,15 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
-import { generateEmployeeQrToken, calculateGpsDistanceMeters, getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
+import { 
+  generateEmployeeQrToken, 
+  calculateGpsDistanceMeters, 
+  getEmployeeWorkDate, 
+  getAttendanceDocId, 
+  getCanonicalEmployeeUid, 
+  isAttendanceForEmployee, 
+  safeGetTimestampMillis 
+} from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
@@ -187,23 +195,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   // Canonical Work-day date in employee timezone
   const todayStr = getEmployeeWorkDate(new Date());
-  const activeUid = getCanonicalEmployeeUid(activeEmployee, user?.uid);
-  const todayRecord = attendance.find(a => 
-    (a.id === getAttendanceDocId(activeUid, todayStr) || 
-     a.employeeUid === activeUid || 
-     a.uid === activeUid || 
-     a.employeeId === activeEmployee?.id || 
-     a.employeeCode === activeEmployee?.employeeId) && 
-    a.date === todayStr
-  );
+  const todayRecord = attendance.find(a => isAttendanceForEmployee(a, activeEmployee, todayStr));
 
-  const rawHistory = attendance.filter(a => 
-    a.employeeId === activeEmployee?.id || 
-    a.employeeId === activeEmployee?.employeeId ||
-    a.employeeCode === activeEmployee?.employeeId ||
-    a.employeeCode === activeEmployee?.id ||
-    (a.employeeName && activeEmployee?.fullName && a.employeeName.toLowerCase() === activeEmployee.fullName.toLowerCase())
-  );
+  const rawHistory = attendance.filter(a => isAttendanceForEmployee(a, activeEmployee));
   const empHistory = rawHistory.filter(rec => {
     if (attendanceFilter === 'All') return true;
     if (attendanceFilter === 'Leave') return rec.status === 'On Leave' || rec.status === 'Leave';
@@ -218,24 +212,20 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Sync activeBreak from today's record (Fixes E36 Break Type Aliasing & Latest Break Selection)
   useEffect(() => {
     if (todayRecord?.breaks && todayRecord.breaks.length > 0) {
-      // Sort breaks by start time ascending to find the most recent chronological entry
-      const sortedBreaks = [...todayRecord.breaks].sort((a, b) => 
-        new Date(a.startAt || (a as any).startTime || 0).getTime() - new Date(b.startAt || (b as any).startTime || 0).getTime()
-      );
-      const lastBreak = sortedBreaks[sortedBreaks.length - 1];
-      if (lastBreak && !lastBreak.endAt && !(lastBreak as any).endTime) {
-        const normalizedType = normalizeBreakType(lastBreak.type);
-        setActiveBreak({ type: normalizedType, startAt: lastBreak.startAt || (lastBreak as any).startTime });
-        return;
+      const openBreak = todayRecord.breaks.find(b => !b.endAt && !(b as any).endTime);
+      if (openBreak) {
+        setActiveBreak({
+          type: openBreak.type,
+          startAt: openBreak.startAt || (openBreak as any).startTime || new Date().toISOString()
+        });
+      } else {
+        setActiveBreak(null);
       }
+    } else {
+      setActiveBreak(null);
     }
-    setActiveBreak(null);
-  }, [todayRecord?.id, JSON.stringify(todayRecord?.breaks)]);
-
-  // Sync WFH flag from today's record
-  useEffect(() => {
-    setIsWfh(todayRecord?.isWfh ?? false);
-  }, [todayRecord?.id, todayRecord?.isWfh]);
+    setIsWfh(!!todayRecord?.isWfh || todayRecord?.status === 'Work From Home');
+  }, [todayRecord]);
 
   // Multi-Device Real-Time Live Shift Sync (Fixes E37 Contract)
   const [, setLiveSyncTick] = useState(0);
@@ -249,8 +239,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Break live timer ticker
   useEffect(() => {
     if (!activeBreak) { setBreakElapsedSec(0); return; }
+    const startMs = safeGetTimestampMillis(activeBreak.startAt);
+    if (!startMs) { setBreakElapsedSec(0); return; }
     const calc = () => {
-      setBreakElapsedSec(Math.max(0, Math.floor((Date.now() - new Date(activeBreak.startAt).getTime()) / 1000)));
+      setBreakElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
     };
     calc();
     const interval = setInterval(calc, 1000);
@@ -260,23 +252,24 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Live WORK seconds ticker — pauses when on a break, resumes when break ends
   const [liveWorkSec, setLiveWorkSec] = useState(0);
   useEffect(() => {
-    if (!todayRecord?.checkInAt || todayRecord?.checkOutAt) {
+    const startMs = safeGetTimestampMillis(todayRecord?.checkInAt);
+    const endMs = safeGetTimestampMillis(todayRecord?.checkOutAt);
+    if (!startMs || endMs) {
       setLiveWorkSec(0);
       return;
     }
     const computeWorkSec = () => {
-      const totalElapsedMs = Date.now() - new Date(todayRecord.checkInAt!).getTime();
-      const completedBreakMs = (todayRecord.totalBreakMinutes || 0) * 60000;
-      // If a break is currently active, subtract its elapsed time too (work is paused)
-      const activeBreakMs = activeBreak
-        ? Math.max(0, Date.now() - new Date(activeBreak.startAt).getTime())
+      const totalElapsedMs = Date.now() - startMs;
+      const completedBreakMs = (todayRecord?.totalBreakMinutes || 0) * 60000;
+      const activeBreakStartMs = safeGetTimestampMillis(activeBreak?.startAt);
+      const activeBreakMs = activeBreak && activeBreakStartMs
+        ? Math.max(0, Date.now() - activeBreakStartMs)
         : 0;
       const workMs = Math.max(0, totalElapsedMs - completedBreakMs - activeBreakMs);
       setLiveWorkSec(Math.floor(workMs / 1000));
     };
     computeWorkSec();
-    // Only tick every second when NOT on a break (work timer is frozen on break)
-    if (activeBreak) return; // timer frozen — break ticker handles its own countdown
+    if (activeBreak) return;
     const interval = setInterval(computeWorkSec, 1000);
     return () => clearInterval(interval);
   }, [todayRecord?.checkInAt, todayRecord?.checkOutAt, todayRecord?.totalBreakMinutes, activeBreak, JSON.stringify(todayRecord)]);
@@ -287,21 +280,22 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const calculateWorkHours = (record?: any) => {
     if (!record) return '0h 0m';
-    if (record.workingMinutes) {
+    if (record.workingMinutes && record.workingMinutes > 0) {
       const hrs = Math.floor(record.workingMinutes / 60);
       const mins = record.workingMinutes % 60;
       return `${hrs}h ${mins}m`;
     }
-    if (record.checkInAt && record.checkOutAt) {
-      const totalMs = new Date(record.checkOutAt).getTime() - new Date(record.checkInAt).getTime();
+    const startMs = safeGetTimestampMillis(record.checkInAt);
+    const endMs = safeGetTimestampMillis(record.checkOutAt);
+    if (startMs && endMs) {
+      const totalMs = Math.max(0, endMs - startMs);
       const breakMs = (record.totalBreakMinutes || 0) * 60000;
       const workMs = Math.max(0, totalMs - breakMs);
       const hrs = Math.floor(workMs / 3600000);
       const mins = Math.floor((workMs % 3600000) / 60000);
       return `${hrs}h ${mins}m`;
     }
-    if (record.checkInAt) {
-      // Live: use liveWorkSec for real-time accuracy
+    if (startMs) {
       const hrs = Math.floor(liveWorkSec / 3600);
       const mins = Math.floor((liveWorkSec % 3600) / 60);
       const secs = liveWorkSec % 60;

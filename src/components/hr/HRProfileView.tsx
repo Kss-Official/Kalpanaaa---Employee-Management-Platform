@@ -28,7 +28,7 @@ import {
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, safeGetTimestampMillis } from '../../lib/attendanceEngine';
 
 export const HRProfileView: React.FC = () => {
   const { triggerHaptic } = useHaptic();
@@ -61,24 +61,23 @@ export const HRProfileView: React.FC = () => {
 
   // Today's Date & Attendance Record (Canonical timezone)
   const todayStr = getEmployeeWorkDate(new Date());
-  const hrUid = getCanonicalEmployeeUid(targetEmployee);
   const myTodayRecord = targetEmployee 
-    ? attendance.find(a => (a.id === getAttendanceDocId(hrUid, todayStr) || a.employeeUid === hrUid || a.employeeId === targetEmployee.id || a.employeeCode === targetEmployee.employeeId) && a.date === todayStr) 
+    ? attendance.find(a => isAttendanceForEmployee(a, targetEmployee, todayStr)) 
     : null;
 
   const isCheckedIn = !!myTodayRecord?.checkInAt && !myTodayRecord?.checkOutAt;
   const activeBreak = myTodayRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
 
-  // Live Timer for Working Hours
+  // Live Timer for Working Hours (Safe timestamp parsing, never NaN)
   const [workingSeconds, setWorkingSeconds] = useState(0);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isCheckedIn && myTodayRecord?.checkInAt) {
+    const startMs = safeGetTimestampMillis(myTodayRecord?.checkInAt);
+    if (isCheckedIn && startMs) {
       const calculateSeconds = () => {
-        const start = new Date(myTodayRecord.checkInAt!).getTime();
         const now = Date.now();
-        const diffSecs = Math.max(0, Math.floor((now - start) / 1000));
+        const diffSecs = Math.max(0, Math.floor((now - startMs) / 1000));
         setWorkingSeconds(diffSecs);
       };
       calculateSeconds();
@@ -122,16 +121,6 @@ export const HRProfileView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          checkIn(targetEmployee.id, pos.coords.latitude, pos.coords.longitude, 'WEB_APP', pos.coords.accuracy);
-        },
-        () => {},
-        { enableHighAccuracy: false, timeout: 2000 }
-      );
-    }
   };
 
   const handleCheckOut = async () => {
@@ -154,6 +143,10 @@ export const HRProfileView: React.FC = () => {
 
   const handleBreakToggle = async () => {
     if (!targetEmployee) return;
+    if (!isCheckedIn) {
+      toast.error('Please Check In first to start a break.');
+      return;
+    }
     setLoading(true);
 
     try {

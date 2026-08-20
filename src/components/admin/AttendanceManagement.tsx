@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
-import { getEmployeeWorkDate } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, safeGetTimestampMillis } from '../../lib/attendanceEngine';
 
 interface AttendanceManagementProps {
   initialDateFilter?: 'today' | 'yesterday' | 'all';
@@ -99,11 +99,11 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
     if (rec.workingMinutes && rec.workingMinutes > 0) {
       return `${Math.floor(rec.workingMinutes / 60)}h ${rec.workingMinutes % 60}m`;
     }
-    if (rec.checkInAt) {
+    const startMs = safeGetTimestampMillis(rec.checkInAt);
+    if (startMs) {
       const totalBreakMins = (rec.breaks || []).reduce((acc, b) => acc + (b.durationMinutes || 0), 0) || (rec.totalBreakMinutes || 0);
-      const endMs = rec.checkOutAt ? new Date(rec.checkOutAt).getTime() : Date.now();
-      const startMs = new Date(rec.checkInAt).getTime();
-      if (!isNaN(startMs) && !isNaN(endMs) && endMs > startMs) {
+      const endMs = safeGetTimestampMillis(rec.checkOutAt) || Date.now();
+      if (endMs > startMs) {
         const elapsedMins = Math.max(0, Math.floor((endMs - startMs) / 60000) - totalBreakMins);
         if (elapsedMins > 0) {
           return `${Math.floor(elapsedMins / 60)}h ${elapsedMins % 60}m${!rec.checkOutAt ? ' (Live)' : ''}`;
