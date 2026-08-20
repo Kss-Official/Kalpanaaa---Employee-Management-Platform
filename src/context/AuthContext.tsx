@@ -944,6 +944,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 employeeId: data.employeeCode || data.employeeId
               });
 
+              const matchedEmp = employees.find(e => 
+                e.id === data.employeeId || 
+                e.employeeId === data.employeeId || 
+                e.employeeId === data.employeeCode || 
+                e.uid === canonicalUid || 
+                e.uid === data.uid || 
+                e.id === canonicalUid ||
+                (e.fullName && data.employeeName && e.fullName.trim().toLowerCase() === String(data.employeeName).trim().toLowerCase())
+              );
+
+              const employeeName = data.employeeName || matchedEmp?.fullName || '';
+              const employeeCode = data.employeeCode || matchedEmp?.employeeId || data.employeeId || canonicalUid;
+              const employeeId = matchedEmp?.id || data.employeeId || canonicalUid;
+
               const dateStr = getWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (recId.includes('_') ? recId.split('_')[1] : new Date()));
               const checkInISO = formatTimestampToISO(data.checkInAt);
               const checkOutISO = formatTimestampToISO(data.checkOutAt);
@@ -954,11 +968,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 id: recId,
                 uid: canonicalUid,
                 employeeUid: canonicalUid,
-                employeeId: data.employeeId || canonicalUid,
-                employeeCode: data.employeeCode || data.employeeId || canonicalUid,
-                employeeName: data.employeeName || '',
-                department: data.department || 'Engineering',
-                pmUid: data.pmUid || '',
+                employeeId: employeeId,
+                employeeCode: employeeCode,
+                employeeName: employeeName,
+                department: data.department || matchedEmp?.department || 'Engineering',
+                pmUid: data.pmUid || matchedEmp?.pmUid || '',
                 date: dateStr,
                 checkInAt: checkInISO,
                 checkOutAt: checkOutISO,

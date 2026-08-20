@@ -210,19 +210,39 @@ export function isAttendanceForEmployee(
   const recEmpId = String(rec.employeeId || '').trim().toLowerCase();
   const recEmpCode = String(rec.employeeCode || '').trim().toLowerCase();
   const recName = String(rec.employeeName || '').trim().toLowerCase();
+  const recDocId = String(rec.id || '').trim().toLowerCase();
 
-  if (targetUid && (recUid === targetUid || rec.id === `${targetUid}_${rec.date}` || rec.id.startsWith(`${targetUid}_`))) {
-    return true;
+  // 1. Direct Employee Code matching (e.g. KSS2407005)
+  if (targetCode) {
+    if (recEmpCode === targetCode || recEmpId === targetCode || recDocId.includes(targetCode)) {
+      return true;
+    }
   }
-  if (targetCode && (recEmpCode === targetCode || recEmpId === targetCode || rec.id.includes(targetCode))) {
-    return true;
+
+  // 2. Database ID matching (e.g. emp-KSS2407005 or emp-1)
+  if (targetId) {
+    if (recEmpId === targetId || recEmpCode === targetId || recDocId.includes(targetId)) {
+      return true;
+    }
   }
-  if (targetId && (recEmpId === targetId || recEmpCode === targetId || rec.id.includes(targetId))) {
-    return true;
+
+  // 3. UID matching
+  if (targetUid) {
+    if (recUid === targetUid || recDocId.startsWith(`${targetUid.toLowerCase()}_`)) {
+      return true;
+    }
   }
-  if (targetName && recName && targetName === recName) {
-    return true;
+
+  // 4. Normalized Name matching (handles extra spaces, initials, and formatting variations)
+  if (targetName && recName) {
+    if (targetName === recName) return true;
+    const cleanTarget = targetName.replace(/[^a-z0-9]/g, '');
+    const cleanRec = recName.replace(/[^a-z0-9]/g, '');
+    if (cleanTarget && cleanRec && (cleanTarget === cleanRec || cleanTarget.includes(cleanRec) || cleanRec.includes(cleanTarget))) {
+      return true;
+    }
   }
+
   return false;
 }
 
