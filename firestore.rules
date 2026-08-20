@@ -26,14 +26,6 @@ service cloud.firestore {
       );
     }
 
-    function isCeo() {
-      return isSignedIn() && (getRole() == 'CEO' || (isSuperAdmin() && getUserDoc().executiveRole == 'CEO'));
-    }
-
-    function isCto() {
-      return isSignedIn() && (getRole() == 'CTO' || (isSuperAdmin() && getUserDoc().executiveRole == 'CTO'));
-    }
-
     function isHrAdmin() {
       return isSignedIn() && (
         getUserDoc().role == 'HR_ADMIN' || 
@@ -47,23 +39,6 @@ service cloud.firestore {
         getUserDoc().role == 'PROJECT_MANAGER' || 
         isSuperAdmin() ||
         (request.auth.token.role != null && (request.auth.token.role == 'PROJECT_MANAGER' || request.auth.token.role == 'project_manager' || request.auth.token.role == 'pm'))
-      );
-    }
-
-    function isAttendanceOwner(recordId) {
-      return isSignedIn() && (
-        recordId.matches('^' + request.auth.uid + '_.*') ||
-        (resource != null && (
-          resource.data.uid == request.auth.uid || 
-          resource.data.employeeUid == request.auth.uid
-        )) ||
-        (request.resource != null && (
-          request.resource.data.uid == request.auth.uid || 
-          request.resource.data.employeeUid == request.auth.uid
-        )) ||
-        // Fallback for employeeId matching
-        (resource != null && 'employeeId' in resource.data && resource.data.employeeId == getEmployeeId()) ||
-        (request.resource != null && 'employeeId' in request.resource.data && request.resource.data.employeeId == getEmployeeId())
       );
     }
 
