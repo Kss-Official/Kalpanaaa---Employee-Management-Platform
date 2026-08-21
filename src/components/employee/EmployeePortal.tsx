@@ -65,7 +65,9 @@ import {
   isAttendanceForEmployee, 
   resolveAttendanceRecord,
   isShiftComplete,
-  safeGetTimestampMillis 
+  safeGetTimestampMillis,
+  calculateBreakBreakdown,
+  calculateTotalBreakMinutes 
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
@@ -1257,43 +1259,8 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
                   {/* Live Productivity & Multi-Color Shift Distribution Meter */}
                   {(() => {
-                    let teaSecs = 0;
-                    let mealSecs = 0;
-                    let huddleSecs = 0;
-                    let meetingSecs = 0;
-                    let trainingSecs = 0;
-                    let activitySecs = 0;
-
-                    (todayRecord.breaks || []).forEach(b => {
-                      let durSec = 0;
-                      // BUG 2 FIX: Detect active break via !b.endAt (canonical, matches
-                      // Firestore schema) instead of `activeBreak?.startAt === b.startAt`
-                      // which failed when Firestore re-hydrated the ISO string slightly
-                      // differently, causing the bar to always report 100% Work.
-                      const isOngoing = !b.endAt && !(b as any).endTime;
-                      if (isOngoing) {
-                        // Use live elapsed seconds for the active (in-progress) break
-                        durSec = breakElapsedSec;
-                      } else if (b.durationMinutes && b.durationMinutes > 0) {
-                        durSec = Math.min(7200, b.durationMinutes * 60);
-                      } else if (b.startAt && b.endAt) {
-                        const diffSec = Math.floor((new Date(b.endAt).getTime() - new Date(b.startAt).getTime()) / 1000);
-                        durSec = Math.min(7200, Math.max(0, diffSec));
-                      }
-
-                      if (b.type === 'Tea Break') teaSecs += durSec;
-                      else if (b.type === 'Meal Break' || (b.type as string) === 'Lunch Break') mealSecs += durSec;
-                      else if (b.type === 'Team Huddle') huddleSecs += durSec;
-                      else if (b.type === 'Team Meeting') meetingSecs += durSec;
-                      else if (b.type === 'Attainment / Training' || (b.type as string) === 'Training') trainingSecs += durSec;
-                      else if (b.type === 'Activity') activitySecs += durSec;
-                    });
-
-                    // No fallback block needed: activeBreak is always derived from
-                    // todayRecord.breaks via openBreakStartAt, so every open break
-                    // is already captured by the `isOngoing` check above.
-
-                    const totalBreakSecs = teaSecs + mealSecs + huddleSecs + meetingSecs + trainingSecs + activitySecs;
+                    const breakdown = calculateBreakBreakdown(todayRecord.breaks || [], breakElapsedSec);
+                    const { teaSecs, mealSecs, huddleSecs, meetingSecs, trainingSecs, activitySecs, totalBreakSecs } = breakdown;
                     const grandTotalSecs = liveWorkSec + totalBreakSecs;
 
                     const workPct = grandTotalSecs > 0 ? Math.round((liveWorkSec / grandTotalSecs) * 100) : 100;
@@ -1311,7 +1278,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                             <Sparkles className="w-3.5 h-3.5 text-blue-400" />
                             Shift Productivity Ratio
                           </span>
-                          <span className="text-emerald-400 font-mono">{workPct}% Work</span>
+                          <span className="text-emerald-400 font-mono">{workPct}% Work ({Math.floor(liveWorkSec / 3600)}h {Math.floor((liveWorkSec % 3600) / 60)}m)</span>
                         </div>
 
                         {/* Multi-Color Segmented Progress Bar */}

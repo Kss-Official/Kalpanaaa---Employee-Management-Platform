@@ -167,6 +167,75 @@ export function computeShiftWorkingMinutes(
 }
 
 /**
+ * Accurately calculate total break minutes across all break entries
+ */
+export function calculateTotalBreakMinutes(breaks: any[] = []): number {
+  if (!Array.isArray(breaks) || breaks.length === 0) return 0;
+  return breaks.reduce((total, b) => {
+    if (typeof b.durationMinutes === 'number' && b.durationMinutes > 0) {
+      return total + b.durationMinutes;
+    }
+    const start = safeGetTimestampMillis(b.startAt || b.startTime);
+    const end = safeGetTimestampMillis(b.endAt || b.endTime);
+    if (start && end && end > start) {
+      return total + Math.max(1, Math.round((end - start) / 60000));
+    }
+    return total;
+  }, 0);
+}
+
+/**
+ * Accurately calculate break duration breakdown and proficiency metrics
+ */
+export function calculateBreakBreakdown(
+  breaks: any[] = [],
+  activeBreakElapsedSec: number = 0
+) {
+  let teaSecs = 0;
+  let mealSecs = 0;
+  let huddleSecs = 0;
+  let meetingSecs = 0;
+  let trainingSecs = 0;
+  let activitySecs = 0;
+
+  (breaks || []).forEach(b => {
+    let durSec = 0;
+    const isOngoing = !b.endAt && !(b as any).endTime;
+    if (isOngoing) {
+      durSec = activeBreakElapsedSec;
+    } else if (typeof b.durationMinutes === 'number' && b.durationMinutes > 0) {
+      durSec = b.durationMinutes * 60;
+    } else if (b.startAt && b.endAt) {
+      const startMs = safeGetTimestampMillis(b.startAt || b.startTime);
+      const endMs = safeGetTimestampMillis(b.endAt || b.endTime);
+      if (startMs && endMs && endMs > startMs) {
+        durSec = Math.floor((endMs - startMs) / 1000);
+      }
+    }
+
+    const type = (b.type || '').toLowerCase();
+    if (type.includes('tea') || type.includes('coffee')) teaSecs += durSec;
+    else if (type.includes('meal') || type.includes('lunch') || type.includes('dinner')) mealSecs += durSec;
+    else if (type.includes('huddle')) huddleSecs += durSec;
+    else if (type.includes('meeting')) meetingSecs += durSec;
+    else if (type.includes('train') || type.includes('attainment')) trainingSecs += durSec;
+    else activitySecs += durSec;
+  });
+
+  const totalBreakSecs = teaSecs + mealSecs + huddleSecs + meetingSecs + trainingSecs + activitySecs;
+  return {
+    teaSecs,
+    mealSecs,
+    huddleSecs,
+    meetingSecs,
+    trainingSecs,
+    activitySecs,
+    totalBreakSecs,
+    totalBreakMinutes: Math.round(totalBreakSecs / 60)
+  };
+}
+
+/**
  * Deterministic Doc ID generator: attendance/{uid}_{YYYY-MM-DD}
  */
 export function getAttendanceDocId(uid: string, dateStr: string): string {

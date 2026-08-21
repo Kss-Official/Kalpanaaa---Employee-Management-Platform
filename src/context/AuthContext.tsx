@@ -37,6 +37,7 @@ import {
   formatTimestampToISO,
   safeGetTimestampMillis,
   resolveAttendanceRecord,
+  calculateTotalBreakMinutes,
   COMPANY_TIMEZONE
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
@@ -2269,9 +2270,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const nowISO = new Date().toISOString();
-        // BUG 1 FIX: include durationMinutes: 0 and endAt: null so the
-        // onSnapshot re-hydration always has a clean numeric baseline and the
-        // proficiency bar can detect an open break via `!b.endAt` reliably.
         const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO, endAt: null, durationMinutes: 0 };
         const updatedBreaks = [...existingBreaks, newBreak];
 
@@ -2280,7 +2278,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           updatedAt: serverTimestamp()
         }));
 
-        return { success: true, message: `${breakType} started!` };
+        return { 
+          success: true, 
+          message: `${breakType} started!`,
+          breaks: updatedBreaks
+        };
+      });
+
+      // Optimistically update React state immediately
+      setAttendance(prev => {
+        return prev.map(rec => {
+          if (rec.id === recordId || (rec.employeeId === emp?.id && rec.date === todayStr)) {
+            return {
+              ...rec,
+              breaks: (res as any).breaks || [...(rec.breaks || []), { type: breakType, startAt: new Date().toISOString(), endAt: null, durationMinutes: 0 }]
+            };
+          }
+          return rec;
+        });
       });
 
       addAuditLog('ATTENDANCE_BREAK_START', emp?.fullName || empUid, `Started ${breakType}`);
@@ -2323,7 +2338,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const nowMs = Date.now();
         const nowISO = new Date(nowMs).toISOString();
         const startIso = formatTimestampToISO(openBreak.startAt || (openBreak as any).startTime) || nowISO;
-        const breakMins = Math.max(1, Math.floor((nowMs - new Date(startIso).getTime()) / 60000));
+        const diffMs = Math.max(0, nowMs - new Date(startIso).getTime());
+        const breakMins = Math.max(1, Math.round(diffMs / 60000));
 
         const updatedBreaks = existingBreaks.map((b: any) => {
           const isOpen = !b.endAt && !(b as any).endTime;
@@ -2339,7 +2355,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return b;
         });
 
-        const totalBreakMins = updatedBreaks.reduce((acc: number, b: any) => acc + (Number(b.durationMinutes) || 0), 0);
+        const totalBreakMins = calculateTotalBreakMinutes(updatedBreaks);
 
         transaction.update(docRef, cleanFirestorePayload({
           breaks: updatedBreaks,
@@ -2347,8 +2363,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           updatedAt: serverTimestamp()
         }));
 
-        return { success: true, message: `Break completed! (${breakMins} mins total)` };
+        return { 
+          success: true, 
+          message: `${openBreak.type || 'Break'} completed! (${breakMins} mins total)`,
+          breaks: updatedBreaks,
+          totalBreakMinutes: totalBreakMins
+        };
       });
+
+      // Optimistically update React state immediately
+      if ((res as any).breaks) {
+        setAttendance(prev => {
+          return prev.map(rec => {
+            if (rec.id === recordId || (rec.employeeId === emp?.id && rec.date === todayStr)) {
+              return {
+                ...rec,
+                breaks: (res as any).breaks,
+                totalBreakMinutes: (res as any).totalBreakMinutes || 0
+              };
+            }
+            return rec;
+          });
+        });
+      }
 
       addAuditLog('ATTENDANCE_BREAK_END', emp?.fullName || empUid, res.message);
       return res;
