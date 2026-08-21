@@ -43,7 +43,7 @@ import {
 import { runAttendanceMigration } from '../lib/attendanceMigration';
 import { classifyError, shouldFallbackToLocalLogin } from '../lib/errors';
 import { fetchAbsoluteTime, toISTTimeString } from '../lib/absoluteTime';
-import { sendKssNotification, sendAdminBroadcast, registerFcmToken, KssNotification } from '../lib/notifications';
+import { sendKssNotification, sendAdminBroadcast, registerFcmToken, unregisterFcmToken, KssNotification } from '../lib/notifications';
 import { clearAllFaceEngineState } from '../lib/faceRecognitionEngine';
 import { LeaveService } from '../lib/leaveService';
 
@@ -1847,6 +1847,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    const empId = activeEmployee?.id || activeEmployee?.employeeId;
+    if (empId) {
+      unregisterFcmToken(empId).catch(() => {});
+    }
     auth.signOut();
     setUser(null);
     setActiveEmployee(null);

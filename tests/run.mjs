@@ -22,9 +22,11 @@ for (const name of entries) {
   }
 }
 
+const testFiles = [join('tests', 'regression.test.mjs'), join('tests', 'fcm.test.mjs')];
+
 const testRes = spawnSync(
   process.execPath,
-  ['--test', join('tests', 'regression.test.mjs')],
+  ['--test', ...testFiles],
   { stdio: 'inherit', env: { ...process.env, KSS_TEST_OUT: OUT } }
 );
 process.exit(testRes.status ?? 1);

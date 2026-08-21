@@ -3,7 +3,7 @@
 // All events are stored in Firestore 'notifications' collection for real-time sync
 
 import { db, cleanFirestorePayload } from './firebase';
-import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, setDoc, deleteDoc, doc, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 export type NotificationEventType =
   | 'ATTENDANCE_CHECKIN'
@@ -186,16 +186,56 @@ export const registerFcmToken = async (
     const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
 
     if (token) {
-      await addDoc(collection(db, 'fcmTokens'), {
+      // Deterministic document ID derived from token suffix: guarantees 1 document per browser device
+      const tokenId = token.slice(-32).replace(/[^a-zA-Z0-9_-]/g, '_');
+      await setDoc(doc(db, 'fcmTokens', tokenId), {
         employeeId,
         role,
         token,
         userAgent: navigator.userAgent,
-        registeredAt: serverTimestamp()
-      });
-      console.info('[FCM] Token registered for employee:', employeeId);
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      console.info('[FCM] Token registered idempotently for employee:', employeeId);
     }
   } catch (err) {
     console.warn('[FCM] Token registration failed (safe to ignore in dev/unsupported browsers):', err);
+  }
+};
+
+// Clean up current browser's FCM push token upon logout
+export const unregisterFcmToken = async (employeeId: string): Promise<void> => {
+  try {
+    const { getMessaging, getToken } = await import('firebase/messaging');
+    const { getApp } = await import('firebase/app');
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+    if (!vapidKey || vapidKey.includes('YOUR_') || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+      return;
+    }
+    const messaging = getMessaging(getApp());
+    const registration = await navigator.serviceWorker.ready;
+    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
+    if (token) {
+      const tokenId = token.slice(-32).replace(/[^a-zA-Z0-9_-]/g, '_');
+      await deleteDoc(doc(db, 'fcmTokens', tokenId)).catch(() => {});
+      console.info('[FCM] Token successfully unregistered for employee:', employeeId);
+    }
+  } catch (err) {
+    console.warn('[FCM] Token unregistration ignored:', err);
+  }
+};
+
+// Listen for foreground push notifications when app is active
+export const listenForegroundFcmMessages = async (onMessageReceived: (payload: any) => void): Promise<() => void> => {
+  try {
+    const { getMessaging, onMessage } = await import('firebase/messaging');
+    const { getApp } = await import('firebase/app');
+    const messaging = getMessaging(getApp());
+    const unsub = onMessage(messaging, (payload) => {
+      console.info('[FCM] Foreground notification received:', payload);
+      onMessageReceived(payload);
+    });
+    return unsub;
+  } catch (e) {
+    return () => {};
   }
 };

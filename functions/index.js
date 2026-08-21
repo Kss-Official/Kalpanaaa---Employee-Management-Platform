@@ -32,18 +32,21 @@ exports.sendFcmPushOnNotification = onDocumentCreated(
         : ['SUPER_ADMIN'];
 
     try {
-      // Gather matching FCM tokens (deduplicated by token value)
-      let tokensQuery = db.collection('fcmTokens');
-      if (!audience.includes('ALL')) {
-        tokensQuery = tokensQuery.where('role', 'in', audience);
-      }
-      const tokenSnap = await tokensQuery.get();
-
+      // Fetch all tokens and match against audience (supports 'ALL', specific roles, and individual employeeIds)
+      const allTokensSnap = await db.collection('fcmTokens').get();
       const uniqueTokens = [];
       const seen = new Set();
-      tokenSnap.forEach((docSnap) => {
-        const t = docSnap.data().token;
-        if (t && typeof t === 'string' && !seen.has(t)) {
+
+      allTokensSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const t = d.token;
+        if (!t || typeof t !== 'string' || seen.has(t)) return;
+
+        const isMatch = audience.includes('ALL') ||
+          (d.role && audience.includes(d.role)) ||
+          (d.employeeId && audience.includes(d.employeeId));
+
+        if (isMatch) {
           seen.add(t);
           uniqueTokens.push(t);
         }
@@ -159,6 +162,58 @@ exports.scheduledFirestoreBackup = onSchedule(
       console.info(`[KSS Backup] Firestore export initiated: ${response.name}`);
     } catch (err) {
       console.warn('[KSS Backup] Cloud Firestore export note: Ensure Firestore Admin API and Cloud Storage bucket are provisioned:', err.message);
+    }
+  }
+);
+
+// ── Scheduled Morning Attendance Reminder (09:00 AM IST Mon-Sat) ──
+exports.scheduledMorningAttendanceReminder = onSchedule(
+  {
+    schedule: '0 9 * * 1-6', // 09:00 AM IST Mon-Sat
+    timeZone: 'Asia/Kolkata',
+    retryCount: 2,
+    memory: '256MiB'
+  },
+  async () => {
+    try {
+      await db.collection('notifications').add({
+        type: 'SYSTEM_ALERT',
+        title: '☀️ Good Morning! Shift Check-In',
+        body: 'Morning shift check-in is now open. Please complete your face biometrics / GPS check-in on the portal.',
+        audience: ['ALL'],
+        actorName: 'KSS Automated Scheduler',
+        createdAt: new Date().toISOString(),
+        _fcmStatus: 'pending'
+      });
+      console.info('[Scheduler] Morning attendance reminder notification posted.');
+    } catch (e) {
+      console.error('[Scheduler] Morning attendance reminder failed:', e);
+    }
+  }
+);
+
+// ── Scheduled Evening Checkout Reminder (06:50 PM IST Mon-Sat) ──
+exports.scheduledEveningCheckoutReminder = onSchedule(
+  {
+    schedule: '50 18 * * 1-6', // 06:50 PM IST Mon-Sat
+    timeZone: 'Asia/Kolkata',
+    retryCount: 2,
+    memory: '256MiB'
+  },
+  async () => {
+    try {
+      await db.collection('notifications').add({
+        type: 'SYSTEM_ALERT',
+        title: '🏁 Shift End Checkout Reminder',
+        body: 'Office hours conclude at 07:00 PM IST. Please remember to complete your check-out before leaving.',
+        audience: ['ALL'],
+        actorName: 'KSS Automated Scheduler',
+        createdAt: new Date().toISOString(),
+        _fcmStatus: 'pending'
+      });
+      console.info('[Scheduler] Evening checkout reminder notification posted.');
+    } catch (e) {
+      console.error('[Scheduler] Evening checkout reminder failed:', e);
     }
   }
 );
