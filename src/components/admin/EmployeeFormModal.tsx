@@ -439,6 +439,21 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   </div>
 
                   <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Employment Status</label>
+                    <select
+                      name="status"
+                      value={formData.status || 'Active'}
+                      onChange={handleChange}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500 font-bold"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="On Leave">On Leave</option>
+                      <option value="Suspended">Suspended</option>
+                      <option value="Terminated">Terminated</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block text-slate-300 font-semibold mb-1">
                       {isEdit ? 'Set New Password (Optional)' : 'Initial Account Password'} <span className="text-rose-500">*</span>
                     </label>

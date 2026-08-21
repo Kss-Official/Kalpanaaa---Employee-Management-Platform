@@ -290,7 +290,9 @@ export function isAttendanceForEmployee(
     if (normalizedRecDate !== normalizedTargetDate) return false;
   }
 
-  const targetUid = getCanonicalEmployeeUid(employeeOrUid);
+  const cleanId = (val: any) => String(val || '').trim().toLowerCase().replace(/^emp-/, '');
+
+  const targetUid = String(getCanonicalEmployeeUid(employeeOrUid) || '').trim().toLowerCase();
   const targetCode = String(
     typeof employeeOrUid === 'string'
       ? employeeOrUid
@@ -307,38 +309,53 @@ export function isAttendanceForEmployee(
       : ''
   ).trim().toLowerCase();
 
-  const recUid = String(rec.uid || rec.employeeUid || '').trim();
+  const recUid = String(rec.uid || rec.employeeUid || '').trim().toLowerCase();
   const recEmpId = String(rec.employeeId || '').trim().toLowerCase();
   const recEmpCode = String(rec.employeeCode || '').trim().toLowerCase();
   const recName = String(rec.employeeName || '').trim().toLowerCase();
   const recDocId = String(rec.id || '').trim().toLowerCase();
+  const recDocPrefix = recDocId.includes('_') ? recDocId.split('_')[0] : recDocId;
 
-  // 1. Direct Employee Code matching (e.g. KSS2407005)
-  if (targetCode) {
-    if (recEmpCode === targetCode || recEmpId === targetCode || recDocId.startsWith(`${targetCode}_`)) {
+  // Normalized identity tokens (stripped of 'emp-' prefix)
+  const targetTokens = new Set([
+    cleanId(targetUid),
+    cleanId(targetCode),
+    cleanId(targetId),
+    targetUid,
+    targetCode,
+    targetId
+  ].filter(t => t.length > 0));
+
+  const recTokens = [
+    cleanId(recUid),
+    cleanId(recEmpId),
+    cleanId(recEmpCode),
+    cleanId(recDocPrefix),
+    recUid,
+    recEmpId,
+    recEmpCode,
+    recDocPrefix
+  ].filter(t => t.length > 0);
+
+  // 1. Check if any target identity token matches any record identity token
+  for (const rTok of recTokens) {
+    if (targetTokens.has(rTok)) {
       return true;
     }
   }
 
-  // 2. Database ID matching (e.g. emp-KSS2407005 or emp-1)
-  if (targetId) {
-    if (recEmpId === targetId || recEmpCode === targetId || recDocId.startsWith(`${targetId}_`)) {
+  // 2. Check docId prefixes
+  for (const tTok of targetTokens) {
+    if (recDocId.startsWith(`${tTok}_`)) {
       return true;
     }
   }
 
-  // 3. UID matching
-  if (targetUid) {
-    if (recUid === targetUid || recDocId.startsWith(`${targetUid.toLowerCase()}_`)) {
-      return true;
-    }
-  }
-
-  // 4. Normalized Full Name matching (exact normalized match only, never substring)
+  // 3. Normalized Full Name matching (ignoring punctuation and order of tokens)
   if (targetName && recName) {
     const cleanTarget = targetName.replace(/[^a-z0-9]/g, '');
     const cleanRec = recName.replace(/[^a-z0-9]/g, '');
-    if (cleanTarget && cleanRec && cleanTarget === cleanRec) {
+    if (cleanTarget && cleanRec && (cleanTarget === cleanRec || cleanTarget.includes(cleanRec) || cleanRec.includes(cleanTarget))) {
       return true;
     }
   }
@@ -376,18 +393,18 @@ export function resolveAttendanceRecord(
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0];
 
-  // 1. Exact canonical document ID: {uid}_{YYYY-MM-DD}
+  // 1. ALWAYS prioritize records that have real check-in data (never let a blank duplicate mask an active shift)
+  const checkedIn = matches
+    .filter(rec => !!rec.checkInAt)
+    .sort((a, b) => (safeGetTimestampMillis(b.updatedAt || b.checkInAt) || 0) - (safeGetTimestampMillis(a.updatedAt || a.checkInAt) || 0));
+  if (checkedIn.length > 0) return checkedIn[0];
+
+  // 2. Exact canonical document ID: {uid}_{YYYY-MM-DD}
   if (canonicalUid && date) {
     const canonicalId = getAttendanceDocId(canonicalUid, date);
     const byCanonicalId = matches.find(rec => rec.id === canonicalId);
     if (byCanonicalId) return byCanonicalId;
   }
-
-  // 2. Prefer the record that has real check-in data (never show a stale blank dup)
-  const checkedIn = matches
-    .filter(rec => !!rec.checkInAt)
-    .sort((a, b) => safeGetTimestampMillis(b.updatedAt || b.checkInAt)! - safeGetTimestampMillis(a.updatedAt || a.checkInAt)!);
-  if (checkedIn.length > 0) return checkedIn[0];
 
   // 3. Deterministic last resort: most recently updated among blanks
   return matches

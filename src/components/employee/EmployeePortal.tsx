@@ -852,7 +852,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 {activeEmployee.department}
               </span>
               <span className="text-xs text-[var(--accent-emerald)] font-semibold bg-[var(--accent-emerald)]/10 px-2 py-0.5 rounded-lg border border-[var(--accent-emerald)]/20">
-                {activeEmployee.status}
+                {(activeEmployee.status || '').toLowerCase() === 'check' || (activeEmployee.status || '').toLowerCase() === 'checked in' ? 'Active' : (activeEmployee.status || 'Active')}
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">{activeEmployee.fullName}</h1>
@@ -1866,7 +1866,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                         {activeEmployee.department}
                       </span>
                       <span className="text-xs text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded-lg border border-emerald-500/20">
-                        {activeEmployee.status}
+                        {(activeEmployee.status || '').toLowerCase() === 'check' || (activeEmployee.status || '').toLowerCase() === 'checked in' ? 'Active' : (activeEmployee.status || 'Active')}
                       </span>
                     </div>
                     <h1 className="text-2xl font-black text-white">{fullName}</h1>

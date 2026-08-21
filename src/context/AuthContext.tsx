@@ -17,7 +17,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload, subscribeWithRecovery } from '../lib/firebase';
-import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
+import { Employee, EmployeeStatus, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
 import {
   INITIAL_EMPLOYEES,
   generateInitialAttendance,
@@ -923,6 +923,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // LIVE AUTOCORRECT INVALID OR 'check' EMPLOYEE STATUS TO 'Active'
+              const validStatuses: EmployeeStatus[] = ['Active', 'On Leave', 'Terminated', 'Suspended'];
+              if (!data.status || !validStatuses.includes(data.status as EmployeeStatus) || String(data.status).toLowerCase() === 'check' || String(data.status).toLowerCase() === 'checked in') {
+                data.status = 'Active';
+                setDoc(doc(db, 'employees', data.id), { status: 'Active' }, { merge: true }).catch(() => { });
+              }
+
               fetched.push(data);
             });
 
@@ -1294,10 +1301,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCompanyWorkZone(fetchedZone);
             setSettings(prev => ({
               ...prev,
-              officeName: fetchedZone.name,
-              officeLatitude: fetchedZone.latitude,
-              officeLongitude: fetchedZone.longitude,
-              allowedRadiusMeters: fetchedZone.radiusMeters
+              officeName: fetchedZone.name || prev.officeName,
+              officeLatitude: fetchedZone.latitude || prev.officeLatitude,
+              officeLongitude: fetchedZone.longitude || prev.officeLongitude,
+              allowedRadiusMeters: fetchedZone.radiusMeters || prev.allowedRadiusMeters
             }));
 
             if (needsUpdate) {
@@ -1308,7 +1315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               name: 'Kalpanaaa Software Solutions — Main Office',
               latitude: 13.014333,
               longitude: 77.646000,
-              radiusMeters: 100,
+              radiusMeters: 300,
               active: true,
               updatedBy: 'System Init',
               updatedAt: new Date().toISOString()
@@ -1316,6 +1323,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setDoc(doc(db, 'workZones', 'company'), defaultZone).catch(() => { });
           }
         }, (error) => {
+          setCompanyWorkZone({
+            name: INITIAL_COMPANY_SETTINGS.officeName,
+            latitude: INITIAL_COMPANY_SETTINGS.officeLatitude,
+            longitude: INITIAL_COMPANY_SETTINGS.officeLongitude,
+            radiusMeters: INITIAL_COMPANY_SETTINGS.allowedRadiusMeters,
+            active: true,
+            updatedBy: 'System Local Default',
+            updatedAt: new Date().toISOString()
+          });
           handleFirestoreError(error, OperationType.GET, 'workZones/company');
         });
 
@@ -1423,6 +1439,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsSessionReady(true);
         localStorage.setItem('kss_v1_session', matched.id);
         if (matched.email) localStorage.setItem('kss_v1_session_email', matched.email.toLowerCase());
+
+        // Sync role to users/{uid} for Firestore Security Rules RBAC lookup
+        setDoc(doc(db, 'users', firebaseUser.uid), {
+          uid: firebaseUser.uid,
+          email: matched.email?.toLowerCase() || firebaseUser.email?.toLowerCase(),
+          role: matched.role,
+          employeeId: matched.employeeId,
+          fullName: matched.fullName,
+          updatedAt: serverTimestamp()
+        }, { merge: true }).catch(() => { });
       }
     });
     return () => unsubscribe();
@@ -1551,6 +1577,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             localStorage.setItem('kss_v1_session_id', newSessionId);
             localStorage.setItem('kss_v1_device_category', cat);
             setDoc(doc(db, 'employees', matched.id), sessionUpdates, { merge: true }).catch(() => { });
+
+            // Sync role to users/{uid} for Firestore Security Rules RBAC lookup
+            setDoc(doc(db, 'users', userCred.user.uid), {
+              uid: userCred.user.uid,
+              email: cleanEmail,
+              role: assignedRole,
+              employeeId: matched.employeeId,
+              fullName: matched.fullName,
+              updatedAt: serverTimestamp()
+            }, { merge: true }).catch(() => { });
 
             addAuditLog('USER_LOGIN', matched.fullName, `Firebase Auth Login (${assignedRole})`);
             clearLockout(matched.id);
@@ -2002,13 +2038,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       addAuditLog('ATTENDANCE_CHECKIN', `${emp.employeeId} (${emp.fullName})`, `Status: ${evalResult.status}, GPS: ${evalResult.locationVerified ? 'Verified' : 'Unverified'} (${distMeters}m from office)`);
 
+      const checkInIsoStr = formatTimestampToISO(txResult.data?.checkInAt) || new Date().toISOString();
+      const resolvedRec: AttendanceRecord = {
+        ...txResult.data,
+        id: recordId,
+        uid: empUid,
+        employeeUid: empUid,
+        employeeId: emp.id,
+        employeeCode: emp.employeeId,
+        employeeName: emp.fullName,
+        date: todayStr,
+        checkInAt: checkInIsoStr
+      } as AttendanceRecord;
+
+      // Immediately sync state so UI reflects Shift Active without delay
+      setAttendance(prev => {
+        const map = new Map<string, AttendanceRecord>();
+        prev.forEach(r => map.set(r.id, r));
+        map.set(recordId, resolvedRec);
+        return Array.from(map.values());
+      });
+
       return { 
         success: true, 
         message: txResult.message, 
-        record: {
-          ...txResult.data,
-          checkInAt: new Date().toISOString()
-        } as AttendanceRecord
+        record: resolvedRec
       };
     } catch (err: any) {
       handleFirestoreError(err, OperationType.CREATE, `attendance/${recordId}`);

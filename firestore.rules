@@ -119,6 +119,10 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
     // ── 5. Salary Disbursements (persisted payroll runs) ──
     // SENSITIVE: reads require an authenticated session; deletes are impossible from clients.
     match /salaryDisbursements/{recordId} {
@@ -143,25 +147,25 @@ service cloud.firestore {
 
     // ── 8. Settings & Configuration ──
     match /settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow update, create: if isSignedIn();
       allow delete: if isSuperAdmin();
     }
 
     match /companyConfig/{configId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isSignedIn();
     }
 
     // ── 9. Workplace Rules ──
     match /companyRules/{ruleId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isSignedIn();
     }
 
     // ── 10. Work Zones (geo-fence definitions) ──
     match /workZones/{zoneId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create, update: if isSignedIn();
       allow delete: if isSuperAdmin();
     }

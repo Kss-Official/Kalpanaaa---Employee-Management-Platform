@@ -407,7 +407,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                               backgroundColor: `${cardModal.color}15`,
                               border: `1px solid ${cardModal.color}30`
                             }}>
-                              {emp.status}
+                              {(emp.status || '').toLowerCase() === 'check' || (emp.status || '').toLowerCase() === 'checked in' ? 'Active' : (emp.status || 'Active')}
                             </span>
                           )}
                         </div>

@@ -113,12 +113,12 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                     {employee.employeeId}
                   </span>
                   <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-lg border flex items-center gap-1 ${
-                    employee.status === 'Active' 
+                    (employee.status || 'Active').toLowerCase() === 'active' || (employee.status || '').toLowerCase() === 'check'
                       ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] border-[var(--accent-emerald)]/20' 
                       : 'bg-[var(--accent-amber)]/10 text-[var(--accent-amber)] border-[var(--accent-amber)]/20'
                   }`}>
-                    {employee.status === 'Active' && <Shield className="w-3 h-3" />}
-                    {employee.status}
+                    {((employee.status || 'Active').toLowerCase() === 'active' || (employee.status || '').toLowerCase() === 'check') && <Shield className="w-3 h-3" />}
+                    {(employee.status || '').toLowerCase() === 'check' || (employee.status || '').toLowerCase() === 'checked in' ? 'Active' : (employee.status || 'Active')}
                   </span>
                   <span className="bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] text-[11px] font-bold px-2.5 py-0.5 rounded-lg border border-[var(--accent-blue)]/20">
                     {employee.role}

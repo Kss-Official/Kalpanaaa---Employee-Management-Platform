@@ -48,6 +48,22 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
 
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
+  const formatEmployeeStatus = (status?: string): EmployeeStatus => {
+    if (!status || status.toLowerCase() === 'check' || status.toLowerCase() === 'checked in' || status.toLowerCase() === 'active') {
+      return 'Active';
+    }
+    if (status.toLowerCase() === 'on leave' || status.toLowerCase() === 'leave') {
+      return 'On Leave';
+    }
+    if (status.toLowerCase() === 'terminated') {
+      return 'Terminated';
+    }
+    if (status.toLowerCase() === 'suspended') {
+      return 'Suspended';
+    }
+    return 'Active';
+  };
+
   const filteredEmployees = employees.filter(emp => {
     if (!emp.fullName || emp.fullName.trim() === '') return false;
     
@@ -58,17 +74,20 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       (emp.designation?.toLowerCase() || '').includes(searchTerm.toLowerCase());
 
     const matchesDept = deptFilter === 'ALL' || emp.department === deptFilter;
-    const matchesStatus = statusFilter === 'ALL' || emp.status === statusFilter;
+    const empStatus = formatEmployeeStatus(emp.status);
+    const matchesStatus = statusFilter === 'ALL' || empStatus === statusFilter;
 
     return matchesSearch && matchesDept && matchesStatus;
   });
 
-  const getStatusIndicator = (status: EmployeeStatus) => {
-    switch (status) {
+  const getStatusIndicator = (status?: string) => {
+    const s = formatEmployeeStatus(status);
+    switch (s) {
       case 'Active': return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]';
       case 'On Leave': return 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]';
       case 'Terminated': return 'bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.5)]';
-      default: return 'bg-slate-500';
+      case 'Suspended': return 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]';
+      default: return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]';
     }
   };
 
@@ -190,13 +209,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             }}
           >
             {filteredEmployees.map(emp => {
-              const statusColorMap = {
-                'Present': 'var(--accent-emerald)',
-                'Late': 'var(--accent-amber)',
-                'Absent': 'var(--accent-rose)',
-                'On Leave': 'var(--accent-violet)',
+              const displayStatus = formatEmployeeStatus(emp.status);
+              const statusColorMap: Record<string, string> = {
+                'Active': 'var(--accent-emerald)',
+                'On Leave': 'var(--accent-amber)',
+                'Suspended': 'var(--accent-amber)',
+                'Terminated': 'var(--accent-rose)',
               };
-              const statusColor = (statusColorMap as any)[emp.status] || 'var(--text-muted)';
+              const statusColor = statusColorMap[displayStatus] || 'var(--accent-emerald)';
               const statusGlow = statusColor.replace('accent', 'glow');
 
               return (
@@ -249,7 +269,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                       style={{ color: statusColor, backgroundColor: `${statusColor}15`, border: `1px solid ${statusColor}30` }}
                     >
                       <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
-                      {emp.status}
+                      {displayStatus}
                     </span>
                     <span className="font-mono font-bold text-[var(--text-secondary)]">
                       {emp.employeeId}
@@ -352,7 +372,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                       <td className="py-3 px-6">
                         <div className="flex items-center gap-2">
                           <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
-                          <span className="text-slate-300 font-bold">{emp.status}</span>
+                          <span className="text-slate-300 font-bold">{formatEmployeeStatus(emp.status)}</span>
                         </div>
                       </td>
 
@@ -411,7 +431,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                   </span>
                   <div className="flex items-center gap-2 bg-slate-950/50 px-2.5 py-1 rounded-lg border border-slate-800/50">
                     <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
-                    <span className="text-[10px] text-slate-300 font-bold tracking-wide uppercase">{emp.status}</span>
+                    <span className="text-[10px] text-slate-300 font-bold tracking-wide uppercase">{formatEmployeeStatus(emp.status)}</span>
                   </div>
                 </div>
                 <div className="text-center my-4">
