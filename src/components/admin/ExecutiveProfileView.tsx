@@ -15,6 +15,7 @@ import {
   Award
 } from 'lucide-react';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
+import { getWorkDate } from '../../lib/attendanceEngine';
 
 /**
  * ExecutiveProfileView — Profile page for CEO / CTO / MD (SUPER_ADMIN).
@@ -44,7 +45,7 @@ export const ExecutiveProfileView: React.FC = () => {
 
   // Quick stats
   const totalEmployees = employees.length;
-  const today = new Date().toISOString().split('T')[0];
+  const today = getWorkDate(new Date());
   const presentToday = attendance.filter(a => a.date === today && (a.status === 'Present' || a.status === 'Late' || a.status === 'Work From Home')).length;
   const absentToday = totalEmployees - presentToday;
 

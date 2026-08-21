@@ -25,6 +25,7 @@ import {
   getAttendanceDocId, 
   getCanonicalEmployeeUid, 
   resolveAttendanceRecord,
+  isShiftComplete,
   safeGetTimestampMillis, 
   formatTimestampToISO 
 } from '../../lib/attendanceEngine';
@@ -86,7 +87,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
   // PM's own live attendance record (canonical resolver — same doc the backend writes to)
   const pmTodayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
-  const isPmCheckedIn = !!pmTodayRecord?.checkInAt && !pmTodayRecord?.checkOutAt;
+  const isPmCheckedIn = !!pmTodayRecord?.checkInAt && !isShiftComplete(pmTodayRecord);
   const activePmBreak = pmTodayRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
   const [isBreakActionLoading, setIsBreakActionLoading] = useState(false);
 

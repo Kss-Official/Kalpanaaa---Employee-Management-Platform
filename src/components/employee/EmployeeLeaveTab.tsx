@@ -4,6 +4,7 @@ import { Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight, Aler
 import { motion, AnimatePresence } from 'framer-motion';
 import { useHaptic } from '../../hooks/useHaptic';
 import { isEmployeeMatch } from '../../lib/attendanceEngine';
+import { todayInIST } from '../../lib/absoluteTime';
 
 export const EmployeeLeaveTab: React.FC = () => {
   const { activeEmployee, leaveRequests, submitLeaveRequest, cancelLeaveRequest } = useAuth();
@@ -19,7 +20,7 @@ export const EmployeeLeaveTab: React.FC = () => {
 
   const [filterType, setFilterType] = useState<'All' | 'Leave' | 'WFH'>('All');
   const [timeFilter, setTimeFilter] = useState<'All' | 'Today' | 'Upcoming' | 'Previous' | 'Approved' | 'Rejected'>('All');
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = todayInIST();
 
   const myRequests = leaveRequests.filter(r => 
     (r.employeeUid && activeEmployee?.uid && r.employeeUid === activeEmployee.uid) ||

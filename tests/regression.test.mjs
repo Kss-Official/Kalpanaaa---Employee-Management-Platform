@@ -269,3 +269,35 @@ test('login fallback: only genuine credential rejections may fall back to local 
   // Non-Firebase exceptions preserve legacy behavior
   assert.equal(errors.shouldFallbackToLocalLogin(undefined), true);
 });
+
+// ── P0 incident regression: SHIFT_COMPLETE truth & fabrication signatures ────
+
+test('shift completion: true ONLY when checkout exists and is not in the future', () => {
+  const now = new Date(2026, 7, 21, 15, 0).getTime(); // Aug 21 15:00 local
+  const open = { checkInAt: '2026-08-21T04:30:00.000Z', checkOutAt: null };
+  assert.equal(engine.isShiftComplete(open, now), false);
+  assert.equal(engine.isShiftComplete({ checkInAt: null, checkOutAt: 'x' }, now), false);
+  assert.equal(engine.isShiftComplete(undefined, now), false);
+
+  // Fabricated FUTURE checkout (e.g. pre-written 19:30 IST) must NOT complete shift
+  const futureOut = { checkInAt: '2026-08-21T04:30:00.000Z', checkOutAt: '2026-08-21T14:00:00.000Z' }; // 19:30 IST
+  assert.equal(engine.isShiftComplete(futureOut, now), false);
+
+  // Real past checkout completes the shift (08:00Z = 13:30 IST < 15:00 IST now)
+  const done = { checkInAt: '2026-08-21T04:30:00.000Z', checkOutAt: '2026-08-21T08:00:00.000Z' };
+  assert.equal(engine.isShiftComplete(done, now), true);
+});
+
+test('fabrication signatures: migration literals match; genuine timestamps never do', () => {
+  // Exactly what the buggy migration wrote
+  assert.equal(engine.isFabricatedShiftPair('2026-08-21T09:45:00.000+05:30', '2026-08-21T19:30:00.000+05:30'), true);
+  assert.equal(engine.isFabricatedCheckoutOnly('2026-08-21T19:30:00.000+05:30'), true);
+
+  // Genuine system auto-checkout stores UTC "Z" strings — must NOT match
+  assert.equal(engine.isFabricatedCheckoutOnly('2026-08-21T14:00:00.000Z'), false);
+  // Genuine manual checkout is a Firestore Timestamp object — must NOT match
+  assert.equal(engine.isFabricatedCheckoutOnly({ seconds: 1779000000, nanoseconds: 0 }), false);
+  assert.equal(engine.isFabricatedCheckoutOnly(null), false);
+  // Real check-in with fabricated checkout → checkout-only repair path
+  assert.equal(engine.isFabricatedShiftPair('2026-08-21T04:35:00.000Z', '2026-08-21T19:30:00.000+05:30'), false);
+});

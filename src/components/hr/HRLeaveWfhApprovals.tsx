@@ -18,6 +18,7 @@ import {
   Plus
 } from 'lucide-react';
 import { LeaveRequest } from '../../types';
+import { getWorkDate } from '../../lib/attendanceEngine';
 
 export const HRLeaveWfhApprovals: React.FC = () => {
   const { leaveRequests, updateLeaveRequestStage, updateLeaveRequestStatus, activeEmployee, settings, assignCompanyWideWfh, removeCompanyWideWfh } = useAuth();
@@ -27,7 +28,7 @@ export const HRLeaveWfhApprovals: React.FC = () => {
   
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+  const tomorrowStr = getWorkDate(tomorrow);
   const [wfhDateInput, setWfhDateInput] = useState(tomorrowStr);
   const [wfhFeedback, setWfhFeedback] = useState<{ success: boolean; message: string } | null>(null);
 

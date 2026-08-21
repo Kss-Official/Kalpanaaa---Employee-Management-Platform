@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { toISTTimeString } from '../../lib/absoluteTime';
+import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { useHaptic } from '../../hooks/useHaptic';
 import { animations } from '../../lib/animations';
 import { motion, AnimatePresence } from 'motion/react';
@@ -64,6 +64,7 @@ import {
   getCanonicalEmployeeUid, 
   isAttendanceForEmployee, 
   resolveAttendanceRecord,
+  isShiftComplete,
   safeGetTimestampMillis 
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
@@ -200,6 +201,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // transactions actually write to ({uid}_{date}) and any duplicate that has a real
   // checkInAt, so the UI can never render a stale blank duplicate after check-in.
   const todayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
+
+  // P0 FIX: SHIFT_COMPLETE only when today's checkout exists AND is not in the
+  // future (a pre-written/fabricated checkout must never complete a shift).
+  const shiftComplete = isShiftComplete(todayRecord);
 
   const rawHistory = attendance.filter(a => isAttendanceForEmployee(a, activeEmployee));
   const empHistory = rawHistory.filter(rec => {
@@ -697,7 +702,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   };
 
   const handleToggleWfh = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayInIST();
     const approvedDates = activeEmployee.approvedWfhDates || [];
     
     if (!approvedDates.includes(todayStr)) {
@@ -967,7 +972,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 {/* Hero Check-In Button */}
                 <div className="flex flex-col items-center justify-center py-6 w-full relative">
                   {(() => {
-                    const todayStr = new Date().toISOString().split('T')[0];
+                    const todayStr = todayInIST();
                     const isOfficeWfh = companyWideWfhDates.includes(todayStr);
                     const isApprovedWfhToday = isOfficeWfh ||
                       (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
@@ -1032,7 +1037,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                         </>
                       )}
                     </button>
-                  ) : !todayRecord?.checkOutAt ? (
+                  ) : !shiftComplete ? (
                     <div className="flex flex-col items-center justify-center gap-4 w-full">
                       <div className="flex items-center justify-center gap-4 sm:gap-6 flex-wrap">
                         {/* Circle 1: Shift Active Status Indicator (Check-in only, never accidental checkout) */}
@@ -1092,7 +1097,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   )}
                   
                   {/* Break & Activity Actions (if checked in) */}
-                  {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+                  {todayRecord?.checkInAt && !shiftComplete && (
                     <div className="w-full mt-4">
                        {activeBreak ? (() => {
                          const cfg = getBreakColorConfig(activeBreak.type);
@@ -1149,24 +1154,24 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 )}
                 
                 {/* WFH Toggle */}
-                {settings.wfhEnabled && todayRecord?.checkInAt && !todayRecord?.checkOutAt && !activeBreak && (
+                {settings.wfhEnabled && todayRecord?.checkInAt && !shiftComplete && !activeBreak && (
                   <button
                     onClick={handleToggleWfh}
                     className={`w-full max-w-[240px] py-2 rounded-xl text-xs font-semibold transition-all border ${
-                      !(companyWideWfhDates.includes(new Date().toISOString().split('T')[0]) ||
-                        (activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0]) ||
-                        leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id) && new Date().toISOString().split('T')[0] >= r.startDate && new Date().toISOString().split('T')[0] <= r.endDate))
+                      !(companyWideWfhDates.includes(todayStr) ||
+                        (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
+                        leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id) && todayStr >= r.startDate && todayStr <= r.endDate))
                         ? 'bg-transparent border-[var(--border-subtle)] text-[var(--text-muted)] cursor-not-allowed'
                         : isWfh
                           ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
                           : 'bg-transparent border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-sky-500/30'
                     } ${animations.tap}`}
                   >
-                    {!(companyWideWfhDates.includes(new Date().toISOString().split('T')[0]) ||
-                       (activeEmployee.approvedWfhDates || []).includes(new Date().toISOString().split('T')[0]) ||
-                       leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id) && new Date().toISOString().split('T')[0] >= r.startDate && new Date().toISOString().split('T')[0] <= r.endDate))
+                    {!(companyWideWfhDates.includes(todayStr) ||
+                       (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
+                       leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id) && todayStr >= r.startDate && todayStr <= r.endDate))
                       ? '🔒 WFH Locked (Requires Approval)'
-                      : companyWideWfhDates.includes(new Date().toISOString().split('T')[0])
+                      : companyWideWfhDates.includes(todayStr)
                         ? '🏢 Office-Wide WFH Active'
                         : isWfh
                           ? '🏠 Working From Home'
@@ -1374,7 +1379,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
 
           {/* Break & Activity Management */}
-          {todayRecord?.checkInAt && !todayRecord?.checkOutAt && (
+          {todayRecord?.checkInAt && !shiftComplete && (
             <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 space-y-4 shadow-sm">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">

@@ -2,6 +2,8 @@ import React from 'react';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { motion } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
+import { todayInIST } from '../../lib/absoluteTime';
+import { isShiftComplete } from '../../lib/attendanceEngine';
 import gauravImg from '../../assets/images/GauravCTO.jpeg';
 import akshitImg from '../../assets/images/Akshit.png';
 import koushikImg from '../../assets/images/Koushik.png';
@@ -35,12 +37,13 @@ interface LandingViewProps {
 export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSplash }) => {
   const { activeEmployee, role, attendance, employees, quickDemoLogin } = useAuth();
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = todayInIST();
   const todayAttendance = attendance.filter(a => a.date === todayStr);
   const presentCount = todayAttendance.filter(a => a.status === 'PRESENT' || a.status === 'LATE').length;
   const lateCount = todayAttendance.filter(a => a.status === 'LATE').length;
   const leaveCount = todayAttendance.filter(a => a.status === 'ON_LEAVE').length;
-  const activeRecord = todayAttendance.find(a => a.employeeId === activeEmployee?.id && !a.checkOutAt);
+  // P0 FIX: an active shift requires a real check-in and NO completed checkout
+  const activeRecord = todayAttendance.find(a => a.employeeId === activeEmployee?.id && a.checkInAt && !isShiftComplete(a));
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white overflow-x-hidden">

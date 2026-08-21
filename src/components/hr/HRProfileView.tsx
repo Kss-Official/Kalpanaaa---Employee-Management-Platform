@@ -28,7 +28,7 @@ import {
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, resolveAttendanceRecord, safeGetTimestampMillis } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, resolveAttendanceRecord, safeGetTimestampMillis, isShiftComplete } from '../../lib/attendanceEngine';
 
 export const HRProfileView: React.FC = () => {
   const { triggerHaptic } = useHaptic();
@@ -65,7 +65,9 @@ export const HRProfileView: React.FC = () => {
     ? resolveAttendanceRecord(attendance, targetEmployee, todayStr) ?? null
     : null;
 
-  const isCheckedIn = !!myTodayRecord?.checkInAt && !myTodayRecord?.checkOutAt;
+  // P0 FIX: shift completion requires a real (non-future) checkout
+  const hrShiftComplete = isShiftComplete(myTodayRecord);
+  const isCheckedIn = !!myTodayRecord?.checkInAt && !hrShiftComplete;
   const activeBreak = myTodayRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
 
   // Live Timer for Working Hours (Safe timestamp parsing, never NaN)
@@ -352,10 +354,10 @@ export const HRProfileView: React.FC = () => {
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">SHIFT END</span>
               </div>
               <h3 className="text-xl font-black text-white">
-                {myTodayRecord?.checkOutAt ? `Checked Out • ${toISTTimeString(myTodayRecord.checkOutAt)}` : 'Check-Out'}
+                {hrShiftComplete ? `Checked Out • ${toISTTimeString(myTodayRecord.checkOutAt)}` : 'Check-Out'}
               </h3>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                {myTodayRecord?.checkOutAt ? 'Today\'s shift completed.' : 'Finalize today\'s total working duration.'}
+                {hrShiftComplete ? 'Today\'s shift completed.' : 'Finalize today\'s total working duration.'}
               </p>
             </div>
 
@@ -438,7 +440,7 @@ export const HRProfileView: React.FC = () => {
                 <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800/80 space-y-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Shift Completion Index</span>
                   <div className="text-lg font-mono font-black text-blue-400">
-                    {isCheckedIn ? `${shiftProgressPercent}%` : myTodayRecord?.checkOutAt ? '100%' : '0%'}
+                    {isCheckedIn ? `${shiftProgressPercent}%` : hrShiftComplete ? '100%' : '0%'}
                   </div>
                   <span className="text-[10px] text-slate-500 font-medium block">Daily completion percentage</span>
                 </div>
@@ -448,12 +450,12 @@ export const HRProfileView: React.FC = () => {
               <div className="space-y-1.5 pt-1">
                 <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
                   <span>Shift Progress Indicator</span>
-                  <span className="font-mono text-white">{isCheckedIn ? shiftProgressPercent : myTodayRecord?.checkOutAt ? 100 : 0}% Completed</span>
+                  <span className="font-mono text-white">{isCheckedIn ? shiftProgressPercent : hrShiftComplete ? 100 : 0}% Completed</span>
                 </div>
                 <div className="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
                   <div 
                     className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500 rounded-full transition-all duration-500"
-                    style={{ width: `${isCheckedIn ? shiftProgressPercent : myTodayRecord?.checkOutAt ? 100 : 0}%` }}
+                    style={{ width: `${isCheckedIn ? shiftProgressPercent : hrShiftComplete ? 100 : 0}%` }}
                   />
                 </div>
               </div>

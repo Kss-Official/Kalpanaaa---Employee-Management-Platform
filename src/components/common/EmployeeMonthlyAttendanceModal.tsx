@@ -18,7 +18,7 @@ import {
   Coffee
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
-import { toISTTimeString, toISTDateString } from '../../lib/absoluteTime';
+import { toISTTimeString, toISTDateString, todayInIST } from '../../lib/absoluteTime';
 
 interface EmployeeMonthlyAttendanceModalProps {
   employee: Employee;
@@ -82,7 +82,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   // Calculate detailed activity & break time breakdown for selected day (Fixes Root Cause 90% Meal Mismatch)
   const computeActivityBreakdown = (record: AttendanceRecord) => {
     const breaks = record.breaks || [];
-    const isToday = record.date === new Date().toISOString().split('T')[0];
+    const isToday = record.date === todayInIST();
     
     let teaBreakMins = 0;
     let mealBreakMins = 0;

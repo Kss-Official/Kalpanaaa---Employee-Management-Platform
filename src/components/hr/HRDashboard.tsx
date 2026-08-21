@@ -20,7 +20,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isShiftComplete } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface HRDashboardProps {
@@ -60,7 +60,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   const hrAttendanceRecord = targetEmployee 
     ? todayAttendance.find(a => a.id === getAttendanceDocId(hrUid, todayStr) || a.employeeUid === hrUid || a.employeeId === targetEmployee.id || a.employeeCode === targetEmployee.employeeId) 
     : null;
-  const isHrCheckedIn = !!hrAttendanceRecord?.checkInAt && !hrAttendanceRecord?.checkOutAt;
+  const isHrCheckedIn = !!hrAttendanceRecord?.checkInAt && !isShiftComplete(hrAttendanceRecord);
   const hrActiveBreak = hrAttendanceRecord?.breaks?.find(b => !b.endAt && !b.endTime);
 
   const [hrActionLoading, setHrActionLoading] = useState(false);

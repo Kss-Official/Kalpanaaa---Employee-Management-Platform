@@ -1,14 +1,14 @@
 import { collection, getDocs, getDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, formatTimestampToISO } from './attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, formatTimestampToISO, isFabricatedCheckoutOnly, isFabricatedShiftPair } from './attendanceEngine';
 import { AttendanceRecord, Employee } from '../types';
-import { INITIAL_EMPLOYEES } from './demoData';
 
 export interface MigrationResult {
   totalScanned: number;
   migratedCount: number;
   skippedExisting: number;
   alreadyCanonical: number;
+  repairedCount: number;
   errors: string[];
 }
 
@@ -56,16 +56,66 @@ function resolveTrueEmpUid(
 }
 
 /**
+ * P0 REPAIR ("Shift Complete everywhere" incident):
+ *
+ * An earlier version of this migration FABRICATED attendance facts — inventing
+ * checkInAt 09:45 / checkOutAt 19:30 IST (+05:30 literal strings), fake breaks
+ * and 564 working minutes — for any legacy document whose canonical target was
+ * missing. Every portal derives shift completion from `!!checkOutAt`, so one
+ * fabricated checkout instantly showed "Shift Complete" for that employee on
+ * ALL portals, and the corruption persisted in Firestore.
+ *
+ * Genuine timestamps can never match these signatures:
+ *   - real check-ins/check-outs are Firestore server Timestamps (objects)
+ *   - genuine system auto-checkouts store UTC "Z" ISO strings (.toISOString())
+ * Only the fabricated literals carry the `+05:30` suffix at exactly 09:45/19:30.
+ *
+ * Repair rules (conservative, idempotent):
+ *   - Fabricated PAIR (09:45 + 19:30, no SYSTEM auto-checkout note): reset the
+ *     record to an open state (null timestamps, zeroed minutes, no breaks).
+ *   - Fabricated checkout ONLY (real check-in preserved): null just checkOutAt.
+ * Returns a merge patch, or null when nothing needs repairing.
+ */
+function buildFabricationRepairPatch(data: any): any | null {
+  const hasAutoNote = typeof data.notes === 'string' && data.notes.includes('SYSTEM: Auto-checked out');
+  if (hasAutoNote) return null;
+
+  const fabricatedPair = isFabricatedShiftPair(data.checkInAt, data.checkOutAt);
+  const fabricatedCheckout = isFabricatedCheckoutOnly(data.checkOutAt);
+  if (!fabricatedCheckout) return null;
+
+  const patch: any = {
+    updatedAt: new Date().toISOString()
+  };
+
+  if (fabricatedPair && Number(data.workingMinutes) === 564) {
+    // Entire shift is invented — reopen the day.
+    patch.checkInAt = null;
+    patch.checkOutAt = null;
+    patch.workingMinutes = 0;
+    patch.totalBreakMinutes = 0;
+    patch.breaks = [];
+    patch.notes = ((typeof data.notes === 'string' ? data.notes + ' | ' : '') +
+      'MIGRATION REPAIR: removed fabricated shift timestamps').trim();
+  } else {
+    // Real check-in survived — only the checkout was invented.
+    patch.checkOutAt = null;
+    patch.notes = ((typeof data.notes === 'string' ? data.notes + ' | ' : '') +
+      'MIGRATION REPAIR: removed fabricated check-out timestamp').trim();
+  }
+
+  return patch;
+}
+
+/**
  * One-time migration function that copies legacy attendance documents
  * into the deterministic `attendance/{uid}_{YYYY-MM-DD}` schema,
  * preserving original timestamps, breaks, and employee identifiers.
  * IDEMPOTENT.
  *
- * ROOT-CAUSE FIX: when the canonical doc already exists, the legacy doc used to be
- * left in place forever (only `att-hist-*` were deleted). Those leftover legacy dups
- * are what made the frontend resolve a different record than backend transactions.
- * Now any missing attendance data is merged INTO the canonical doc and the legacy
- * duplicate is deleted — for every legacy id format.
+ * P0 CONTRACT: this migration NEVER invents attendance data. A record without
+ * a real check-out must stay open — SHIFT_COMPLETE may only ever be derived
+ * from a checkout that actually exists.
  */
 export async function runAttendanceMigration(): Promise<MigrationResult> {
   const result: MigrationResult = {
@@ -73,6 +123,7 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
     migratedCount: 0,
     skippedExisting: 0,
     alreadyCanonical: 0,
+    repairedCount: 0,
     errors: []
   };
 
@@ -95,17 +146,26 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
       });
     } catch { /* identity resolution degrades gracefully to doc-field derivation */ }
 
-    const existingCanonicalIds = new Set<string>();
-
     for (const docSnap of snap.docs) {
       const legacyId = docSnap.id;
-      const data = docSnap.data();
+      let data: any = { ...docSnap.data() };
 
       const canonicalUid = resolveTrueEmpUid(data, legacyId, employeesByCode, employeesById, employeesByName);
 
       const dateStr = getEmployeeWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (legacyId.includes('_') ? legacyId.split('_')[1] : new Date()));
       const targetCanonicalId = getAttendanceDocId(canonicalUid, dateStr);
-      existingCanonicalIds.add(targetCanonicalId);
+
+      // ── P0 repair pass: undo previously fabricated shifts (any doc, incl. canonical)
+      const repairPatch = buildFabricationRepairPatch(data);
+      if (repairPatch) {
+        try {
+          await setDoc(doc(db, 'attendance', legacyId), repairPatch, { merge: true });
+          data = { ...data, ...repairPatch };
+          result.repairedCount++;
+        } catch (err: any) {
+          result.errors.push(`Failed repairing ${legacyId}: ${err.message}`);
+        }
+      }
 
       if (legacyId === targetCanonicalId) {
         // Normalize in-place if date is not string
@@ -123,6 +183,7 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
         if (targetDocSnap.exists()) {
           // Merge anything the legacy dup knows that the canonical doc lacks,
           // then remove the duplicate so frontend & backend resolve ONE record.
+          // ONLY real data is copied — never defaults.
           const target = targetDocSnap.data();
           const patch: any = {};
           if (!target.checkInAt && data.checkInAt) patch.checkInAt = data.checkInAt;
@@ -140,12 +201,14 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
           continue;
         }
 
-        const checkInISO = formatTimestampToISO(data.checkInAt) || `${dateStr}T09:45:00.000+05:30`;
-        const checkOutISO = formatTimestampToISO(data.checkOutAt) || `${dateStr}T19:30:00.000+05:30`;
-        const createdISO = formatTimestampToISO(data.createdAt) || checkInISO;
-        const updatedISO = formatTimestampToISO(data.updatedAt) || checkOutISO;
+        // Migrate the legacy doc as-is. Missing timestamps stay missing — an
+        // open shift must NEVER be converted into a completed one.
+        const checkInISO = formatTimestampToISO(data.checkInAt);
+        const checkOutISO = formatTimestampToISO(data.checkOutAt);
+        const createdISO = formatTimestampToISO(data.createdAt) || checkInISO || new Date().toISOString();
+        const updatedISO = formatTimestampToISO(data.updatedAt) || checkOutISO || createdISO;
 
-        const migratedRecord: Partial<AttendanceRecord> = {
+        const migratedRecord: Record<string, any> = {
           ...data,
           id: targetCanonicalId,
           uid: canonicalUid,
@@ -158,19 +221,16 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
           checkOutAt: checkOutISO,
           createdAt: createdISO,
           updatedAt: updatedISO,
-          workingMinutes: Number(data.workingMinutes) > 0 ? Number(data.workingMinutes) : 564,
-          totalBreakMinutes: Number(data.totalBreakMinutes) || 45,
-          breaks: Array.isArray(data.breaks) && data.breaks.length > 0 ? data.breaks : [
-            { type: 'Tea Break', startAt: `${dateStr}T11:15:00+05:30`, endAt: `${dateStr}T11:30:00+05:30`, durationMinutes: 15 },
-            { type: 'Meal Break', startAt: `${dateStr}T13:30:00+05:30`, endAt: `${dateStr}T14:00:00+05:30`, durationMinutes: 30 }
-          ],
+          workingMinutes: Number(data.workingMinutes) > 0 ? Number(data.workingMinutes) : 0,
+          totalBreakMinutes: Number(data.totalBreakMinutes) > 0 ? Number(data.totalBreakMinutes) : 0,
+          breaks: Array.isArray(data.breaks) && data.breaks.length > 0 ? data.breaks : [],
           status: data.status || 'Present',
           attendanceMethod: data.attendanceMethod || 'Self Portal',
-          locationVerified: true
+          locationVerified: !!data.locationVerified
         };
+        delete migratedRecord.endTime; // legacy alias, superseded by endAt
 
         await setDoc(targetDocRef, migratedRecord, { merge: true });
-        existingCanonicalIds.add(targetCanonicalId);
 
         // Remove the legacy doc so exactly ONE document exists per employee + day.
         await deleteDoc(doc(db, 'attendance', legacyId)).catch(() => {});
@@ -181,52 +241,10 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
       }
     }
 
-    // Ensure all team members have confirmed records for current week past workdays (Mon 08-17, Tue 08-18, Wed 08-19)
-    const pastWeekDates = ['2026-08-17', '2026-08-18', '2026-08-19'];
-    for (const dStr of pastWeekDates) {
-      for (const emp of INITIAL_EMPLOYEES) {
-        if (emp.role === 'SUPER_ADMIN') continue;
-        const empUid = getCanonicalEmployeeUid(emp);
-        const canonId = getAttendanceDocId(empUid, dStr);
-        const altId1 = `${emp.employeeId}_${dStr}`;
-        const altId2 = `${emp.id}_${dStr}`;
-
-        if (!existingCanonicalIds.has(canonId) && !existingCanonicalIds.has(altId1) && !existingCanonicalIds.has(altId2)) {
-          const docRef = doc(db, 'attendance', canonId);
-          const docSnap = await getDoc(docRef);
-          if (!docSnap.exists()) {
-            const checkInISO = `${dStr}T09:45:00.000+05:30`;
-            const checkOutISO = `${dStr}T19:30:00.000+05:30`;
-            const rec: Partial<AttendanceRecord> = {
-              id: canonId,
-              uid: empUid,
-              employeeUid: empUid,
-              employeeId: emp.id,
-              employeeCode: emp.employeeId,
-              employeeName: emp.fullName,
-              department: emp.department || 'Engineering',
-              date: dStr,
-              checkInAt: checkInISO,
-              checkOutAt: checkOutISO,
-              createdAt: checkInISO,
-              updatedAt: checkOutISO,
-              workingMinutes: 564, // 9.4 hours
-              totalBreakMinutes: 45,
-              breaks: [
-                { type: 'Tea Break', startAt: `${dStr}T11:15:00+05:30`, endAt: `${dStr}T11:30:00+05:30`, durationMinutes: 15 },
-                { type: 'Meal Break', startAt: `${dStr}T13:30:00+05:30`, endAt: `${dStr}T14:00:00+05:30`, durationMinutes: 30 }
-              ],
-              status: 'Present',
-              attendanceMethod: 'Self Portal',
-              locationVerified: true
-            };
-            await setDoc(docRef, rec, { merge: true }).catch(() => {});
-            existingCanonicalIds.add(canonId);
-            result.migratedCount++;
-          }
-        }
-      }
-    }
+    // NOTE: the previous "past week backfill" block (which force-created
+    // completed 09:45→19:30 records for every employee) was removed entirely.
+    // Fabricating attendance history violates the SHIFT_COMPLETE contract and
+    // poisoned live production data during the P0 incident.
   } catch (err: any) {
     handleFirestoreError(err, OperationType.LIST, 'attendance');
     result.errors.push(`Migration query failed: ${err.message}`);

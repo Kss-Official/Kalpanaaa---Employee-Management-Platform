@@ -66,6 +66,48 @@ export function getWorkDate(
 export const getEmployeeWorkDate = getWorkDate;
 
 /**
+ * SHIFT_COMPLETE truth resolver — the ONLY sanctioned way to decide whether an
+ * employee's shift is over.
+ *
+ * Contract: SHIFT_COMPLETE is true ONLY when BOTH timestamps exist AND the
+ * checkout has actually happened (not in the future). A checkout timestamp
+ * dated AFTER `now` is definitionally fabricated (e.g. a pre-written 07:30 PM
+ * auto-checkout or a bad migration) and must NEVER complete a shift.
+ */
+export function isShiftComplete(
+  rec: AttendanceRecord | undefined | null,
+  nowMs: number = Date.now()
+): boolean {
+  if (!rec || !rec.checkInAt || !rec.checkOutAt) return false;
+  const outMs = safeGetTimestampMillis(rec.checkOutAt);
+  return outMs !== null && outMs <= nowMs;
+}
+
+/**
+ * Fabrication signature detectors (P0 "Shift Complete everywhere" incident).
+ *
+ * The legacy migration wrote invented shifts using literal IST-offset strings:
+ *   checkInAt  = `${date}T09:45:00.000+05:30`
+ *   checkOutAt = `${date}T19:30:00.000+05:30`
+ * Genuine system auto-checkouts instead store UTC "Z" ISO strings (from
+ * .toISOString()), and genuine manual checkouts store Firestore server
+ * Timestamps — neither can ever match these signatures.
+ */
+export function isFabricatedCheckoutOnly(checkOutAt: any): boolean {
+  const co = typeof checkOutAt === 'string' ? checkOutAt : '';
+  return co.includes('T19:30:00') && co.endsWith('+05:30');
+}
+
+export function isFabricatedShiftPair(checkInAt: any, checkOutAt: any): boolean {
+  const ci = typeof checkInAt === 'string' ? checkInAt : '';
+  return (
+    ci.includes('T09:45:00') &&
+    ci.endsWith('+05:30') &&
+    isFabricatedCheckoutOnly(checkOutAt)
+  );
+}
+
+/**
  * Phase 18 contract: LOCAL calendar date (YYYY-MM-DD) with NO UTC drift.
  * Unlike getWorkDate (which pins to the company timezone), this formats in the
  * device's own timezone — 23:30 local must stay the same calendar day.

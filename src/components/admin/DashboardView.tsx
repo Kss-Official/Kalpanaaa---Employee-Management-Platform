@@ -39,7 +39,7 @@ import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 import { toISTTimeString } from '../../lib/absoluteTime';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete } from '../../lib/attendanceEngine';
 import { Employee, AttendanceRecord } from '../../types';
 
 interface DashboardViewProps {
@@ -72,7 +72,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   };
   const displayName = activeEmployee?.fullName?.split(' ')[0] || 'there';
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getWorkDate(new Date());
   const todayRecords = attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
 
   const totalEmployeesCount = employees.filter(e => e.status === 'Active').length;
@@ -80,13 +80,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   const lateTodayCount = todayRecords.filter(a => a.status === 'Late').length;
   const absentTodayCount = todayRecords.filter(a => a.status === 'Absent').length;
   const onLeaveCount = employees.filter(e => e.status === 'On Leave').length;
-  const currentlyCheckedInCount = todayRecords.filter(a => a.checkInAt && !a.checkOutAt).length;
+  // P0 FIX: "currently checked in" excludes shifts with a real completed checkout
+  const currentlyCheckedInCount = todayRecords.filter(a => a.checkInAt && !isShiftComplete(a)).length;
 
-  // Compute 7-day attendance trend chart data
+  // Compute 7-day attendance trend chart data (IST day buckets)
   const trendData = Array.from({ length: 7 }).map((_, idx) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - idx));
-    const dStr = d.toISOString().split('T')[0];
+    const dStr = getWorkDate(d);
     const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' });
     const dayRecs = attendance.filter(a => a.date === dStr);
 
@@ -135,7 +136,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
     employee: employees.find(e => e.id === rec.employeeId || e.employeeId === rec.employeeCode)
   }));
   const onLeaveItems = employees.filter(e => e.status === 'On Leave').map(e => ({ employee: e }));
-  const activeNowItems = todayRecords.filter(a => a.checkInAt && !a.checkOutAt).map(rec => ({
+  const activeNowItems = todayRecords.filter(a => a.checkInAt && !isShiftComplete(a)).map(rec => ({
     record: rec,
     employee: employees.find(e => e.id === rec.employeeId || e.employeeId === rec.employeeCode)
   }));
