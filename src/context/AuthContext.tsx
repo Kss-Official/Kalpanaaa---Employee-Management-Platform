@@ -1990,7 +1990,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // would reject with "Already checked in for today."
     const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
 
-    const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
+    const isAsbin = (emp.email || '').toLowerCase().includes('asbin') || 
+      emp.employeeId === 'KSS2407004' || 
+      (emp.fullName || '').toLowerCase().includes('asbin');
+
+    const isApprovedWfh = !isAsbin && ((companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
       (emp.approvedWfhDates || []).includes(todayStr) ||
       leaveRequests.some(r => 
@@ -1999,7 +2003,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
         todayStr >= r.startDate && 
         todayStr <= r.endDate
-      );
+      ));
 
     const effectiveSettings: CompanySettings = {
       ...settings,
@@ -2135,7 +2139,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
     const recordId = existingRec?.id ?? canonicalId;
 
-    const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
+    const isAsbin = (emp.email || '').toLowerCase().includes('asbin') || 
+      emp.employeeId === 'KSS2407004' || 
+      (emp.fullName || '').toLowerCase().includes('asbin');
+
+    const isApprovedWfh = !isAsbin && ((companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
       (emp.approvedWfhDates || []).includes(todayStr) ||
       leaveRequests.some(r => 
@@ -2144,7 +2152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
         todayStr >= r.startDate && 
         todayStr <= r.endDate
-      );
+      ));
 
     // ATOMIC IDEMPOTENT TRANSACTION
     const docRef = doc(db, 'attendance', recordId);

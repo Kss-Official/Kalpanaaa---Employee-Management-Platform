@@ -444,19 +444,16 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                                 // Both check-in and check-out exist
                                 const diffMins = Math.max(0, Math.floor((endMs - startMs) / 60000) - totalBreakMins);
                                 hours = Math.round((diffMins / 60) * 10) / 10;
-                              } else if (startMs && d.dateStr === todayStr && !endMs) {
-                                // Live shift in progress today
+                              } else if (startMs && !endMs) {
+                                // Live shift in progress
                                 isLive = true;
-                                const liveMins = Math.max(0, Math.floor((Date.now() - startMs) / 60000) - totalBreakMins);
+                                const liveMins = Math.max(1, Math.floor((Date.now() - startMs) / 60000) - totalBreakMins);
                                 hours = Math.round((liveMins / 60) * 10) / 10;
-                              } else if (startMs && d.dateStr < todayStr) {
-                                // Past workday check-in: standard shift hours (10:00 to 19:30 IST minus 1h break = 8.5h or actual diff)
-                                const autoShiftEndMs = new Date(`${d.dateStr}T19:30:00+05:30`).getTime();
-                                const effectiveEndMs = !isNaN(autoShiftEndMs) && autoShiftEndMs > startMs ? autoShiftEndMs : (startMs + 9.5 * 3600000);
-                                const diffMins = Math.max(0, Math.floor((effectiveEndMs - startMs) / 60000) - Math.max(60, totalBreakMins));
-                                hours = Math.max(7.5, Math.round((diffMins / 60) * 10) / 10);
+                              } else if (startMs && d.dateStr <= todayStr) {
+                                isLive = true;
+                                const liveMins = Math.max(1, Math.floor((Date.now() - startMs) / 60000) - totalBreakMins);
+                                hours = Math.round((liveMins / 60) * 10) / 10;
                               } else if (rec.status === 'Present' || rec.status === 'Work From Home' || rec.isWfh) {
-                                // Marked present or WFH on past day without timestamp
                                 hours = 8.5;
                               } else if (rec.status === 'Half Day') {
                                 hours = 4.5;
@@ -470,14 +467,13 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                               d.dateStr >= r.startDate && d.dateStr <= r.endDate
                             );
                             if (!isOnLeave) {
-                              // Standard regular workday shift (9.4h - 9.5h)
                               const empCodeNum = parseInt(emp.employeeId.replace(/\D/g, '') || '1', 10);
                               const pseudoOffset = (empCodeNum % 3) * 0.1;
                               hours = Math.round((9.4 + pseudoOffset) * 10) / 10;
                             }
                           }
 
-                          const hasCheckIn = (hours !== null && hours > 0) || (isLive && hours !== null) || (d.dateStr === todayStr && !!rec?.checkInAt);
+                          const hasCheckIn = (hours !== null && hours > 0) || isLive || (d.dateStr === todayStr && !!rec?.checkInAt);
 
                           return (
                             <td key={d.dateStr} className="py-3 px-2 text-center">

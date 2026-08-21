@@ -96,24 +96,31 @@ export const EmployeeLeaveTab: React.FC = () => {
     }
   };
 
+  const isWfhDisabledForEmployee = 
+    activeEmployee?.email?.toLowerCase().includes('asbin') || 
+    activeEmployee?.employeeId === 'KSS2407004' || 
+    (activeEmployee?.fullName || '').toLowerCase().includes('asbin');
+
   return (
     <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-4 sm:p-8 shadow-2xl w-full space-y-6 backdrop-blur-md">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-4 mb-2">
         <div>
           <h2 className="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
             <CalendarDays className="w-5 h-5 text-blue-400 shrink-0" />
-            <span>My Leave &amp; WFH Requests</span>
+            <span>{isWfhDisabledForEmployee ? 'My Leave Requests' : 'My Leave & WFH Requests'}</span>
           </h2>
           <p className="text-slate-400 text-xs mt-1 leading-relaxed">Submit new requests and track your 4-stage approval status.</p>
         </div>
-        <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto shrink-0">
-          <button
-            onClick={() => { setType('WFH'); setShowForm(true); setFeedback(null); }}
-            className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 ${showForm && type === 'WFH' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300'} hover:bg-purple-500 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer w-full`}
-          >
-            <Plus className="w-4 h-4" />
-            <span>Request WFH</span>
-          </button>
+        <div className={`grid ${isWfhDisabledForEmployee ? 'grid-cols-1' : 'grid-cols-2'} gap-2.5 w-full sm:w-auto shrink-0`}>
+          {!isWfhDisabledForEmployee && (
+            <button
+              onClick={() => { setType('WFH'); setShowForm(true); setFeedback(null); }}
+              className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 ${showForm && type === 'WFH' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300'} hover:bg-purple-500 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer w-full`}
+            >
+              <Plus className="w-4 h-4" />
+              <span>Request WFH</span>
+            </button>
+          )}
           <button
             onClick={() => { setType('Leave'); setShowForm(true); setFeedback(null); }}
             className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 ${showForm && type === 'Leave' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300'} hover:bg-orange-500 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer w-full`}

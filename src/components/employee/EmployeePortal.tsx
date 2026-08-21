@@ -293,7 +293,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const activeBreakStartMs = safeGetTimestampMillis(openBreakStartAt);
 
     const computeWorkSec = () => {
-      const totalElapsedMs = Date.now() - startMs;
+      const totalElapsedMs = Math.max(0, Date.now() - startMs);
       const activeBreakMs = openBreakStartAt && activeBreakStartMs
         ? Math.max(0, Date.now() - activeBreakStartMs)
         : 0;
@@ -302,14 +302,13 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     };
 
     computeWorkSec();
-    if (openBreakStartAt) return; // interval pauses while a break is active
     const interval = setInterval(computeWorkSec, 1000);
     return () => clearInterval(interval);
   }, [
     todayRecord?.checkInAt,
     todayRecord?.checkOutAt,
     todayRecord?.totalBreakMinutes,
-    openBreakStartAt, // scalar — only changes on break start/end events
+    openBreakStartAt,
   ]);
 
   const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list'>('cards');
