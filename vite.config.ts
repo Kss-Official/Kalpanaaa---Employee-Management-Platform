@@ -6,6 +6,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({ command }) => {
   return {
+    // Build identifier surfaced in error_logs diagnostics (Phase 22)
+    define: {
+      __BUILD_ID__: JSON.stringify(new Date().toISOString().replace(/[:.]/g, '-'))
+    },
     plugins: [
       react(), 
       tailwindcss(),

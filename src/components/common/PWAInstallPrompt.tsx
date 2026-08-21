@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Download, X } from 'lucide-react';
 import { triggerHaptic } from '../../hooks/useHaptic';
 import { animations } from '../../lib/animations';
+import { safeGetString, safeSetString } from '../../lib/safeStorage';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -17,7 +18,8 @@ export const PWAInstallPrompt: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
   
   const [isDismissed, setIsDismissed] = useState(() => {
-    return localStorage.getItem('pwaPromptDismissed') === 'true';
+    // Guarded: blocked storage (Safari private mode) must never crash boot
+    return safeGetString('pwaPromptDismissed') === 'true';
   });
 
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches 
@@ -38,15 +40,17 @@ export const PWAInstallPrompt: React.FC = () => {
       }
     };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    window.addEventListener('appinstalled', () => {
+    const handleAppInstalled = () => {
       setIsVisible(false);
       setDeferredPrompt(null);
-    });
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, [isDismissed, isStandalone]);
 
@@ -71,7 +75,7 @@ export const PWAInstallPrompt: React.FC = () => {
 
       if (outcome === 'dismissed') {
          setIsDismissed(true);
-         localStorage.setItem('pwaPromptDismissed', 'true');
+         safeSetString('pwaPromptDismissed', 'true');
       }
     } else {
       // Fallback instructions if native prompt isn't available
@@ -90,7 +94,7 @@ export const PWAInstallPrompt: React.FC = () => {
     triggerHaptic('light');
     setIsVisible(false);
     setIsDismissed(true);
-    localStorage.setItem('pwaPromptDismissed', 'true');
+    safeSetString('pwaPromptDismissed', 'true');
   };
                        
   if (!isVisible || isStandalone) return null;

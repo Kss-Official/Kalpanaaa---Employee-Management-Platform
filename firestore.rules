@@ -47,6 +47,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Test collection used for the connectivity probe
+    match /test/{docId} {
+      allow read: if true;
+    }
+
     // ── 1. Users Collection ──
     match /users/{userId} {
       allow read: if isSignedIn() && (
@@ -105,7 +110,15 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // ── 5. Notifications Collection ──
+    // ── 5. Salary Disbursements (persisted payroll runs) ──
+    // SENSITIVE: reads require an authenticated session; deletes are impossible from clients.
+    match /salaryDisbursements/{recordId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(recordId);
+      allow delete: if false;
+    }
+
+    // ── 6. Notifications Collection ──
     match /notifications/{notifId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
@@ -113,13 +126,13 @@ service cloud.firestore {
       allow delete: if isHrAdmin() || isSuperAdmin();
     }
 
-    // ── 6. FCM Tokens Collection ──
+    // ── 7. FCM Tokens Collection ──
     match /fcmTokens/{tokenId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn();
     }
 
-    // ── 7. Settings & Configuration ──
+    // ── 8. Settings & Configuration ──
     match /settings/{settingId} {
       allow read: if isSignedIn();
       allow update, create: if isSignedIn();
@@ -131,13 +144,20 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
-    // ── 8. Workplace Rules ──
+    // ── 9. Workplace Rules ──
     match /companyRules/{ruleId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn();
     }
 
-    // ── 9. PM Projects & Kanban Tasks ──
+    // ── 10. Work Zones (geo-fence definitions) ──
+    match /workZones/{zoneId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── 11. PM Projects & Kanban Tasks ──
     match /projects/{projectId} {
       allow read, write: if isSignedIn();
     }
@@ -150,11 +170,20 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
-    // ── 10. Audit Logs (Immutable Append-Only) ──
+    // ── 12. Audit Logs (Immutable Append-Only) ──
     match /auditLogs/{logId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if false; // Append-only audit trail
+    }
+
+    // ── 13. Error Diagnostics (Phase 22 observability) ──
+    // CREATE stays open: failures can occur before authentication and must
+    // still be recorded. READ requires sign-in. Records are immutable.
+    match /error_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if true;
+      allow update, delete: if false;
     }
   }
 }

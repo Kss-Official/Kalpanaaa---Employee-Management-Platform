@@ -1,15 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { ShieldCheck, ShieldAlert, CheckCircle2, Building2, MapPin, Briefcase } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, CheckCircle2, Building2, MapPin, Briefcase, Loader2 } from 'lucide-react';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
+
+const LOOKUP_GRACE_MS = 8000;
 
 export const VerificationView: React.FC = () => {
   const { employees, settings } = useAuth();
   const [empId, setEmpId] = useState<string | null>(null);
+  // The public verify page must never show a false "Employee Not Found" while
+  // the Firestore employee list is still streaming in. Only report "not found"
+  // after the lookup grace period has elapsed.
+  const [lookupElapsed, setLookupElapsed] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setEmpId(params.get('empId'));
+    const timer = setTimeout(() => setLookupElapsed(true), LOOKUP_GRACE_MS);
+    return () => clearTimeout(timer);
   }, []);
 
   if (!empId) {
@@ -30,6 +38,15 @@ export const VerificationView: React.FC = () => {
   );
 
   if (!employee) {
+    if (!lookupElapsed) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+          <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
+          <h1 className="text-lg font-bold text-white">Verifying Employee…</h1>
+          <p className="text-slate-500 mt-2 text-xs">Checking ID {empId} against official records.</p>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
         <ShieldAlert className="w-16 h-16 text-rose-500 mb-4" />

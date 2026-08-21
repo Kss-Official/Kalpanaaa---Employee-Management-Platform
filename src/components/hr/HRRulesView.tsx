@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { safeGetJson, safeSetJson, safeGetString, safeSetString } from '../../lib/safeStorage';
 import {
   ShieldCheck,
   Building2,
@@ -85,25 +86,23 @@ export const HRRulesView: React.FC = () => {
     let seededLocally = false;
 
     const trySeed = (snapshotEmpty: boolean) => {
-      const alreadySeeded = localStorage.getItem('kss_v1_rules_seeded');
+      const alreadySeeded = safeGetString('kss_v1_rules_seeded');
       if (snapshotEmpty && !alreadySeeded && !seededLocally) {
         seededLocally = true;
         DEFAULT_RULES.forEach(r => {
           const seedId = `rule-${r.kind.toLowerCase()}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
           setDoc(doc(db, 'companyRules', seedId), { ...r, id: seedId }).catch(() => {});
         });
-        localStorage.setItem('kss_v1_rules_seeded', '1');
+        safeSetString('kss_v1_rules_seeded', '1');
       }
     };
 
-    try {
-      const cached = localStorage.getItem('kss_v1_company_rules');
-      if (cached) {
-        setRules(JSON.parse(cached));
-      } else {
-        setRules(DEFAULT_RULES);
-      }
-    } catch { /* ignore corrupted cache */ }
+    const cached = safeGetJson<WorkplaceRule[] | null>('kss_v1_company_rules', null);
+    if (cached && Array.isArray(cached)) {
+      setRules(cached);
+    } else {
+      setRules(DEFAULT_RULES);
+    }
 
     unsub = onSnapshot(collection(db, 'companyRules'), (snapshot) => {
       if (!snapshot.empty) {
@@ -113,7 +112,7 @@ export const HRRulesView: React.FC = () => {
         });
         fetched.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setRules(fetched);
-        localStorage.setItem('kss_v1_company_rules', JSON.stringify(fetched));
+        safeSetJson('kss_v1_company_rules', fetched);
       } else {
         trySeed(true);
       }
@@ -130,7 +129,7 @@ export const HRRulesView: React.FC = () => {
     setDoc(doc(db, 'companyRules', rule.id), rule).catch(err => console.warn('Rule save error:', err));
     const next = [...rules.filter(r => r.id !== rule.id), rule].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     setRules(next);
-    localStorage.setItem('kss_v1_company_rules', JSON.stringify(next));
+    safeSetJson('kss_v1_company_rules', next);
   };
 
   const handleAddRule = (e: React.FormEvent) => {
@@ -165,7 +164,7 @@ export const HRRulesView: React.FC = () => {
     deleteDoc(doc(db, 'companyRules', rule.id)).catch(err => console.warn('Rule delete error:', err));
     const next = rules.filter(r => r.id !== rule.id);
     setRules(next);
-    localStorage.setItem('kss_v1_company_rules', JSON.stringify(next));
+    safeSetJson('kss_v1_company_rules', next);
     showToast('Rule deleted');
   };
 
