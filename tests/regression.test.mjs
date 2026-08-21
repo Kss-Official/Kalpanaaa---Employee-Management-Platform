@@ -191,10 +191,10 @@ test('state machine: check-in blocked before shift start and after shift end', (
   t.enable({ apis: ['Date'] });
 
   try {
-    t.setTime(new Date(2026, 7, 20, 8, 30).getTime()); // 8:30 AM — before 10 AM
+    t.setTime(new Date(2026, 7, 20, 8, 30).getTime()); // 8:30 AM — before 9:30 AM
     let r = engine.evaluateAttendanceScan({}, undefined, baseSettings);
     assert.equal(r.allowed, false);
-    assert.match(r.message, /10:00 AM/);
+    assert.match(r.message, /09:30 AM/);
 
     t.setTime(new Date(2026, 7, 20, 19, 30).getTime()); // 7:30 PM — after strict end
     r = engine.evaluateAttendanceScan({}, undefined, baseSettings);

@@ -115,7 +115,7 @@ export const PMProjectsView: React.FC = () => {
       } else {
         // Seed Firestore with DEFAULT_TASKS if collection is empty
         DEFAULT_TASKS.forEach(t => {
-          setDoc(doc(db, 'projectTasks', t.id), t).catch(console.error);
+          setDoc(doc(db, 'projectTasks', t.id), cleanFirestorePayload(t)).catch(console.error);
         });
       }
     }, (err) => console.warn('[PMProjectsView] Firestore projectTasks listener error', err));

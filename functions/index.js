@@ -129,3 +129,36 @@ exports.sendFcmPushOnNotification = onDocumentCreated(
     }
   }
 );
+
+// ── Enterprise Disaster Recovery: Automated Daily Firestore Backup to Cloud Storage ──
+// Runs every night at 02:00 AM IST (20:30 UTC) to archive whole database snapshots.
+// Can be triggered manually or via Cloud Scheduler on Blaze plan.
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+
+exports.scheduledFirestoreBackup = onSchedule(
+  {
+    schedule: '30 20 * * *', // 02:00 AM IST daily
+    timeZone: 'Asia/Kolkata',
+    retryCount: 3,
+    memory: '512MiB'
+  },
+  async () => {
+    try {
+      const { v1 } = require('@google-cloud/firestore');
+      const client = new v1.FirestoreAdminClient();
+      const projectId = process.env.GCLOUD_PROJECT || 'kalpanaaa-employees-website';
+      const databaseName = client.databasePath(projectId, '(default)');
+      const bucketName = `gs://${projectId}-backups`;
+
+      console.info(`[KSS Backup] Starting automated Firestore export to ${bucketName}...`);
+      const [response] = await client.exportDocuments({
+        name: databaseName,
+        outputUriPrefix: `${bucketName}/${new Date().toISOString().split('T')[0]}`,
+        collectionIds: ['employees', 'attendance', 'leaveRequests', 'salaryDisbursements', 'projects', 'settings', 'auditLogs', 'companyRules']
+      });
+      console.info(`[KSS Backup] Firestore export initiated: ${response.name}`);
+    } catch (err) {
+      console.warn('[KSS Backup] Cloud Firestore export note: Ensure Firestore Admin API and Cloud Storage bucket are provisioned:', err.message);
+    }
+  }
+);

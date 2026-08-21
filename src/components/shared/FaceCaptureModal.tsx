@@ -43,6 +43,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
   
   const [stream, setStream] = useState<MediaStream | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const actionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [statusStep, setStatusStep] = useState<'LOADING_MODELS' | 'INITIALIZING' | 'CENTER_FACE' | 'SCANNING' | 'VERIFIED' | 'FAILED' | 'NOT_ENROLLED' | 'ERROR'>('LOADING_MODELS');
   const [feedbackText, setFeedbackText] = useState('Loading face recognition neural network models...');
   const [confidencePercent, setConfidencePercent] = useState<number | null>(null);
@@ -83,6 +84,10 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
   // Load Models & Start Camera Stream
   useEffect(() => {
     if (!isOpen) {
+      if (actionTimerRef.current) {
+        clearTimeout(actionTimerRef.current);
+        actionTimerRef.current = null;
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
@@ -140,6 +145,10 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
 
     return () => {
       isMounted = false;
+      if (actionTimerRef.current) {
+        clearTimeout(actionTimerRef.current);
+        actionTimerRef.current = null;
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
@@ -170,7 +179,8 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
     setFeedbackText('✓ Face Biometrics Successfully Registered & Verified!');
     triggerHaptic('success');
 
-    setTimeout(() => {
+    if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+    actionTimerRef.current = setTimeout(() => {
       onSuccess();
       onClose();
     }, 1200);
@@ -226,7 +236,8 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
               active = false;
               clearInterval(interval);
 
-              setTimeout(() => {
+              if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+              actionTimerRef.current = setTimeout(() => {
                 onSuccess();
                 onClose();
               }, 1200);

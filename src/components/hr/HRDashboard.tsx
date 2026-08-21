@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { 
   Users, 
@@ -20,7 +20,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isShiftComplete } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isShiftComplete, resolveAttendanceRecord } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface HRDashboardProps {
@@ -54,6 +54,10 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     rec: resolveAttendanceRecord(attendance, emp, todayStr)
   }));
 
+  const todayAttendance = employeeTodayRecords
+    .map(({ rec }) => rec)
+    .filter((rec): rec is NonNullable<typeof rec> => !!rec && !!rec.checkInAt);
+
   const totalEmployees = employees.length;
   const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave').length;
   const onDutyCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec)).length;
@@ -75,7 +79,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   // HR Personal Attendance Record for today
   const hrAttendanceRecord = resolveAttendanceRecord(attendance, targetEmployee, todayStr);
   const isHrCheckedIn = !!hrAttendanceRecord?.checkInAt && !isShiftComplete(hrAttendanceRecord);
-  const hrActiveBreak = hrAttendanceRecord?.breaks?.find(b => !b.endAt && !b.endTime);
+  const hrActiveBreak = hrAttendanceRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
 
   const [hrActionLoading, setHrActionLoading] = useState(false);
   const [hrStatusMessage, setHrStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);

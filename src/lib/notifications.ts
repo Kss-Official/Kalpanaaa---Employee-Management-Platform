@@ -178,6 +178,10 @@ export const registerFcmToken = async (
       return;
     }
 
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !navigator.serviceWorker) {
+      return;
+    }
+
     const registration = await navigator.serviceWorker.ready;
     const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
 

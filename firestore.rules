@@ -80,13 +80,28 @@ service cloud.firestore {
 
     // ── 3. Attendance Records (Live Workforce & Single Source of Truth) ──
     match /attendance/{recordId} {
-      allow read, create, update: if true;
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (
+        isHrAdmin() || 
+        isSuperAdmin() || 
+        request.resource.data.uid == request.auth.uid || 
+        request.resource.data.employeeUid == request.auth.uid ||
+        request.resource.data.employeeId == getEmployeeId()
+      );
       allow delete: if isSuperAdmin();
     }
 
     // ── 4. Leave & WFH Requests Collection ──
     match /leaveRequests/{requestId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isHrAdmin() || 
+        isSuperAdmin() || 
+        isProjectManager() || 
+        resource.data.employeeUid == request.auth.uid ||
+        resource.data.employeeId == getEmployeeId()
+      );
       allow delete: if isSuperAdmin();
     }
 
@@ -94,21 +109,28 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    // ── 5. Salary Disbursements (persisted payroll runs) ──
+    // ── 5. Salary Disbursements (Enterprise Payroll Runs & Payslips) ──
     match /salaryDisbursements/{recordId} {
-      allow read, create, update: if true;
-      allow delete: if false;
+      // HR/Admin can read all; Employees can read ONLY their own payslip
+      allow read: if isSignedIn() && (
+        isHrAdmin() || 
+        isSuperAdmin() || 
+        resource.data.employeeUid == request.auth.uid || 
+        resource.data.employeeId == getEmployeeId()
+      );
+      allow create, update: if isHrAdmin() || isSuperAdmin();
+      allow delete: if false; // Immutable payroll records
     }
 
     // ── 6. Notifications Collection ──
     match /notifications/{notifId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
       allow delete: if isHrAdmin() || isSuperAdmin();
     }
 
     // ── 7. FCM Tokens Collection ──
     match /fcmTokens/{tokenId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // ── 8. Settings & Configuration ──

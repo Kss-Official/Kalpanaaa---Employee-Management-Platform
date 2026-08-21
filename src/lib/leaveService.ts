@@ -19,11 +19,19 @@ export class LeaveService {
    */
   static getDateRangeArray(startDate: string, endDate: string): string[] {
     const dates: string[] = [];
-    const current = new Date(startDate);
-    const end = new Date(endDate);
+    if (!startDate || !endDate) return dates;
+    const [sy, sm, sd] = startDate.split('-').map(Number);
+    const [ey, em, ed] = endDate.split('-').map(Number);
+    if (!sy || !sm || !sd || !ey || !em || !ed) return dates;
+
+    const current = new Date(sy, sm - 1, sd, 12, 0, 0);
+    const end = new Date(ey, em - 1, ed, 12, 0, 0);
 
     while (current <= end) {
-      dates.push(current.toISOString().split('T')[0]);
+      const y = current.getFullYear();
+      const m = String(current.getMonth() + 1).padStart(2, '0');
+      const d = String(current.getDate()).padStart(2, '0');
+      dates.push(`${y}-${m}-${d}`);
       current.setDate(current.getDate() + 1);
     }
     return dates;

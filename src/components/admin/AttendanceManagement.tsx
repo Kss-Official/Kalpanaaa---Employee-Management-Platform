@@ -141,13 +141,14 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
   const handleForceCheckout = () => {
     if (!editingRecord) return;
     
-    // Set to standard 7:30 PM checkout time for that date
-    const autoCheckOutDate = new Date(`${editingRecord.date}T19:30:00`);
+    // Set to standard 7:30 PM checkout time for that date in IST
+    const autoCheckOutDate = new Date(`${editingRecord.date}T19:30:00+05:30`);
     const forceCheckOutTime = autoCheckOutDate.toISOString();
     
     let totalMins = 0;
-    if (editingRecord.checkInAt) {
-      totalMins = Math.floor((autoCheckOutDate.getTime() - new Date(editingRecord.checkInAt).getTime()) / 60000);
+    const checkInMs = safeGetTimestampMillis(editingRecord.checkInAt);
+    if (checkInMs) {
+      totalMins = Math.floor((autoCheckOutDate.getTime() - checkInMs) / 60000);
       if (editingRecord.totalBreakMinutes) {
         totalMins = Math.max(0, totalMins - editingRecord.totalBreakMinutes);
       }

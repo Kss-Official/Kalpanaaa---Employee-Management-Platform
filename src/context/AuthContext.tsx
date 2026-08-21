@@ -17,7 +17,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload, subscribeWithRecovery, signInAnonymously } from '../lib/firebase';
-import { Employee, EmployeeStatus, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
+import { Employee, EmployeeStatus, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod, BreakType } from '../types';
 import {
   INITIAL_EMPLOYEES,
   generateInitialAttendance,
@@ -551,7 +551,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       body: `CEO & CTO have declared Work From Home for all employees on ${date}. No GPS check-in restriction applies. Stay safe and productive! 🏠`,
       audience: ['ALL'],
       actorName: 'CEO & CTO Office',
-      createdAt: new Date(date + 'T09:00:00').toISOString()
+      createdAt: new Date(`${date}T09:00:00+05:30`).toISOString()
     }));
 
     const synthesized = [...wfhAnnounceNotifs, ...leaveNotifs, ...attNotifs];
@@ -1048,6 +1048,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (deduplicated.length > 0) {
               setEmployees(deduplicated);
+              setActiveEmployee(prev => {
+                if (!prev) return prev;
+                const fresh = deduplicated.find(e => e.id === prev.id || e.employeeId === prev.employeeId || (prev.email && e.email?.toLowerCase() === prev.email.toLowerCase()));
+                if (!fresh) return prev;
+                if (fresh.status === 'Terminated' || fresh.status === 'Suspended') {
+                  console.warn('[Auth] Active employee status changed to', fresh.status, '— logging out.');
+                  setTimeout(() => logout(), 0);
+                  return null;
+                }
+                return { ...prev, ...fresh };
+              });
             }
           } else {
             // Seed initial employees if empty
