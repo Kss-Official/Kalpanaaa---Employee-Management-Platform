@@ -431,7 +431,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                           <span className="text-[10px] text-slate-500">{emp.designation}</span>
                         </td>
 
-                        {/* Real Hours Calculated per Date via Safe Parsing */}
+                        {/* Exact Real Hours Calculated per Date via Safe Parsing */}
                         {weekDays.map(d => {
                           const rec = resolveAttendanceRecord(attendance, emp, d.dateStr);
 
@@ -448,35 +448,17 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                               const totalBreakMins = rec.totalBreakMinutes || (rec.breaks || []).reduce((acc, b) => acc + (b.durationMinutes || 0), 0) || 0;
 
                               if (startMs && endMs && endMs > startMs) {
-                                // Both check-in and check-out exist
+                                // Both check-in and check-out exist: exact recorded duration
                                 const diffMins = Math.max(0, Math.floor((endMs - startMs) / 60000) - totalBreakMins);
                                 hours = Math.round((diffMins / 60) * 10) / 10;
-                              } else if (startMs && !endMs) {
-                                // Live shift in progress
+                              } else if (startMs && !endMs && d.dateStr === todayStr) {
+                                // Live shift in progress today: exact real-time live elapsed duration
                                 isLive = true;
                                 const liveMins = Math.max(1, Math.floor((Date.now() - startMs) / 60000) - totalBreakMins);
                                 hours = Math.round((liveMins / 60) * 10) / 10;
-                              } else if (startMs && d.dateStr <= todayStr) {
-                                isLive = true;
-                                const liveMins = Math.max(1, Math.floor((Date.now() - startMs) / 60000) - totalBreakMins);
-                                hours = Math.round((liveMins / 60) * 10) / 10;
-                              } else if (rec.status === 'Present' || rec.status === 'Work From Home' || rec.isWfh) {
-                                hours = 8.5;
                               } else if (rec.status === 'Half Day') {
                                 hours = 4.5;
                               }
-                            }
-                          } else if (d.dateStr < todayStr) {
-                            // If no record exists for past sprint weekdays, check if on leave
-                            const isOnLeave = leaveRequests.some(r =>
-                              r.status === 'Approved' &&
-                              (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
-                              d.dateStr >= r.startDate && d.dateStr <= r.endDate
-                            );
-                            if (!isOnLeave) {
-                              const empCodeNum = parseInt(emp.employeeId.replace(/\D/g, '') || '1', 10);
-                              const pseudoOffset = (empCodeNum % 3) * 0.1;
-                              hours = Math.round((9.4 + pseudoOffset) * 10) / 10;
                             }
                           }
 
