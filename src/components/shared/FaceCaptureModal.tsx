@@ -42,6 +42,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [statusStep, setStatusStep] = useState<'LOADING_MODELS' | 'INITIALIZING' | 'CENTER_FACE' | 'SCANNING' | 'VERIFIED' | 'FAILED' | 'NOT_ENROLLED' | 'ERROR'>('LOADING_MODELS');
   const [feedbackText, setFeedbackText] = useState('Loading face recognition neural network models...');
   const [confidencePercent, setConfidencePercent] = useState<number | null>(null);
@@ -82,8 +83,9 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
   // Load Models & Start Camera Stream
   useEffect(() => {
     if (!isOpen) {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
         setStream(null);
       }
       return;
@@ -113,7 +115,10 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
         }
 
         if (isMounted && mediaStream) {
+          streamRef.current = mediaStream;
           setStream(mediaStream);
+        } else if (mediaStream) {
+          mediaStream.getTracks().forEach(t => t.stop());
         }
 
         await loadFaceModels();
@@ -135,8 +140,9 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
 
     return () => {
       isMounted = false;
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
       }
     };
   }, [isOpen]);

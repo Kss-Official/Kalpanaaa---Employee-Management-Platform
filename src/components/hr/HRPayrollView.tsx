@@ -5,6 +5,7 @@ import { Banknote, Download, FileText, CheckCircle2, TrendingUp, DollarSign, Sen
 import { SalaryDisbursement, Employee, AttendanceRecord } from '../../types';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { generatePayslipPdf } from '../../lib/pdfGenerator';
+import { isAttendanceForEmployee } from '../../lib/attendanceEngine';
 
 export const HRPayrollView: React.FC = () => {
   const { employees, attendance, activeEmployee, role, settings } = useAuth();
@@ -95,7 +96,7 @@ export const HRPayrollView: React.FC = () => {
   const disbursements = employees.map((emp, idx) => {
     const custom = manualAdjustments[emp.id];
 
-    const empAttendance = attendance.filter(a => (a.employeeId === emp.id || a.employeeCode === emp.employeeId));
+    const empAttendance = attendance.filter(a => isAttendanceForEmployee(a, emp));
     const autoDaysWorked = empAttendance.length > 0 ? empAttendance.filter(a => a.status === 'Present' || a.status === 'Work From Home' || a.status === 'Late').length : (22 - (idx % 2));
     
     const daysWorked = custom?.daysWorked !== undefined ? custom.daysWorked : autoDaysWorked;
