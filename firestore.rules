@@ -7,28 +7,37 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // P0 FIX: get() THROWS when the document does not exist, which denied every
+    // rule that touched getUserDoc() for accounts lacking a users/{uid} doc.
+    // exists() never throws — role simply resolves to null (still unauthorized),
+    // so authorization outcomes are unchanged for well-formed data while the
+    // crash-deny path is removed.
+    function userDocExists() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function getUserDoc() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
     function getRole() {
-      return getUserDoc().role;
+      return userDocExists() ? getUserDoc().role : null;
     }
 
     function getEmployeeId() {
-      return getUserDoc().employeeId;
+      return userDocExists() ? getUserDoc().employeeId : null;
     }
 
     function isSuperAdmin() {
       return isSignedIn() && (
-        getUserDoc().role == 'SUPER_ADMIN' || 
+        getRole() == 'SUPER_ADMIN' || 
         (request.auth.token.role != null && (request.auth.token.role == 'SUPER_ADMIN' || request.auth.token.role == 'superadmin'))
       );
     }
 
     function isHrAdmin() {
       return isSignedIn() && (
-        getUserDoc().role == 'HR_ADMIN' || 
+        getRole() == 'HR_ADMIN' || 
         isSuperAdmin() || 
         (request.auth.token.role != null && (request.auth.token.role == 'HR_ADMIN' || request.auth.token.role == 'hr_admin' || request.auth.token.role == 'hr' || request.auth.token.role == 'SUPER_ADMIN' || request.auth.token.role == 'superadmin'))
       );
@@ -36,7 +45,7 @@ service cloud.firestore {
 
     function isProjectManager() {
       return isSignedIn() && (
-        getUserDoc().role == 'PROJECT_MANAGER' || 
+        getRole() == 'PROJECT_MANAGER' || 
         isSuperAdmin() ||
         (request.auth.token.role != null && (request.auth.token.role == 'PROJECT_MANAGER' || request.auth.token.role == 'project_manager' || request.auth.token.role == 'pm'))
       );

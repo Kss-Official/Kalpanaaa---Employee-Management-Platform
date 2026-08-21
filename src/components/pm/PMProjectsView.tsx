@@ -21,8 +21,8 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { ProjectTask, TaskStatus, TaskPriority } from '../../types';
-import { db, cleanFirestorePayload } from '../../lib/firebase';
-import { collection, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
+import { db, cleanFirestorePayload, subscribeWithRecovery } from '../../lib/firebase';
+import { collection, setDoc, doc, deleteDoc } from 'firebase/firestore';
 
 const DEFAULT_TASKS: ProjectTask[] = [
   {
@@ -84,7 +84,7 @@ const DEFAULT_TASKS: ProjectTask[] = [
 ];
 
 export const PMProjectsView: React.FC = () => {
-  const { employees, activeEmployee } = useAuth();
+  const { employees, activeEmployee, isAuthenticated } = useAuth();
   const [activeView, setActiveView] = useState<'kanban' | 'roadmap'>('kanban');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -103,8 +103,10 @@ export const PMProjectsView: React.FC = () => {
   });
 
   // Real-time Firestore Sync for Project Tasks (Addresses Test P14 Contract)
+  // P0 FIX: auth-gated + transient-error recovery (see subscribeWithRecovery).
   useEffect(() => {
-    const unsubTasks = onSnapshot(collection(db, 'projectTasks'), (snapshot) => {
+    if (!isAuthenticated) return;
+    const unsubTasks = subscribeWithRecovery(collection(db, 'projectTasks'), (snapshot) => {
       if (!snapshot.empty) {
         const fetchedTasks: ProjectTask[] = [];
         snapshot.forEach(d => fetchedTasks.push(d.data() as ProjectTask));
@@ -119,7 +121,7 @@ export const PMProjectsView: React.FC = () => {
     }, (err) => console.warn('[PMProjectsView] Firestore projectTasks listener error', err));
 
     return () => unsubTasks();
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     localStorage.setItem('kss_pm_tasks', JSON.stringify(tasks));

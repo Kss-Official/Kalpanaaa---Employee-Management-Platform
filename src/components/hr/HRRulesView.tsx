@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, subscribeWithRecovery } from '../../lib/firebase';
+import { useAuth } from '../../context/AuthContext';
 import { safeGetJson, safeSetJson, safeGetString, safeSetString } from '../../lib/safeStorage';
 import {
   ShieldCheck,
@@ -61,6 +62,7 @@ const DEFAULT_RULES: WorkplaceRule[] = [
 ];
 
 export const HRRulesView: React.FC = () => {
+  const { isAuthenticated } = useAuth();
   const [activeKind, setActiveKind] = useState<RuleKind>('Company');
   const [rules, setRules] = useState<WorkplaceRule[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -104,7 +106,13 @@ export const HRRulesView: React.FC = () => {
       setRules(DEFAULT_RULES);
     }
 
-    unsub = onSnapshot(collection(db, 'companyRules'), (snapshot) => {
+    // P0 FIX: auth-gated + transient-error recovery (see subscribeWithRecovery).
+    if (!isAuthenticated) {
+      setIsSyncing(false);
+      return;
+    }
+
+    unsub = subscribeWithRecovery(collection(db, 'companyRules'), (snapshot) => {
       if (!snapshot.empty) {
         const fetched: WorkplaceRule[] = [];
         snapshot.forEach(docSnap => {
@@ -123,7 +131,7 @@ export const HRRulesView: React.FC = () => {
     });
 
     return () => unsub();
-  }, []);
+  }, [isAuthenticated]);
 
   const persist = (rule: WorkplaceRule) => {
     setDoc(doc(db, 'companyRules', rule.id), rule).catch(err => console.warn('Rule save error:', err));

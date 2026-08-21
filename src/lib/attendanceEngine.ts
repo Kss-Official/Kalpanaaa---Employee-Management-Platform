@@ -66,6 +66,65 @@ export function getWorkDate(
 export const getEmployeeWorkDate = getWorkDate;
 
 /**
+ * Phase 18 contract: LOCAL calendar date (YYYY-MM-DD) with NO UTC drift.
+ * Unlike getWorkDate (which pins to the company timezone), this formats in the
+ * device's own timezone — 23:30 local must stay the same calendar day.
+ * Falls back to today's date for invalid input, never throws, never NaN.
+ */
+export function getLocalDateString(dateInput: any = new Date()): string {
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (!d || isNaN(d.getTime())) {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Phase 4 contract alias: match an attendance record to an employee across
+ * id / uid / employeeCode representations. Same resolver as
+ * isAttendanceForEmployee (record-first argument order).
+ */
+export const isRecordForEmployee = isAttendanceForEmployee;
+
+/**
+ * Phase 18 contract: shift-capped working minutes.
+ *
+ * Elapsed minutes between check-in and check-out, capped at 7:00 PM (19:00)
+ * OF THE RECORD'S WORK DATE so a forgotten check-out at 2 AM cannot inflate
+ * the previous day into a 16-hour shift. Break minutes are subtracted and
+ * the result floors at zero. Missing check-in yields 0.
+ */
+export function computeShiftWorkingMinutes(
+  dateStr: string,
+  checkInISO: string | null | undefined,
+  checkOutISO: string | null | undefined,
+  breakMinutes: number = 0
+): number {
+  if (!checkInISO) return 0;
+  const checkInMs = new Date(checkInISO).getTime();
+  if (isNaN(checkInMs)) return 0;
+
+  // Shift end = 19:00 LOCAL time of the record's work date
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  let capMs: number;
+  if (y && m && d) {
+    capMs = new Date(y, m - 1, d, 19, 0, 0, 0).getTime();
+  } else {
+    const fallbackCap = new Date(checkInISO);
+    fallbackCap.setHours(19, 0, 0, 0);
+    capMs = fallbackCap.getTime();
+  }
+
+  let endMs = checkOutISO ? new Date(checkOutISO).getTime() : Date.now();
+  if (isNaN(endMs)) endMs = Date.now();
+  endMs = Math.min(endMs, capMs);
+
+  const rawMinutes = Math.floor(Math.max(0, endMs - checkInMs) / 60000);
+  return Math.max(0, rawMinutes - Math.max(0, Number(breakMinutes) || 0));
+}
+
+/**
  * Deterministic Doc ID generator: attendance/{uid}_{YYYY-MM-DD}
  */
 export function getAttendanceDocId(uid: string, dateStr: string): string {
@@ -246,6 +305,55 @@ export function isAttendanceForEmployee(
 }
 
 /**
+ * Single Source of Truth resolver for "today's attendance record".
+ *
+ * ROOT-CAUSE FIX: Firestore may contain BOTH a canonical doc ({uid}_{date}) and a
+ * legacy doc (KSS…_date / emp…_date) for the same employee + work-day. A bare
+ * `attendance.find(isAttendanceForEmployee)` returns whichever duplicate sorts first,
+ * so the UI could render the stale/blank record while backend transactions target the
+ * canonical doc — producing "Already checked in" popups on a page that still shows
+ * the Check-In button.
+ *
+ * Resolution priority:
+ *   1. Exact canonical doc ID match ({uid}_{date})
+ *   2. Any matching record that actually HAS a checkInAt (most recently updated wins)
+ *   3. Any other fuzzy match (legacy fallback)
+ */
+export function resolveAttendanceRecord(
+  attendance: AttendanceRecord[],
+  employeeOrUid: any,
+  targetDate?: string
+): AttendanceRecord | undefined {
+  if (!Array.isArray(attendance) || attendance.length === 0 || !employeeOrUid) return undefined;
+
+  const date = targetDate ? getWorkDate(targetDate) : undefined;
+  const canonicalUid = getCanonicalEmployeeUid(employeeOrUid);
+
+  const matches = attendance.filter(rec => isAttendanceForEmployee(rec, employeeOrUid, date));
+
+  if (matches.length === 0) return undefined;
+  if (matches.length === 1) return matches[0];
+
+  // 1. Exact canonical document ID: {uid}_{YYYY-MM-DD}
+  if (canonicalUid && date) {
+    const canonicalId = getAttendanceDocId(canonicalUid, date);
+    const byCanonicalId = matches.find(rec => rec.id === canonicalId);
+    if (byCanonicalId) return byCanonicalId;
+  }
+
+  // 2. Prefer the record that has real check-in data (never show a stale blank dup)
+  const checkedIn = matches
+    .filter(rec => !!rec.checkInAt)
+    .sort((a, b) => safeGetTimestampMillis(b.updatedAt || b.checkInAt)! - safeGetTimestampMillis(a.updatedAt || a.checkInAt)!);
+  if (checkedIn.length > 0) return checkedIn[0];
+
+  // 3. Deterministic last resort: most recently updated among blanks
+  return matches
+    .slice()
+    .sort((a, b) => (safeGetTimestampMillis(b.updatedAt || b.createdAt) || 0) - (safeGetTimestampMillis(a.updatedAt || a.createdAt) || 0))[0];
+}
+
+/**
  * Haversine formula to calculate distance between two GPS points in meters
  */
 export function calculateGpsDistanceMeters(
@@ -423,6 +531,20 @@ export function evaluateAttendanceScan(
       };
     }
 
+    // EVENING TIME WINDOW RULE: mirror of the morning gate. After shift end
+    // (07:30 PM IST) a fresh check-in would corrupt the work day (e.g. a
+    // forgotten terminal scanning past midnight creates a 16-hour blob).
+    if (currentHourIST > 19 || (currentHourIST === 19 && currentMinIST >= 30)) {
+      return {
+        allowed: false,
+        action: 'CHECK_IN',
+        status: 'Present',
+        locationVerified: false,
+        distanceMeters: 0,
+        message: `Check-In Blocked: Today's shift ended at 07:30 PM IST. New check-ins are not permitted after shift end. Please contact HR if you believe this is an error.`
+      };
+    }
+
     const lateThreshold = new Date();
     lateThreshold.setHours(10, 30, 0, 0);
 
@@ -452,7 +574,18 @@ export function evaluateAttendanceScan(
   if (todayRecord.checkInAt && !todayRecord.checkOutAt) {
     // Perform CHECK_OUT
     if (!isApprovedWfh && isGpsEnforced && !locationVerified) {
-      if (userLat === undefined || userLon === undefined) {
+      // FALLBACK: trust the verified check-in location evidence stored on the
+      // record when the live GPS fix is missing or has drifted outside the
+      // radius. The employee was already verified at office for THIS shift —
+      // GPS loss at checkout must not trap them inside the terminal.
+      const hasStoredVerifiedLocation =
+        todayRecord.locationVerified === true &&
+        typeof todayRecord.distanceFromOffice === 'number';
+
+      if (hasStoredVerifiedLocation) {
+        locationVerified = true;
+        distanceMeters = todayRecord.distanceFromOffice as number;
+      } else if (userLat === undefined || userLon === undefined) {
         return {
           allowed: false,
           action: 'CHECK_OUT',
@@ -461,17 +594,17 @@ export function evaluateAttendanceScan(
           distanceMeters: 0,
           message: 'GPS Location Required for Check-Out.'
         };
+      } else {
+        const radius = settings.allowedRadiusMeters || 300;
+        return {
+          allowed: false,
+          action: 'CHECK_OUT',
+          status: todayRecord.status as 'Present' | 'Late' | 'Half Day',
+          locationVerified: false,
+          distanceMeters,
+          message: `Check-Out Blocked: You are ${distanceMeters}m away from company office (Allowed limit: ${radius}m).`
+        };
       }
-
-      const radius = settings.allowedRadiusMeters || 300;
-      return {
-        allowed: false,
-        action: 'CHECK_OUT',
-        status: todayRecord.status as 'Present' | 'Late' | 'Half Day',
-        locationVerified: false,
-        distanceMeters,
-        message: `Check-Out Blocked: You are ${distanceMeters}m away from company office (Allowed limit: ${radius}m).`
-      };
     }
 
     return {

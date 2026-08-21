@@ -16,7 +16,7 @@ import {
   runTransaction,
   serverTimestamp
 } from 'firebase/firestore';
-import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload } from '../lib/firebase';
+import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload, subscribeWithRecovery } from '../lib/firebase';
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
 import {
   INITIAL_EMPLOYEES,
@@ -36,10 +36,11 @@ import {
   getCanonicalEmployeeUid,
   formatTimestampToISO,
   safeGetTimestampMillis,
-  isAttendanceForEmployee,
+  resolveAttendanceRecord,
   COMPANY_TIMEZONE
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
+import { classifyError, shouldFallbackToLocalLogin } from '../lib/errors';
 import { fetchAbsoluteTime, toISTTimeString } from '../lib/absoluteTime';
 import { sendKssNotification, sendAdminBroadcast, registerFcmToken, KssNotification } from '../lib/notifications';
 import { clearAllFaceEngineState } from '../lib/faceRecognitionEngine';
@@ -300,6 +301,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Session is always ready immediately — activeEmployee is restored synchronously above
   const [isSessionReady, setIsSessionReady] = useState<boolean>(true);
   const [attendanceSyncStatus, setAttendanceSyncStatus] = useState<'loading' | 'synced'>('loading');
+
+  // P0 INCIDENT FIX: verified Firebase Auth identity driving the Firestore listener
+  // lifecycle. Listeners may only attach AFTER onAuthStateChanged has resolved a
+  // real user (token validated), and must detach when that identity disappears
+  // (sign-out / failed token refresh). Attaching auth-blind at mount caused every
+  // listener to die permanently on permission-denied and never recover.
+  const [authUid, setAuthUid] = useState<string | null>(null);
 
   // employeesRef always mirrors the current employees state for use in one-time effects
   const employeesRef = useRef<Employee[]>([]);
@@ -830,7 +838,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 
   // Sync to & from Firestore
+  //
+  // P0 INCIDENT FIX — listener lifecycle is now owned by Firebase Auth:
+  //   BEFORE: this effect ran once on mount ([] deps) and attached all listeners
+  //   while request.auth was still null (session restore pending or local-login
+  //   session). Firestore denied every query, each listener died permanently
+  //   (permission-denied listeners never retry), and after a successful login
+  //   nothing re-attached them → ALL portals frozen with "Missing or insufficient
+  //   permissions".
+  //   AFTER: listeners attach only when authUid becomes non-null (token verified),
+  //   re-attach on every login, and detach cleanly on sign-out / token death.
   useEffect(() => {
+    if (!authUid) {
+      // No verified Firebase session: nothing to sync. Mark sync complete so the
+      // UI falls back to cached/local data instead of spinning forever.
+      setAttendanceSyncStatus('synced');
+      return;
+    }
+
     let unsubEmps = () => { };
     let unsubAtt = () => { };
     let unsubLogs = () => { };
@@ -994,7 +1019,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const fetched: AttendanceRecord[] = [];
           if (!snapshot.empty) {
             snapshot.forEach(docSnap => {
-              const data = docSnap.data();
+              // ROOT-CAUSE FIX: request estimated serverTimestamps so latency-compensated
+              // (local) snapshots already carry checkInAt instead of null. Without this,
+              // the UI flashed the stale "Tap to Check In" state until the server ack
+              // arrived, even though the write had already been applied locally.
+              const data = docSnap.data({ serverTimestamps: 'estimate' });
               const recId = docSnap.id;
 
               const canonicalUid = getCanonicalEmployeeUid({
@@ -1003,7 +1032,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 employeeId: data.employeeCode || data.employeeId
               });
 
-              const matchedEmp = employees.find(e => 
+              // Read live employees via ref — the listener closure captures a stale
+              // `employees` array from subscription time (often empty on cold start),
+              // which broke identity resolution and produced duplicate state records.
+              const empPool = employeesRef.current;
+              const matchedEmp = empPool.find(e => 
                 e.id === data.employeeId || 
                 e.employeeId === data.employeeId || 
                 e.employeeId === data.employeeCode || 
@@ -1064,23 +1097,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
 
-          // Deduplicate by canonical UID + date (preferring records with checkInAt / checkOutAt).
-          // BUG 6 FIX: old records may have empty employeeUid AND employeeId, making the key
-          // collapse to `_date` and incorrectly merging unrelated records. Fall back to `rec.id`
-          // (the Firestore document ID, always unique) so each real document is preserved.
+          // Deduplicate by RESOLVED employee identity + date.
+          // ROOT-CAUSE FIX: the previous key used raw `rec.employeeUid || rec.employeeId || rec.id`,
+          // so a legacy doc (KSS2407003_2026-08-21) and its canonical counterpart
+          // ({uid}_2026-08-21) survived as TWO separate state records for the same
+          // employee + day. UI `.find()` then picked whichever sorted first — possibly
+          // the stale blank one — while backend transactions targeted the canonical doc,
+          // causing "Already checked in" popups on a page still showing Check-In.
+          // Now every doc resolves to ONE identity key (matchedEmp.uid/id → uid → code → docId).
           const deduplicatedMap = new Map<string, AttendanceRecord>();
           fetched.forEach(rec => {
-            const empKey = `${rec.employeeUid || rec.employeeId || rec.id}_${rec.date}`;
+            const recEmp = employeesRef.current.find(e =>
+              e.id === rec.employeeId ||
+              e.employeeId === rec.employeeCode ||
+              e.uid === rec.employeeUid
+            );
+            const identityKey = getCanonicalEmployeeUid(
+              recEmp
+                ? { uid: recEmp.uid, id: recEmp.id, employeeId: recEmp.employeeId }
+                : { uid: rec.employeeUid, id: rec.employeeId, employeeId: rec.employeeCode }
+            ) || rec.id;
+            const empKey = `${identityKey}_${rec.date}`;
             const existing = deduplicatedMap.get(empKey);
             if (!existing) {
               deduplicatedMap.set(empKey, rec);
             } else {
+              // Merge duplicates preferring the record with REAL attendance data so a
+              // stale blank duplicate can never mask an actual check-in / check-out.
+              const richer = (rec.checkInAt ? rec : existing) as AttendanceRecord;
+              const poorer = (rec.checkInAt ? existing : rec) as AttendanceRecord;
+              // Keep the canonical doc ID ({uid}_{date}) when one of the dups has it,
+              // so canonical-ID lookups elsewhere hit this exact state record.
+              const isCanonicalId = (id: string) => id === `${identityKey}_${rec.date}`;
               const merged: AttendanceRecord = {
-                ...existing,
-                ...rec,
-                checkInAt: rec.checkInAt || existing.checkInAt,
-                checkOutAt: rec.checkOutAt || existing.checkOutAt,
-                status: rec.status || existing.status,
+                ...poorer,
+                ...richer,
+                id: isCanonicalId(richer.id) ? richer.id : (isCanonicalId(poorer.id) ? poorer.id : richer.id),
+                checkInAt: richer.checkInAt || poorer.checkInAt,
+                checkOutAt: richer.checkOutAt || poorer.checkOutAt,
+                status: richer.status || poorer.status,
+                breaks: (richer.breaks && richer.breaks.length > 0 ? richer.breaks : poorer.breaks) || [],
                 workingMinutes: Math.max(existing.workingMinutes || 0, rec.workingMinutes || 0),
                 totalBreakMinutes: Math.max(existing.totalBreakMinutes || 0, rec.totalBreakMinutes || 0)
               };
@@ -1279,14 +1335,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubLeaveReqs();
       unsubNotifs();
     };
-  }, []);
+  }, [authUid]);
 
   // Conditionally subscribe to audit logs only for admins (bounded query to prevent read spikes)
   useEffect(() => {
     let unsubLogs = () => { };
-    if (isAuthenticated && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) {
+    if (isAuthenticated && authUid && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) {
       const logsQuery = query(collection(db, 'auditLogs'), limit(100));
-      unsubLogs = onSnapshot(logsQuery, (snapshot) => {
+      // P0 FIX: recovery-enabled subscription (transient errors retried with backoff)
+      unsubLogs = subscribeWithRecovery(logsQuery, (snapshot) => {
         if (!snapshot.empty) {
           const fetched: AuditLog[] = [];
           snapshot.forEach(docSnap => {
@@ -1304,7 +1361,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setAuditLogs([]);
     }
     return () => unsubLogs();
-  }, [isAuthenticated, role]);
+  }, [isAuthenticated, authUid, role]);
 
   // ── Session Restore: Already done synchronously via useState initializers above ──
   // This effect only clears stale sessions that couldn't be matched on mount.
@@ -1328,32 +1385,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // ── Firebase Auth State: subscribes ONCE, uses ref for employee lookup ──
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(firebaseUser);
-        setIsDemoMode(false);
-        const cleanEmail = firebaseUser.email?.toLowerCase();
-        let matched = employeesRef.current.find(e => e.email?.toLowerCase() === cleanEmail);
+      // P0 FIX: publish the verified identity FIRST — this gates the Firestore
+      // listener effect. When the identity disappears (sign-out, revoked/failed
+      // token refresh → the identitytoolkit HTTP 400 path), listeners detach and
+      // sensitive Firestore-derived state is purged instead of zombie-denying.
+      setAuthUid(firebaseUser?.uid ?? null);
+      if (!firebaseUser) {
+        setUser(null);
+        setAttendance([]);
+        setLeaveRequests([]);
+        setNotifications([]);
+        setAuditLogs([]);
+        setAttendanceSyncStatus('synced');
+        return;
+      }
+      setUser(firebaseUser);
+      setIsDemoMode(false);
+      const cleanEmail = firebaseUser.email?.toLowerCase();
+      let matched = employeesRef.current.find(e => e.email?.toLowerCase() === cleanEmail);
 
-        if (!matched && cleanEmail) {
-          try {
-            const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-            if (userDoc.exists()) {
-              const userData = userDoc.data();
-              matched = employeesRef.current.find(e => e.email?.toLowerCase() === userData.email?.toLowerCase());
-            }
-          } catch (e) {
-            console.warn('User doc fetch exception:', e);
+      if (!matched && cleanEmail) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            matched = employeesRef.current.find(e => e.email?.toLowerCase() === userData.email?.toLowerCase());
           }
+        } catch (e) {
+          console.warn('User doc fetch exception:', e);
         }
+      }
 
-        if (matched) {
-          setActiveEmployee(matched);
-          setRole(matched.role);
-          setIsAuthenticated(true);
-          setIsSessionReady(true);
-          localStorage.setItem('kss_v1_session', matched.id);
-          if (matched.email) localStorage.setItem('kss_v1_session_email', matched.email.toLowerCase());
-        }
+      if (matched) {
+        setActiveEmployee(matched);
+        setRole(matched.role);
+        setIsAuthenticated(true);
+        setIsSessionReady(true);
+        localStorage.setItem('kss_v1_session', matched.id);
+        if (matched.email) localStorage.setItem('kss_v1_session_email', matched.email.toLowerCase());
       }
     });
     return () => unsubscribe();
@@ -1551,7 +1620,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return { success: true, message: `Welcome! You're now signed in.` };
         }
       } catch (fbErr: any) {
-        // Firebase auth failed — fallback to development testing login
+        // P0 INCIDENT FIX: this catch previously swallowed EVERY Firebase error and
+        // fell through to the local password check. Config/environment failures
+        // (Email/Password provider disabled, restricted API key, unauthorized
+        // domain, network outage, disabled account) surfaced only as anonymous
+        // identitytoolkit HTTP 400s while the app silently continued without a
+        // real Firebase session — guaranteeing permission-denied on every
+        // Firestore call. Only genuine credential rejections may fall back.
+        const fbCode: string | undefined = fbErr?.code;
+        if (!shouldFallbackToLocalLogin(fbCode)) {
+          console.error(`[Auth] Firebase sign-in failed with non-credential error (${fbCode}). NOT falling back to local login.`, fbErr);
+          recordFailure();
+          setIsLoading(false);
+          const friendly = classifyError(fbErr).userMessage;
+          return { success: false, message: `Cloud sign-in is currently unavailable (${fbCode}). ${friendly}` };
+        }
+        // Credential rejection (wrong password / unknown email) — legacy local fallback proceeds below.
       }
 
       // Strict Password Verification: Require original registered password or master admin pass (Removes fake 6-digit bypass)
@@ -1612,11 +1696,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       const userCred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
       
+      // P0 FIX: this users/{uid} doc is what firestore.rules role helpers read.
+      // It was previously created WITHOUT a role field, so the account could never
+      // resolve privileges (and a missing doc made rule get() calls throw).
       await setDoc(doc(db, 'users', userCred.user.uid), {
         uid: userCred.user.uid,
         email: email,
+        role: 'EMPLOYEE',
+        fullName: email.split('@')[0],
         createdAt: new Date().toISOString()
-      }, { merge: true }).catch(() => { });
+      }).catch(err => {
+        console.error(`[Auth] Failed to provision users/${userCred.user.uid} — privileged-rule lookups will deny for this account until fixed.`, err);
+      });
 
       await signOut(secondaryAuth);
       return { success: true, message: 'Password successfully set.' };
@@ -1697,14 +1788,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const userCred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, empData.password);
         uid = userCred.user.uid;
         
-        // Write user mapping record to Firestore using primary DB
+        // Write user mapping record to Firestore using primary DB.
+        // P0 FIX: surface failures — this doc is the rules' source of truth for
+        // role resolution; a silent failure leaves the account permanently unprivileged.
         await setDoc(doc(db, 'users', uid), {
           uid: uid,
           email: cleanEmail,
           role: empData.role,
           fullName: empData.fullName,
           createdAt: new Date().toISOString()
-        }).catch(() => { });
+        }).catch(err => {
+          console.error(`[Auth] Failed to write users/${uid} role mapping (${empData.role}). Admin-only rule checks will deny for this account.`, err);
+        });
 
         // Sign out secondary auth so we don't hold the session
         await signOut(secondaryAuth);
@@ -1814,10 +1909,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const todayStr = customDate || getEmployeeWorkDate(new Date());
     const recordId = getAttendanceDocId(empUid, todayStr);
 
-    const existingRec = attendance.find(a => 
-      (a.id === recordId || a.employeeUid === empUid || a.employeeId === emp.id || a.employeeCode === emp.employeeId) && 
-      a.date === todayStr
-    );
+    // ROOT-CAUSE FIX: prioritize the canonical doc ({uid}_{date}) and any duplicate
+    // that actually has checkInAt — a bare OR-find could match a stale blank legacy
+    // duplicate, let evaluateAttendanceScan allow CHECK_IN, and then the transaction
+    // would reject with "Already checked in for today."
+    const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
 
     const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
@@ -1940,9 +2036,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const todayStr = customDate || getEmployeeWorkDate(new Date());
     const canonicalId = getAttendanceDocId(empUid, todayStr);
 
-    // Canonical ID lookup first (O(1), no fuzzy matching), fall back to isAttendanceForEmployee for legacy IDs
-    const existingRec = attendance.find(a => a.id === canonicalId)
-      ?? attendance.find(a => isAttendanceForEmployee(a, emp, todayStr));
+    // Canonical ID lookup first, then any duplicate that actually has attendance data.
+    // Never target a stale blank legacy doc — that would split check-in/check-out
+    // across two Firestore documents.
+    const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
     const recordId = existingRec?.id ?? canonicalId;
 
     const isApprovedWfh = (companyWideWfhDates || []).includes(todayStr) ||
@@ -2092,10 +2189,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Canonical doc ID — deterministic, matches recordCheckIn output
     const canonicalId = getAttendanceDocId(empUid, todayStr);
 
-    // Check canonical ID first (O(1), no fuzzy matching), fall back to
-    // isAttendanceForEmployee only for legacy records with a different ID format.
-    const existingRec = attendance.find(a => a.id === canonicalId)
-      ?? attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
+    // Canonical ID first, then any duplicate with real attendance data (never a stale blank legacy doc)
+    const existingRec = resolveAttendanceRecord(attendance, { ...(emp || { id: employeeId }), uid: empUid }, todayStr);
     const recordId = existingRec?.id ?? canonicalId;
     const docRef = doc(db, 'attendance', recordId);
 
@@ -2149,10 +2244,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const todayStr = getWorkDate(new Date());
     const canonicalId = getAttendanceDocId(empUid, todayStr);
 
-    // Canonical ID first — avoids "No active check-in record found" when
-    // isAttendanceForEmployee fails due to UID format mismatches.
-    const existingRec = attendance.find(a => a.id === canonicalId)
-      ?? attendance.find(a => isAttendanceForEmployee(a, emp || employeeId, todayStr));
+    // Canonical ID first, then any duplicate with real attendance data (never a stale blank legacy doc)
+    const existingRec = resolveAttendanceRecord(attendance, { ...(emp || { id: employeeId }), uid: empUid }, todayStr);
     const recordId = existingRec?.id ?? canonicalId;
     const docRef = doc(db, 'attendance', recordId);
 

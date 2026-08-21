@@ -22,11 +22,10 @@ import {
   Briefcase
 } from 'lucide-react';
 import { OneOnOneNote, Employee } from '../../types';
-import { db, cleanFirestorePayload } from '../../lib/firebase';
-import { collection, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
-
+import { db, cleanFirestorePayload, subscribeWithRecovery } from '../../lib/firebase';
+import { collection, setDoc, doc, deleteDoc } from 'firebase/firestore';
 export const PMTeamPerformance: React.FC = () => {
-  const { employees, activeEmployee } = useAuth();
+  const { employees, activeEmployee, isAuthenticated } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDept, setSelectedDept] = useState('ALL');
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.id || '');
@@ -57,8 +56,10 @@ export const PMTeamPerformance: React.FC = () => {
   });
 
   // Real-time Firestore sync for 1:1 Notes
+  // P0 FIX: auth-gated + transient-error recovery (see subscribeWithRecovery).
   useEffect(() => {
-    const unsubNotes = onSnapshot(collection(db, 'oneOnOneNotes'), (snapshot) => {
+    if (!isAuthenticated) return;
+    const unsubNotes = subscribeWithRecovery(collection(db, 'oneOnOneNotes'), (snapshot) => {
       if (!snapshot.empty) {
         const fetched: OneOnOneNote[] = [];
         snapshot.forEach(d => fetched.push(d.data() as OneOnOneNote));
@@ -68,7 +69,7 @@ export const PMTeamPerformance: React.FC = () => {
     }, (err) => console.warn('[PMTeamPerformance] Firestore 1on1 notes listener error:', err));
 
     return () => unsubNotes();
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     localStorage.setItem('kss_pm_1on1_notes', JSON.stringify(notes));

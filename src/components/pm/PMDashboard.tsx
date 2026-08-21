@@ -18,13 +18,13 @@ import {
   Loader2
 } from 'lucide-react';
 import { Project, LeaveRequest } from '../../types';
-import { db } from '../../lib/firebase';
-import { collection, onSnapshot, setDoc, doc } from 'firebase/firestore';
+import { db, subscribeWithRecovery } from '../../lib/firebase';
+import { collection, setDoc, doc } from 'firebase/firestore';
 import { 
   getEmployeeWorkDate, 
   getAttendanceDocId, 
   getCanonicalEmployeeUid, 
-  isAttendanceForEmployee, 
+  resolveAttendanceRecord,
   safeGetTimestampMillis, 
   formatTimestampToISO 
 } from '../../lib/attendanceEngine';
@@ -80,12 +80,12 @@ const DEFAULT_PROJECTS: Project[] = [
 ];
 
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
-  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak } = useAuth();
+  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated } = useAuth();
 
   const todayStr = getEmployeeWorkDate(new Date());
 
-  // PM's own live attendance record
-  const pmTodayRecord = attendance.find(a => isAttendanceForEmployee(a, activeEmployee, todayStr));
+  // PM's own live attendance record (canonical resolver — same doc the backend writes to)
+  const pmTodayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
   const isPmCheckedIn = !!pmTodayRecord?.checkInAt && !pmTodayRecord?.checkOutAt;
   const activePmBreak = pmTodayRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
   const [isBreakActionLoading, setIsBreakActionLoading] = useState(false);
@@ -123,7 +123,10 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   });
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'projects'), (snapshot) => {
+    // P0 FIX: never attach while unauthenticated — a permission-denied kills a
+    // listener permanently, and this effect previously ran once with [] deps.
+    if (!isAuthenticated) return;
+    const unsub = subscribeWithRecovery(collection(db, 'projects'), (snapshot) => {
       if (!snapshot.empty) {
         const fetched: Project[] = [];
         snapshot.forEach(d => fetched.push(d.data() as Project));
@@ -137,7 +140,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     }, (err) => console.warn('[PMDashboard] Firestore projects listener error:', err));
 
     return () => unsub();
-  }, []);
+  }, [isAuthenticated]);
 
   // Modal State for PM Custom Sprint Conflict / Rejection Reason
   const [rejectModalReq, setRejectModalReq] = useState<LeaveRequest | null>(null);
@@ -398,7 +401,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                 </thead>
                 <tbody className="divide-y divide-slate-800/50 font-semibold">
                   {teamMembersOnly.map(emp => {
-                    const empAtt = attendance.find(a => isAttendanceForEmployee(a, emp, todayStr));
+                    const empAtt = resolveAttendanceRecord(attendance, emp, todayStr);
                     const isCheckedIn = !!empAtt?.checkInAt;
                     const isWfh = isCheckedIn && (empAtt?.isWfh === true || empAtt?.status === 'Work From Home');
 
@@ -422,7 +425,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
                         {/* Real Hours Calculated per Date via Safe Parsing */}
                         {weekDays.map(d => {
-                          const rec = attendance.find(a => isAttendanceForEmployee(a, emp, d.dateStr));
+                          const rec = resolveAttendanceRecord(attendance, emp, d.dateStr);
 
                           let hours: number | null = null;
                           let isLive = false;

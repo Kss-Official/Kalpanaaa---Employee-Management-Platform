@@ -17,14 +17,19 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
+  onSnapshot,
   serverTimestamp,
   getDocFromServer,
   runTransaction,
   Timestamp,
   persistentLocalCache,
   persistentMultipleTabManager,
-  memoryLocalCache
+  memoryLocalCache,
+  type Query,
+  type QuerySnapshot,
+  type Unsubscribe
 } from "firebase/firestore";
+import { isRetryableListenerError, nextBackoffMs } from './errors';
 
 export { runTransaction, serverTimestamp, Timestamp };
 
@@ -95,11 +100,83 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  // Suppress permission-denied noise from dev console
-  if (!errInfo.error.includes('permissions') && !errInfo.error.includes('PERMISSION_DENIED')) {
+  // P0 INCIDENT FIX: permission-denied used to be silently suppressed here, which
+  // hid the outage where every portal stopped receiving realtime updates. A
+  // permission-denied is ALWAYS a security-relevant signal (missing users/{uid}
+  // mapping, unauthenticated local session, or rule regression) and must be loud.
+  if (errInfo.error.includes('permission') || errInfo.error.includes('PERMISSION_DENIED') || errInfo.error.includes('insufficient permissions')) {
+    console.error(
+      `[Firestore SECURITY] ${operationType} ${path ?? '<no-path>'} denied for uid=${errInfo.authInfo.userId ?? 'NULL (no Firebase session)'} — check firestore.rules and users/{uid} role mapping.`,
+      error
+    );
+  } else {
     console.warn('Firestore Operation Exception:', JSON.stringify(errInfo));
   }
   return errInfo;
+}
+
+/**
+ * P0 INCIDENT FIX: resilient realtime subscription.
+ *
+ * Firestore listeners that fail with a transient error (unavailable / network)
+ * stay dead unless re-subscribed manually. And after a permission-denied they can
+ * NEVER succeed with the same identity — recovery is owned by the auth lifecycle.
+ *
+ * - Retryable errors → exponential backoff re-subscribe (1s→30s cap).
+ * - permission-denied / unauthenticated → reported ONCE to onError; the caller's
+ *   auth-gated effect will re-attach when onAuthStateChanged delivers a user.
+ * Returns an Unsubscribe that also cancels any pending backoff timer.
+ */
+export function subscribeWithRecovery(
+  q: Query,
+  onData: (snapshot: QuerySnapshot) => void,
+  onError?: (error: Error) => void,
+  maxAttempts: number = 5
+): Unsubscribe {
+  let unsubCurrent: Unsubscribe = () => {};
+  let stopped = false;
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const start = () => {
+    if (stopped) return;
+    unsubCurrent = onSnapshot(
+      q,
+      (snapshot) => {
+        attempt = 0; // healthy snapshot resets the backoff ladder
+        onData(snapshot);
+      },
+      (err) => {
+        if (stopped) return;
+        if (isRetryableListenerError(err) && attempt < maxAttempts) {
+          attempt += 1;
+          const delay = nextBackoffMs(attempt);
+          console.warn(`[Firestore] Transient listener error (${err.code}), re-subscribing in ${delay}ms (attempt ${attempt}/${maxAttempts}).`);
+          timer = setTimeout(start, delay);
+        } else {
+          // Permanent for this identity — surfaced loudly instead of suppressed.
+          const pathLabel = (() => {
+            try {
+              const internal = q as unknown as { _query?: { path?: { toString(): string } } };
+              return internal._query?.path?.toString() ?? '<unknown-path>';
+            } catch {
+              return '<unknown-path>';
+            }
+          })();
+          handleFirestoreError(err, OperationType.LIST, pathLabel);
+          onError?.(err);
+        }
+      }
+    );
+  };
+
+  start();
+
+  return () => {
+    stopped = true;
+    if (timer !== null) clearTimeout(timer);
+    unsubCurrent();
+  };
 }
 
 // Test Connection reliably

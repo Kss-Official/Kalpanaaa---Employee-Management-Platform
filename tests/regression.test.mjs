@@ -214,3 +214,58 @@ test('state machine: check-in blocked before shift start and after shift end', (
     t.reset();
   }
 });
+
+// ── P0 incident regression: listener recovery & auth fallback policy ─────────
+
+test('listener policy: permission-denied and unauthenticated are NOT retryable', () => {
+  for (const code of ['permission-denied', 'unauthenticated']) {
+    assert.equal(errors.isRetryableListenerError({ code }), false, code);
+  }
+  // Message-based variants (Firestore SDK surfaces 'Missing or insufficient permissions.')
+  assert.equal(errors.isRetryableListenerError(new Error('Missing or insufficient permissions.')), false);
+});
+
+test('listener policy: transient codes are retryable', () => {
+  for (const code of ['unavailable', 'deadline-exceeded', 'cancelled', 'internal', 'unknown']) {
+    assert.equal(errors.isRetryableListenerError({ code }), true, code);
+  }
+  assert.equal(errors.isRetryableListenerError(new Error('Failed to fetch')), true);
+});
+
+test('listener policy: backoff grows exponentially and caps at 30s', () => {
+  assert.equal(errors.nextBackoffMs(1), 1000);
+  assert.equal(errors.nextBackoffMs(2), 2000);
+  assert.equal(errors.nextBackoffMs(3), 4000);
+  assert.equal(errors.nextBackoffMs(5), 16000);
+  assert.equal(errors.nextBackoffMs(6), 30000);
+  assert.equal(errors.nextBackoffMs(50), 30000);
+  assert.equal(errors.nextBackoffMs(0), 1000); // defensive floor
+});
+
+test('login fallback: only genuine credential rejections may fall back to local login', () => {
+  const safe = [
+    'auth/invalid-credential',
+    'auth/invalid-login-credentials',
+    'auth/wrong-password',
+    'auth/user-not-found',
+    'auth/invalid-email'
+  ];
+  for (const code of safe) {
+    assert.equal(errors.shouldFallbackToLocalLogin(code), true, code);
+  }
+  // Config/environment failures must surface instead of silently degrading
+  const unsafe = [
+    'auth/operation-not-allowed',
+    'auth/api-key-not-valid',
+    'auth/unauthorized-domain',
+    'auth/network-request-failed',
+    'auth/user-disabled',
+    'auth/too-many-requests',
+    'auth/admin-restricted-operation'
+  ];
+  for (const code of unsafe) {
+    assert.equal(errors.shouldFallbackToLocalLogin(code), false, code);
+  }
+  // Non-Firebase exceptions preserve legacy behavior
+  assert.equal(errors.shouldFallbackToLocalLogin(undefined), true);
+});

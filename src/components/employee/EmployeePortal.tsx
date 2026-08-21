@@ -63,6 +63,7 @@ import {
   getAttendanceDocId, 
   getCanonicalEmployeeUid, 
   isAttendanceForEmployee, 
+  resolveAttendanceRecord,
   safeGetTimestampMillis 
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
@@ -195,7 +196,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   // Canonical Work-day date in employee timezone
   const todayStr = getEmployeeWorkDate(new Date());
-  const todayRecord = attendance.find(a => isAttendanceForEmployee(a, activeEmployee, todayStr));
+  // ROOT-CAUSE FIX: canonical resolver — prefers the Firestore doc the backend
+  // transactions actually write to ({uid}_{date}) and any duplicate that has a real
+  // checkInAt, so the UI can never render a stale blank duplicate after check-in.
+  const todayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
 
   const rawHistory = attendance.filter(a => isAttendanceForEmployee(a, activeEmployee));
   const empHistory = rawHistory.filter(rec => {
@@ -860,11 +864,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
                 : todayRecord?.status === 'Absent'
                 ? 'text-rose-400 bg-rose-500/10 border-rose-500/30'
-                : todayRecord?.status === 'Leave'
+                : todayRecord?.status === 'On Leave'
                 ? 'text-purple-400 bg-purple-500/10 border-purple-500/30'
                 : todayRecord?.isWfh
                 ? 'text-sky-400 bg-sky-500/10 border-sky-500/30'
-                : todayRecord?.status === 'On Time' || todayRecord?.status === 'Present'
+                : todayRecord?.status === 'Present'
                 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
                 : 'text-slate-400 bg-slate-800/50 border-slate-700'
             }`}>
@@ -1276,7 +1280,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       else if (b.type === 'Meal Break' || (b.type as string) === 'Lunch Break') mealSecs += durSec;
                       else if (b.type === 'Team Huddle') huddleSecs += durSec;
                       else if (b.type === 'Team Meeting') meetingSecs += durSec;
-                      else if (b.type === 'Attainment / Training' || b.type === 'Training') trainingSecs += durSec;
+                      else if (b.type === 'Attainment / Training' || (b.type as string) === 'Training') trainingSecs += durSec;
                       else if (b.type === 'Activity') activitySecs += durSec;
                     });
 

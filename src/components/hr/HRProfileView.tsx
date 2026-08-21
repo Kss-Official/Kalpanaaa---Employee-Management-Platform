@@ -28,7 +28,7 @@ import {
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, safeGetTimestampMillis } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, resolveAttendanceRecord, safeGetTimestampMillis } from '../../lib/attendanceEngine';
 
 export const HRProfileView: React.FC = () => {
   const { triggerHaptic } = useHaptic();
@@ -62,7 +62,7 @@ export const HRProfileView: React.FC = () => {
   // Today's Date & Attendance Record (Canonical timezone)
   const todayStr = getEmployeeWorkDate(new Date());
   const myTodayRecord = targetEmployee 
-    ? attendance.find(a => isAttendanceForEmployee(a, targetEmployee, todayStr)) 
+    ? resolveAttendanceRecord(attendance, targetEmployee, todayStr) ?? null
     : null;
 
   const isCheckedIn = !!myTodayRecord?.checkInAt && !myTodayRecord?.checkOutAt;

@@ -10,6 +10,7 @@ import {
   Download
 } from 'lucide-react';
 import { UserRole } from '../../types';
+import { getEmployeeWorkDate, resolveAttendanceRecord } from '../../lib/attendanceEngine';
 import { NotificationBell } from './NotificationBell';
 import { FaceCaptureModal } from '../shared/FaceCaptureModal';
 
@@ -28,9 +29,11 @@ export const Header: React.FC<HeaderProps> = ({
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [, setHeaderActionLoading] = useState(false);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  // ROOT-CAUSE FIX: use the IST work-day (not UTC toISOString date) and the canonical
+  // resolver so the header reflects the same record the backend transactions write to.
+  const todayStr = getEmployeeWorkDate(new Date());
   const myTodayRecord = activeEmployee 
-    ? attendance.find(a => (a.employeeId === activeEmployee.id || a.employeeCode === activeEmployee.employeeId) && a.date === todayStr) 
+    ? resolveAttendanceRecord(attendance, activeEmployee, todayStr) ?? null
     : null;
 
   const [isHeaderFaceModalOpen, setIsHeaderFaceModalOpen] = useState(false);

@@ -77,3 +77,56 @@ export function isChunkLoadError(err: unknown): boolean {
     (message.includes('module script') && message.includes('mime'))
   );
 }
+
+// ── P0 incident hardening: Firestore listener recovery & auth fallback policy ──
+
+/**
+ * Firestore error codes a live listener can recover from by re-subscribing.
+ * NOT included: 'permission-denied' and 'unauthenticated' — retrying those with
+ * the same identity can never succeed; they are owned by the auth lifecycle
+ * (listeners must re-attach only after onAuthStateChanged delivers a user).
+ */
+const RETRYABLE_LISTENER_CODES = new Set([
+  'unavailable',
+  'deadline-exceeded',
+  'cancelled',
+  'internal',
+  'unknown'
+]);
+
+export function isRetryableListenerError(err: unknown): boolean {
+  const code = (err as any)?.code as string | undefined;
+  if (code === 'permission-denied' || code === 'unauthenticated') return false;
+  const message = String((err as any)?.message || err || '').toLowerCase();
+  if (message.includes('permission') || message.includes('insufficient permissions')) return false;
+  if (code) return RETRYABLE_LISTENER_CODES.has(code);
+  return NETWORK_FRAGMENTS.some(f => message.includes(f));
+}
+
+/** Capped exponential backoff for listener re-subscription: 1s, 2s, 4s … max 30s. */
+export function nextBackoffMs(attempt: number): number {
+  const safeAttempt = Math.max(1, Math.floor(attempt));
+  return Math.min(30000, 1000 * Math.pow(2, safeAttempt - 1));
+}
+
+/**
+ * Auth login codes for which falling back to the local (non-Firebase) credential
+ * check is SAFE — i.e. Firebase definitely rejected THIS user's credentials.
+ *
+ * Config/environment failures (provider disabled, invalid API key, unauthorized
+ * domain, network down, disabled account, rate limiting) MUST NOT fall back
+ * silently: doing so masked the P0 outage where every portal lost realtime sync
+ * while the console showed nothing but identitytoolkit HTTP 400s.
+ */
+const FALLBACK_SAFE_AUTH_CODES = new Set([
+  'auth/invalid-credential',
+  'auth/invalid-login-credentials',
+  'auth/wrong-password',
+  'auth/user-not-found',
+  'auth/invalid-email'
+]);
+
+export function shouldFallbackToLocalLogin(fbErrorCode: string | undefined | null): boolean {
+  if (!fbErrorCode) return true; // non-Firebase exception — preserve legacy behavior
+  return FALLBACK_SAFE_AUTH_CODES.has(fbErrorCode);
+}
