@@ -193,13 +193,32 @@ export async function testConnection() {
   }
 }
 
-// Clean any payload recursively to prevent Firestore undefined / NaN serialization crashes
+// Clean any payload recursively to prevent Firestore undefined / NaN serialization crashes while preserving Firestore Sentinels and Dates
 export function cleanFirestorePayload<T extends Record<string, any>>(obj: T): T {
-  return JSON.parse(
-    JSON.stringify(obj, (key, value) => {
-      if (value === undefined) return null;
-      if (typeof value === 'number' && isNaN(value)) return 0;
-      return value;
-    })
-  );
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+
+  // Preserve Firestore FieldValues (serverTimestamp, deleteField, etc.), Timestamps, and Dates
+  if (obj instanceof Date || (obj as any)._methodName || (obj as any).toMillis || (obj.constructor && obj.constructor.name === 'FieldValue')) {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => typeof item === 'object' && item !== null ? cleanFirestorePayload(item) : item) as unknown as T;
+  }
+
+  const result: any = {};
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (val === undefined) {
+      result[key] = null;
+    } else if (typeof val === 'number' && isNaN(val)) {
+      result[key] = 0;
+    } else if (val !== null && typeof val === 'object') {
+      result[key] = cleanFirestorePayload(val);
+    } else {
+      result[key] = val;
+    }
+  }
+  return result as T;
 }

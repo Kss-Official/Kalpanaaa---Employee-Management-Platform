@@ -579,6 +579,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     employeesRef.current = employees;
   }, [employees]);
 
+  // Universal robust employee lookup helper matching ID, emp- ID, employeeCode, UID, email, or fullName
+  const findEmployee = useCallback((employeeIdOrEmp: any): Employee | undefined => {
+    if (!employeeIdOrEmp) return undefined;
+    if (typeof employeeIdOrEmp === 'object' && employeeIdOrEmp.id) {
+      const direct = employeesRef.current.find(e => 
+        e.id === employeeIdOrEmp.id || 
+        (e.employeeId && e.employeeId === employeeIdOrEmp.employeeId) ||
+        (e.email && employeeIdOrEmp.email && e.email.toLowerCase() === employeeIdOrEmp.email.toLowerCase()) ||
+        (e.uid && employeeIdOrEmp.uid && e.uid === employeeIdOrEmp.uid)
+      );
+      if (direct) return direct;
+      return employeeIdOrEmp as Employee;
+    }
+    const search = String(employeeIdOrEmp).trim().toLowerCase();
+    const searchWithoutEmp = search.replace(/^emp-/, '');
+    return employeesRef.current.find(e =>
+      (e.id && e.id.toLowerCase() === search) ||
+      (e.id && e.id.toLowerCase().replace(/^emp-/, '') === searchWithoutEmp) ||
+      (e.employeeId && e.employeeId.toLowerCase() === search) ||
+      (e.employeeId && e.employeeId.toLowerCase() === searchWithoutEmp) ||
+      (e.uid && e.uid.toLowerCase() === search) ||
+      (e.email && e.email.toLowerCase() === search) ||
+      (e.fullName && e.fullName.toLowerCase() === search)
+    ) || INITIAL_EMPLOYEES.find(e =>
+      (e.id && e.id.toLowerCase() === search) ||
+      (e.id && e.id.toLowerCase().replace(/^emp-/, '') === searchWithoutEmp) ||
+      (e.employeeId && e.employeeId.toLowerCase() === search) ||
+      (e.employeeId && e.employeeId.toLowerCase() === searchWithoutEmp) ||
+      (e.uid && e.uid.toLowerCase() === search) ||
+      (e.email && e.email.toLowerCase() === search) ||
+      (e.fullName && e.fullName.toLowerCase() === search)
+    );
+  }, []);
+
   // Keep attendanceRef current so the stable auto-checkout interval always
   // reads the latest data without being in the effect's dep array.
   useEffect(() => {
@@ -758,8 +792,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const checkAutoCheckout = () => {
       const now = new Date();
       const todayStr = getEmployeeWorkDate(now);
-      const currentHours = now.getHours();
-      const currentMinutes = now.getMinutes();
+      // Strictly resolve hours and minutes in IST
+      const istParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: COMPANY_TIMEZONE,
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false
+      }).formatToParts(now);
+      const currentHours = Number(istParts.find(p => p.type === 'hour')?.value || 0);
+      const currentMinutes = Number(istParts.find(p => p.type === 'minute')?.value || 0);
       const isPastSevenThirtyPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 30);
 
       attendanceRef.current.forEach(record => {
@@ -1044,22 +1085,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // `employees` array from subscription time (often empty on cold start),
               // which broke identity resolution and produced duplicate state records.
               const empPool = employeesRef.current;
-              const matchedEmp = empPool.find(e => 
-                e.id === data.employeeId || 
-                e.employeeId === data.employeeId || 
-                e.employeeId === data.employeeCode || 
-                e.uid === canonicalUid || 
-                e.uid === data.uid || 
-                e.id === canonicalUid ||
-                (e.fullName && data.employeeName && e.fullName.trim().toLowerCase() === String(data.employeeName).trim().toLowerCase())
-              );
+              const matchedEmp = findEmployee({
+                id: data.employeeId,
+                employeeId: data.employeeCode || data.employeeId,
+                uid: canonicalUid || data.uid,
+                fullName: data.employeeName
+              });
 
               const employeeName = data.employeeName || matchedEmp?.fullName || '';
               const employeeCode = data.employeeCode || matchedEmp?.employeeId || data.employeeId || canonicalUid;
               const employeeId = matchedEmp?.id || data.employeeId || canonicalUid;
 
               const dateStr = getWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (recId.includes('_') ? recId.split('_')[1] : new Date()));
-              const checkInISO = formatTimestampToISO(data.checkInAt);
+              let checkInISO = formatTimestampToISO(data.checkInAt);
+              if (!checkInISO && data.checkInAt && typeof data.checkInAt === 'object') {
+                checkInISO = formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.updatedAt);
+              }
               const checkOutISO = formatTimestampToISO(data.checkOutAt);
               const createdISO = formatTimestampToISO(data.createdAt) || checkInISO || new Date().toISOString();
               const updatedISO = formatTimestampToISO(data.updatedAt) || checkOutISO || createdISO;
@@ -1106,20 +1147,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           // Deduplicate by RESOLVED employee identity + date.
-          // ROOT-CAUSE FIX: the previous key used raw `rec.employeeUid || rec.employeeId || rec.id`,
-          // so a legacy doc (KSS2407003_2026-08-21) and its canonical counterpart
-          // ({uid}_2026-08-21) survived as TWO separate state records for the same
-          // employee + day. UI `.find()` then picked whichever sorted first — possibly
-          // the stale blank one — while backend transactions targeted the canonical doc,
-          // causing "Already checked in" popups on a page still showing Check-In.
-          // Now every doc resolves to ONE identity key (matchedEmp.uid/id → uid → code → docId).
           const deduplicatedMap = new Map<string, AttendanceRecord>();
           fetched.forEach(rec => {
-            const recEmp = employeesRef.current.find(e =>
-              e.id === rec.employeeId ||
-              e.employeeId === rec.employeeCode ||
-              e.uid === rec.employeeUid
-            );
+            const recEmp = findEmployee({
+              id: rec.employeeId,
+              employeeId: rec.employeeCode,
+              uid: rec.employeeUid,
+              fullName: rec.employeeName
+            });
             const identityKey = getCanonicalEmployeeUid(
               recEmp
                 ? { uid: recEmp.uid, id: recEmp.id, employeeId: recEmp.employeeId }
@@ -1937,7 +1972,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-In blocked.' };
     }
 
-    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
+    const emp = findEmployee(employeeId);
     if (!emp) {
       return { success: false, message: 'Employee not found.' };
     }
@@ -2082,7 +2117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'SECURITY ALERT: Airplane mode or offline connection detected. Check-Out blocked.' };
     }
 
-    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
+    const emp = findEmployee(employeeId);
     if (!emp) {
       return { success: false, message: 'Employee not found.' };
     }
@@ -2236,7 +2271,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const startBreak = async (employeeId: string, breakType: string = 'Tea / Lunch Break') => {
-    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
+    const emp = findEmployee(employeeId);
     // BUG 4 FIX: Use the same canonical UID derivation as recordCheckIn so
     // startBreak always targets the exact same Firestore document.
     const empUid = getCanonicalEmployeeUid(emp, user?.uid);
@@ -2307,7 +2342,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const endBreak = async (employeeId: string) => {
-    const emp = employees.find(e => e.id === employeeId || e.employeeId === employeeId || e.uid === employeeId);
+    const emp = findEmployee(employeeId);
     // BUG 4 FIX: Same canonical UID as recordCheckIn/startBreak — single doc target.
     const empUid = getCanonicalEmployeeUid(emp, user?.uid);
     const todayStr = getWorkDate(new Date());
