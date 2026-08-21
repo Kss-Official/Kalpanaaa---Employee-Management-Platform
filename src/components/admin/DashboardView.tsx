@@ -76,10 +76,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   const todayRecords = attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
 
   const totalEmployeesCount = employees.filter(e => e.status === 'Active').length;
-  const presentTodayCount = todayRecords.filter(a => a.status === 'Present').length;
+  const presentTodayCount = todayRecords.filter(a => a.status === 'Present' || a.status === 'Late' || a.status === 'Work From Home' || a.isWfh).length;
   const lateTodayCount = todayRecords.filter(a => a.status === 'Late').length;
-  const absentTodayCount = todayRecords.filter(a => a.status === 'Absent').length;
-  const onLeaveCount = employees.filter(e => e.status === 'On Leave').length;
+  const onLeaveCount = employees.filter(e => e.status === 'On Leave' || todayRecords.some(r => (r.employeeId === e.id || r.employeeCode === e.employeeId) && (r.status === 'On Leave' || r.status === 'Leave'))).length;
+  const absentTodayCount = Math.max(0, totalEmployeesCount - presentTodayCount - onLeaveCount);
   // P0 FIX: "currently checked in" excludes shifts with a real completed checkout
   const currentlyCheckedInCount = todayRecords.filter(a => a.checkInAt && !isShiftComplete(a)).length;
 
