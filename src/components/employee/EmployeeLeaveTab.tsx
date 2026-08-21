@@ -10,7 +10,7 @@ export const EmployeeLeaveTab: React.FC = () => {
   const { activeEmployee, leaveRequests, submitLeaveRequest, cancelLeaveRequest } = useAuth();
   const { triggerHaptic } = useHaptic();
   
-  const [type, setType] = useState<'Leave' | 'WFH'>('WFH');
+  const [type, setType] = useState<'Leave' | 'WFH'>('Leave');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
