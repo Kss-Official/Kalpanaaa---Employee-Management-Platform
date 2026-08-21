@@ -55,7 +55,8 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   }));
 
   const totalEmployees = employees.length;
-  const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec) && rec.status !== 'Absent' && rec.status !== 'On Leave').length;
+  const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave').length;
+  const onDutyCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec)).length;
   const lateCount = employeeTodayRecords.filter(({ rec }) => rec?.status === 'Late').length;
   const wfhCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && (rec.isWfh || rec.status === 'Work From Home')).length;
   const onLeaveCount = employeeTodayRecords.filter(({ emp, rec }) => 
