@@ -801,18 +801,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }).formatToParts(now);
       const currentHours = Number(istParts.find(p => p.type === 'hour')?.value || 0);
       const currentMinutes = Number(istParts.find(p => p.type === 'minute')?.value || 0);
-      const isPastSevenThirtyPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 30);
+      const isPastSevenFifteenPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 15);
 
       attendanceRef.current.forEach(record => {
         if (processedIds.has(record.id)) return; // already handled this session
         const isPastDay = record.date < todayStr;
-        const isTodayPastCutoff = record.date === todayStr && isPastSevenThirtyPm;
+        const isTodayPastCutoff = record.date === todayStr && isPastSevenFifteenPm;
 
         if (!record.checkOutAt && (isPastDay || isTodayPastCutoff)) {
           processedIds.add(record.id); // mark before async write to prevent double-write
 
-          // Construct 7:30 PM ISO cutoff timestamp for the record date
-          const autoCheckOutDate = new Date(`${record.date}T19:30:00`);
+          // Construct 7:15 PM ISO cutoff timestamp for the record date
+          const autoCheckOutDate = new Date(`${record.date}T19:15:00`);
           const forceCheckOutTime = autoCheckOutDate.toISOString();
 
           // Atomically close any open break on auto-checkout

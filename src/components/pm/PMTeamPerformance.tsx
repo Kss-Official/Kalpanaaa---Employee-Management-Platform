@@ -237,7 +237,7 @@ export const PMTeamPerformance: React.FC = () => {
               </div>
               <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
                 <span className="text-slate-400 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-slate-500" /> Assigned Shift</span>
-                <span className="text-slate-300 text-[11px]">{selectedEmp.shift || 'Day Shift (10:00 - 19:30)'}</span>
+                <span className="text-slate-300 text-[11px]">{selectedEmp.shift || 'Day Shift (10:00 - 19:00)'}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">Sprint On-Time Score</span>

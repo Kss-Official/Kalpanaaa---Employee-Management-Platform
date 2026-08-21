@@ -651,40 +651,37 @@ export function evaluateAttendanceScan(
     // Perform CHECK_IN
     const now = new Date();
 
-    // MORNING TIME WINDOW RULE: Check-in is strictly restricted until 10:00 AM IST
+    // MORNING TIME WINDOW RULE: Office timing is 10:00 AM - 07:00 PM IST. Check-in opens from 09:30 AM IST (half hour early).
     const currentHourIST = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }).format(now), 10);
     const currentMinIST = parseInt(new Intl.DateTimeFormat('en-US', { minute: 'numeric', timeZone: 'Asia/Kolkata' }).format(now), 10);
 
-    if (currentHourIST < 10) {
-      const minRemaining = (9 - currentHourIST) * 60 + (60 - currentMinIST);
+    if (currentHourIST < 9 || (currentHourIST === 9 && currentMinIST < 30)) {
+      const minRemaining = (9 - currentHourIST) * 60 + (30 - currentMinIST);
       return {
         allowed: false,
         action: 'CHECK_IN',
         status: 'Present',
         locationVerified: false,
         distanceMeters: 0,
-        message: `Check-In Restricted: Morning shift check-in opens strictly at 10:00 AM IST. Please wait until 10:00 AM to check in (${minRemaining} mins remaining).`
+        message: `Check-In Restricted: Morning shift check-in opens at 09:30 AM IST. Please wait until 09:30 AM to check in (${minRemaining} mins remaining).`
       };
     }
 
-    // EVENING TIME WINDOW RULE: mirror of the morning gate. After shift end
-    // (07:30 PM IST) a fresh check-in would corrupt the work day (e.g. a
-    // forgotten terminal scanning past midnight creates a 16-hour blob).
-    if (currentHourIST > 19 || (currentHourIST === 19 && currentMinIST >= 30)) {
+    // EVENING TIME WINDOW RULE: Office timing is 10:00 AM - 07:00 PM IST with auto-checkout at 07:15 PM.
+    if (currentHourIST > 19 || (currentHourIST === 19 && currentMinIST >= 15)) {
       return {
         allowed: false,
         action: 'CHECK_IN',
         status: 'Present',
         locationVerified: false,
         distanceMeters: 0,
-        message: `Check-In Blocked: Today's shift ended at 07:30 PM IST. New check-ins are not permitted after shift end. Please contact HR if you believe this is an error.`
+        message: `Check-In Blocked: Today's shift ended at 07:00 PM IST (Cutoff 07:15 PM IST). New check-ins are not permitted after shift end.`
       };
     }
 
-    const lateThreshold = new Date();
-    lateThreshold.setHours(10, 30, 0, 0);
-
-    let status: 'Present' | 'Late' = now > lateThreshold ? 'Late' : 'Present';
+    // Grace period: On-time up to 10:15 AM (15 mins past 10:00 AM)
+    const isLateArrival = currentHourIST > 10 || (currentHourIST === 10 && currentMinIST > 15);
+    let status: 'Present' | 'Late' = isLateArrival ? 'Late' : 'Present';
 
     // GPS Location Verification on Normal Days
     if (!isApprovedWfh && isGpsEnforced && !locationVerified) {
