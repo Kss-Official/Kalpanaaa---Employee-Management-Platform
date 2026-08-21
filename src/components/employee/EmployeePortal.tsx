@@ -229,29 +229,20 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       (b) => !b.endAt && !(b as any).endTime
     );
     return ob ? (ob.startAt || (ob as any).startTime || null) : null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    // Stable dep: only re-compute when the set of {start, end} pairs changes
-    JSON.stringify((todayRecord?.breaks ?? []).map(b => ({ s: b.startAt, e: b.endAt }))),
-  ]);
+  }, [todayRecord?.breaks]);
 
-  // Sync activeBreak UI state only when the open-break identity changes.
-  // Avoids re-running on every Firestore write (e.g. updatedAt).
+  // Sync activeBreak UI state instantly
   useEffect(() => {
     const breaks = todayRecord?.breaks ?? [];
     const ob = breaks.find((b) => !b.endAt && !(b as any).endTime);
     if (ob) {
       const startAt = ob.startAt || (ob as any).startTime || new Date().toISOString();
-      setActiveBreak(prev =>
-        prev?.startAt === startAt && prev?.type === ob.type
-          ? prev // keep stable reference — prevents unnecessary downstream re-renders
-          : { type: ob.type, startAt }
-      );
+      setActiveBreak({ type: ob.type, startAt });
     } else {
       setActiveBreak(null);
     }
     setIsWfh(!!todayRecord?.isWfh || todayRecord?.status === 'Work From Home');
-  }, [openBreakStartAt, todayRecord?.isWfh, todayRecord?.status]);
+  }, [todayRecord?.breaks, todayRecord?.isWfh, todayRecord?.status]);
 
   // Multi-Device Real-Time Live Shift Sync (Fixes E37 Contract)
   const [, setLiveSyncTick] = useState(0);

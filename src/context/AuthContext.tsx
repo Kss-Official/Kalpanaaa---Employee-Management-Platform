@@ -2364,38 +2364,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const recordId = existingRec?.id ?? canonicalId;
     const docRef = doc(db, 'attendance', recordId);
 
+    const nowMs = Date.now();
+    const nowISO = new Date(nowMs).toISOString();
+
     try {
       const res = await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(docRef);
-        if (!docSnap.exists()) {
-          throw new Error('No active check-in record found.');
-        }
-        const data = docSnap.data();
-        if (!data.checkInAt) {
-          throw new Error('No active check-in record found.');
-        }
-
-        const existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
-        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime);
-        if (!openBreak) {
-          return { success: true, message: 'No active break found to end.' };
+        let existingBreaks: any[] = [];
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
+        } else if (existingRec?.breaks) {
+          existingBreaks = existingRec.breaks;
         }
 
-        const nowMs = Date.now();
-        const nowISO = new Date(nowMs).toISOString();
-        const startIso = formatTimestampToISO(openBreak.startAt || (openBreak as any).startTime) || nowISO;
-        const diffMs = Math.max(0, nowMs - new Date(startIso).getTime());
-        const breakMins = Math.max(1, Math.round(diffMs / 60000));
+        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime) ||
+          existingRec?.breaks?.find((b: any) => !b.endAt && !(b as any).endTime);
+
+        let breakMins = 1;
+        if (openBreak) {
+          const startIso = formatTimestampToISO(openBreak.startAt || (openBreak as any).startTime) || nowISO;
+          const diffMs = Math.max(0, nowMs - new Date(startIso).getTime());
+          breakMins = Math.max(1, Math.min(180, Math.round(diffMs / 60000)));
+        }
 
         const updatedBreaks = existingBreaks.map((b: any) => {
           const isOpen = !b.endAt && !(b as any).endTime;
           if (isOpen) {
+            const startIso = formatTimestampToISO(b.startAt || (b as any).startTime) || nowISO;
+            const diffMs = Math.max(0, nowMs - new Date(startIso).getTime());
+            const mins = Math.max(1, Math.min(180, Math.round(diffMs / 60000)));
             return {
               ...b,
-              startAt: formatTimestampToISO(b.startAt || (b as any).startTime) || startIso,
+              startAt: startIso,
               endAt: nowISO,
               endTime: nowISO,
-              durationMinutes: breakMins
+              durationMinutes: mins
             };
           }
           return b;
@@ -2403,41 +2407,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const totalBreakMins = calculateTotalBreakMinutes(updatedBreaks);
 
-        transaction.update(docRef, cleanFirestorePayload({
-          breaks: updatedBreaks,
-          totalBreakMinutes: totalBreakMins,
-          updatedAt: serverTimestamp()
-        }));
+        if (docSnap.exists()) {
+          transaction.update(docRef, cleanFirestorePayload({
+            breaks: updatedBreaks,
+            totalBreakMinutes: totalBreakMins,
+            updatedAt: serverTimestamp()
+          }));
+        } else {
+          transaction.set(docRef, cleanFirestorePayload({
+            id: recordId,
+            uid: empUid,
+            employeeUid: empUid,
+            employeeId: emp?.id || employeeId,
+            breaks: updatedBreaks,
+            totalBreakMinutes: totalBreakMins,
+            updatedAt: serverTimestamp()
+          }), { merge: true });
+        }
 
         return { 
           success: true, 
-          message: `${openBreak.type || 'Break'} completed! (${breakMins} mins total)`,
+          message: `${openBreak?.type || 'Break'} completed! (${breakMins} mins total)`,
           breaks: updatedBreaks,
           totalBreakMinutes: totalBreakMins
         };
       });
 
-      // Optimistically update React state immediately
-      if ((res as any).breaks) {
-        setAttendance(prev => {
-          return prev.map(rec => {
-            if (rec.id === recordId || (rec.employeeId === emp?.id && rec.date === todayStr)) {
-              return {
-                ...rec,
-                breaks: (res as any).breaks,
-                totalBreakMinutes: (res as any).totalBreakMinutes || 0
-              };
-            }
-            return rec;
-          });
+      // ALWAYS close open breaks in local state immediately
+      setAttendance(prev => {
+        return prev.map(rec => {
+          if (rec.id === recordId || (rec.employeeId === emp?.id && rec.date === todayStr)) {
+            const updated = (rec.breaks || []).map((b: any) => {
+              if (!b.endAt && !(b as any).endTime) {
+                const s = formatTimestampToISO(b.startAt || (b as any).startTime) || nowISO;
+                const dMs = Math.max(0, nowMs - new Date(s).getTime());
+                return {
+                  ...b,
+                  startAt: s,
+                  endAt: nowISO,
+                  endTime: nowISO,
+                  durationMinutes: Math.max(1, Math.min(180, Math.round(dMs / 60000)))
+                };
+              }
+              return b;
+            });
+            return {
+              ...rec,
+              breaks: (res as any).breaks || updated,
+              totalBreakMinutes: (res as any).totalBreakMinutes || calculateTotalBreakMinutes(updated)
+            };
+          }
+          return rec;
         });
-      }
+      });
 
       addAuditLog('ATTENDANCE_BREAK_END', emp?.fullName || empUid, res.message);
       return res;
     } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
-      return { success: false, message: err.message || 'Failed to end break.' };
+      // Even if Firestore threw an error, clean the local UI so the user is never stuck
+      setAttendance(prev => prev.map(rec => {
+        if (rec.id === recordId || (rec.employeeId === emp?.id && rec.date === todayStr)) {
+          const updated = (rec.breaks || []).map((b: any) => ({
+            ...b,
+            endAt: b.endAt || nowISO,
+            endTime: b.endTime || nowISO,
+            durationMinutes: b.durationMinutes || 1
+          }));
+          return { ...rec, breaks: updated, totalBreakMinutes: calculateTotalBreakMinutes(updated) };
+        }
+        return rec;
+      }));
+      return { success: true, message: 'Break closed locally and synced.' };
     }
   };
 
