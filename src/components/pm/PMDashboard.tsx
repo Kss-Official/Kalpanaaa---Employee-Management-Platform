@@ -487,9 +487,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                               <span 
                                 title={hasCheckIn ? `${hours || 0}h worked on ${d.dateStr}${isLive ? ` (Live • In: ${toISTTimeString(rec?.checkInAt)})` : rec?.checkInAt ? ` (In: ${toISTTimeString(rec.checkInAt)})` : ''}` : `No check-in on ${d.dateStr}`}
                                 className={`inline-block min-w-[36px] px-1.5 h-8 rounded-lg font-mono font-bold text-xs leading-8 ${
-                                  hasCheckIn && (hours || 0) >= 8.5 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
-                                  hasCheckIn && (hours || 0) >= 7.5 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                                  hasCheckIn && ((hours || 0) > 0 || isLive) ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                                  hasCheckIn && (hours || 0) >= 8.0 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                  hasCheckIn && (hours || 0) >= 6.0 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                                  hasCheckIn && ((hours || 0) > 0 || isLive) ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
                                   'bg-slate-950/60 text-slate-600 border border-slate-900'
                                 }`}
                               >
