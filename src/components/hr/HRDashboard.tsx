@@ -31,7 +31,13 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   const { employees, attendance, leaveRequests, activeEmployee, checkIn, checkOut, startBreak, endBreak } = useAuth();
 
   const todayStr = getEmployeeWorkDate(new Date());
-  const todayAttendance = (attendance || []).filter(a => a.date === todayStr);
+
+  // Real-time live attendance ticker: re-computes live status every 10 seconds
+  const [, setLiveTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setLiveTick(t => t + 1), 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const targetEmployee = activeEmployee || employees.find(e => e.department?.toLowerCase().includes('hr') || e.role === 'HR_ADMIN') || employees[0];
 
@@ -42,12 +48,22 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     targetEmployee?.employeeId === 'CEO001' ||
     targetEmployee?.employeeId === 'CTO001';
 
+  // Canonical resolution of each employee's today record
+  const employeeTodayRecords = employees.map(emp => ({
+    emp,
+    rec: resolveAttendanceRecord(attendance, emp, todayStr)
+  }));
+
   const totalEmployees = employees.length;
-  const presentCount = todayAttendance.filter(a => a.status === 'Present').length;
-  const absentCount = todayAttendance.filter(a => a.status === 'Absent').length;
-  const lateCount = todayAttendance.filter(a => a.status === 'Late').length;
-  const onLeaveCount = todayAttendance.filter(a => a.status === 'On Leave' || a.status === 'Leave').length;
-  const wfhCount = todayAttendance.filter(a => a.isWfh).length;
+  const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec) && rec.status !== 'Absent' && rec.status !== 'On Leave').length;
+  const lateCount = employeeTodayRecords.filter(({ rec }) => rec?.status === 'Late').length;
+  const wfhCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && (rec.isWfh || rec.status === 'Work From Home')).length;
+  const onLeaveCount = employeeTodayRecords.filter(({ emp, rec }) => 
+    rec?.status === 'On Leave' || rec?.status === 'Leave' ||
+    leaveRequests.some(r => r.status === 'Approved' && (r.employeeId === emp.id || r.employeeId === emp.employeeId) && todayStr >= r.startDate && todayStr <= r.endDate)
+  ).length;
+  const absentCount = Math.max(0, totalEmployees - presentCount - onLeaveCount);
+
   const hrPendingRequests = leaveRequests.filter(r => 
     r.status === 'Pending' && 
     (r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && 
@@ -56,10 +72,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
   const pendingApprovalsCount = hrPendingRequests.length;
 
   // HR Personal Attendance Record for today
-  const hrUid = getCanonicalEmployeeUid(targetEmployee);
-  const hrAttendanceRecord = targetEmployee 
-    ? todayAttendance.find(a => a.id === getAttendanceDocId(hrUid, todayStr) || a.employeeUid === hrUid || a.employeeId === targetEmployee.id || a.employeeCode === targetEmployee.employeeId) 
-    : null;
+  const hrAttendanceRecord = resolveAttendanceRecord(attendance, targetEmployee, todayStr);
   const isHrCheckedIn = !!hrAttendanceRecord?.checkInAt && !isShiftComplete(hrAttendanceRecord);
   const hrActiveBreak = hrAttendanceRecord?.breaks?.find(b => !b.endAt && !b.endTime);
 

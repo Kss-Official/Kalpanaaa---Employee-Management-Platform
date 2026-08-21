@@ -85,6 +85,13 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
   const todayStr = getEmployeeWorkDate(new Date());
 
+  // Real-time live attendance ticker: re-computes live working hours every 10 seconds
+  const [, setLiveTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setLiveTick(t => t + 1), 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   // PM's own live attendance record (canonical resolver — same doc the backend writes to)
   const pmTodayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
   const isPmCheckedIn = !!pmTodayRecord?.checkInAt && !isShiftComplete(pmTodayRecord);
