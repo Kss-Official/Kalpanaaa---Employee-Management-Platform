@@ -276,11 +276,20 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   useEffect(() => {
     const startMs = safeGetTimestampMillis(todayRecord?.checkInAt);
     const endMs = safeGetTimestampMillis(todayRecord?.checkOutAt);
-    if (!startMs || endMs) {
+    if (!startMs) {
       setLiveWorkSec(0);
       return;
     }
     const completedBreakMs = (todayRecord?.totalBreakMinutes ?? 0) * 60000;
+
+    // If shift is completed (checked out), compute total finished shift work seconds
+    if (endMs && endMs > startMs) {
+      const totalElapsedMs = Math.max(0, endMs - startMs);
+      const workMs = Math.max(0, totalElapsedMs - completedBreakMs);
+      setLiveWorkSec(Math.floor(workMs / 1000));
+      return;
+    }
+
     const activeBreakStartMs = safeGetTimestampMillis(openBreakStartAt);
 
     const computeWorkSec = () => {
@@ -644,30 +653,32 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     breakOpInProgressRef.current = true;
     setIsProcessingBreak(true);
     triggerHaptic('medium');
-    if (!activeEmployee) {
+    try {
+      if (!activeEmployee) return;
+      const res = await startBreak(activeEmployee.id, type);
+      if (res.success) {
+        triggerHaptic('success');
+        const emojiMap: Record<string, string> = {
+          'Tea Break': '🍵',
+          'Meal Break': '🍱',
+          'Lunch Break': '🍽️',
+          'Team Huddle': '👥',
+          'Team Meeting': '📅',
+          'Attainment / Training': '🎓',
+          'Activity': '⚡'
+        };
+        const emoji = emojiMap[type] || '⚡';
+        setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ${emoji}` });
+      } else {
+        triggerHaptic('error');
+        setActionFeedback({ success: false, message: res.message });
+      }
+    } catch (err: any) {
+      triggerHaptic('error');
+      setActionFeedback({ success: false, message: err.message || 'Failed to start break' });
+    } finally {
       breakOpInProgressRef.current = false;
       setIsProcessingBreak(false);
-      return;
-    }
-    const res = await startBreak(activeEmployee.id, type);
-    breakOpInProgressRef.current = false;
-    setIsProcessingBreak(false);
-    if (res.success) {
-      triggerHaptic('success');
-      const emojiMap: Record<string, string> = {
-        'Tea Break': '🍵',
-        'Meal Break': '🍱',
-        'Lunch Break': '🍽️',
-        'Team Huddle': '👥',
-        'Team Meeting': '📅',
-        'Attainment / Training': '🎓',
-        'Activity': '⚡'
-      };
-      const emoji = emojiMap[type] || '⚡';
-      setActionFeedback({ success: true, message: `${type} started. Remember to end it when you return! ${emoji}` });
-    } else {
-      triggerHaptic('error');
-      setActionFeedback({ success: false, message: res.message });
     }
   };
 
@@ -676,20 +687,22 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     breakOpInProgressRef.current = true;
     setIsProcessingBreak(true);
     triggerHaptic('medium');
-    if (!activeEmployee) {
+    try {
+      if (!activeEmployee) return;
+      const res = await endBreak(activeEmployee.id);
+      if (res.success) {
+        triggerHaptic('success');
+        setActionFeedback({ success: true, message: res.message || 'Break ended. Welcome back! 👋' });
+      } else {
+        triggerHaptic('error');
+        setActionFeedback({ success: false, message: res.message });
+      }
+    } catch (err: any) {
+      triggerHaptic('error');
+      setActionFeedback({ success: false, message: err.message || 'Failed to end break' });
+    } finally {
       breakOpInProgressRef.current = false;
       setIsProcessingBreak(false);
-      return;
-    }
-    const res = await endBreak(activeEmployee.id);
-    breakOpInProgressRef.current = false;
-    setIsProcessingBreak(false);
-    if (res.success) {
-      triggerHaptic('success');
-      setActionFeedback({ success: true, message: res.message || 'Break ended. Welcome back! 👋' });
-    } else {
-      triggerHaptic('error');
-      setActionFeedback({ success: false, message: res.message });
     }
   };
 

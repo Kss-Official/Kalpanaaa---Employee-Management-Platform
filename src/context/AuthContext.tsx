@@ -2281,53 +2281,77 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const startBreak = async (employeeId: string, breakType: string = 'Tea / Lunch Break') => {
+  const startBreak = async (employeeId: string, breakType: BreakType) => {
     const emp = findEmployee(employeeId);
-    // BUG 4 FIX: Use the same canonical UID derivation as recordCheckIn so
-    // startBreak always targets the exact same Firestore document.
+    // BUG 4 FIX: Same canonical UID as recordCheckIn/endBreak — single doc target.
     const empUid = getCanonicalEmployeeUid(emp, user?.uid);
     const todayStr = getWorkDate(new Date());
-    // Canonical doc ID — deterministic, matches recordCheckIn output
     const canonicalId = getAttendanceDocId(empUid, todayStr);
 
-    // Canonical ID first, then any duplicate with real attendance data (never a stale blank legacy doc)
+    // Canonical ID first, then any duplicate with real attendance data
     const existingRec = resolveAttendanceRecord(attendance, { ...(emp || { id: employeeId }), uid: empUid }, todayStr);
     const recordId = existingRec?.id ?? canonicalId;
     const docRef = doc(db, 'attendance', recordId);
 
+    const nowISO = new Date().toISOString();
+
     try {
       const res = await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(docRef);
-        if (!docSnap.exists()) {
-          throw new Error('You must check in first before starting a break.');
-        }
-        const data = docSnap.data();
-        if (!data.checkInAt) {
-          throw new Error('You must check in first before starting a break.');
-        }
-        if (data.checkOutAt) {
-          throw new Error('You have already checked out for today.');
-        }
-
-        const existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
-        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime);
-        if (openBreak) {
-          throw new Error('You already have an active break in progress.');
+        let existingBreaks: any[] = [];
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.checkOutAt) {
+            throw new Error('You have already checked out for today.');
+          }
+          existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
+        } else if (existingRec?.breaks) {
+          existingBreaks = existingRec.breaks;
         }
 
-        const nowISO = new Date().toISOString();
+        // Auto-close any previous unclosed break before starting the new one
+        const sanitizedBreaks = existingBreaks.map((b: any) => {
+          if (!b.endAt && !(b as any).endTime) {
+            const startIso = formatTimestampToISO(b.startAt || (b as any).startTime) || nowISO;
+            const diffMs = Math.max(0, new Date(nowISO).getTime() - new Date(startIso).getTime());
+            return {
+              ...b,
+              startAt: startIso,
+              endAt: nowISO,
+              endTime: nowISO,
+              durationMinutes: Math.max(1, Math.min(120, Math.round(diffMs / 60000)))
+            };
+          }
+          return b;
+        });
+
         const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO, endAt: null, durationMinutes: 0 };
-        const updatedBreaks = [...existingBreaks, newBreak];
+        const updatedBreaks = [...sanitizedBreaks, newBreak];
+        const totalBreakMins = calculateTotalBreakMinutes(updatedBreaks);
 
-        transaction.update(docRef, cleanFirestorePayload({
-          breaks: updatedBreaks,
-          updatedAt: serverTimestamp()
-        }));
+        if (docSnap.exists()) {
+          transaction.update(docRef, cleanFirestorePayload({
+            breaks: updatedBreaks,
+            totalBreakMinutes: totalBreakMins,
+            updatedAt: serverTimestamp()
+          }));
+        } else {
+          transaction.set(docRef, cleanFirestorePayload({
+            id: recordId,
+            uid: empUid,
+            employeeUid: empUid,
+            employeeId: emp?.id || employeeId,
+            breaks: updatedBreaks,
+            totalBreakMinutes: totalBreakMins,
+            updatedAt: serverTimestamp()
+          }), { merge: true });
+        }
 
         return { 
           success: true, 
           message: `${breakType} started!`,
-          breaks: updatedBreaks
+          breaks: updatedBreaks,
+          totalBreakMinutes: totalBreakMins
         };
       });
 
@@ -2335,9 +2359,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setAttendance(prev => {
         return prev.map(rec => {
           if (rec.id === recordId || (rec.employeeId === emp?.id && rec.date === todayStr)) {
+            const currentBreaks = (rec.breaks || []).map((b: any) => {
+              if (!b.endAt && !(b as any).endTime) {
+                return { ...b, endAt: nowISO, endTime: nowISO, durationMinutes: 1 };
+              }
+              return b;
+            });
+            const newBreaks = [...currentBreaks, { type: breakType, startAt: nowISO, startTime: nowISO, endAt: null, durationMinutes: 0 }];
             return {
               ...rec,
-              breaks: (res as any).breaks || [...(rec.breaks || []), { type: breakType, startAt: new Date().toISOString(), endAt: null, durationMinutes: 0 }]
+              breaks: (res as any).breaks || newBreaks,
+              totalBreakMinutes: (res as any).totalBreakMinutes || calculateTotalBreakMinutes(newBreaks)
             };
           }
           return rec;

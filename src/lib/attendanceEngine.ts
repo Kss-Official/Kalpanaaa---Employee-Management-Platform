@@ -198,11 +198,16 @@ export function calculateBreakBreakdown(
   let trainingSecs = 0;
   let activitySecs = 0;
 
+  let ongoingAssigned = false;
+
   (breaks || []).forEach(b => {
     let durSec = 0;
     const isOngoing = !b.endAt && !(b as any).endTime;
     if (isOngoing) {
-      durSec = activeBreakElapsedSec;
+      if (!ongoingAssigned) {
+        durSec = Math.max(0, activeBreakElapsedSec);
+        ongoingAssigned = true;
+      }
     } else if (typeof b.durationMinutes === 'number' && b.durationMinutes > 0) {
       durSec = b.durationMinutes * 60;
     } else if (b.startAt && b.endAt) {
@@ -213,8 +218,11 @@ export function calculateBreakBreakdown(
       }
     }
 
+    // Protection against corrupted numbers
+    durSec = Math.max(0, durSec);
+
     const type = (b.type || '').toLowerCase();
-    if (type.includes('tea') || type.includes('coffee')) teaSecs += durSec;
+    if (type.includes('tea') || type.includes('coffee') || type.includes('snack')) teaSecs += durSec;
     else if (type.includes('meal') || type.includes('lunch') || type.includes('dinner')) mealSecs += durSec;
     else if (type.includes('huddle')) huddleSecs += durSec;
     else if (type.includes('meeting')) meetingSecs += durSec;
