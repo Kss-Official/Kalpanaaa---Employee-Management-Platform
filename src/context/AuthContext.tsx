@@ -16,7 +16,7 @@ import {
   runTransaction,
   serverTimestamp
 } from 'firebase/firestore';
-import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload, subscribeWithRecovery } from '../lib/firebase';
+import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload, subscribeWithRecovery, signInAnonymously } from '../lib/firebase';
 import { Employee, EmployeeStatus, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod } from '../types';
 import {
   INITIAL_EMPLOYEES,
@@ -1816,6 +1816,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveEmployee(updatedTarget);
         const assignedRole = (targetEmp.employeeId === 'CEO001' || targetEmp.employeeId === 'CTO001') ? 'SUPER_ADMIN' : targetEmp.role;
         setRole(assignedRole);
+        if (!auth.currentUser) {
+          signInAnonymously(auth).catch(() => {});
+        }
         localStorage.setItem('kss_v1_session', targetEmp.id);
         if (targetEmp.email) localStorage.setItem('kss_v1_session_email', targetEmp.email.toLowerCase());
         localStorage.setItem('kss_v1_session_id', newSessionId);

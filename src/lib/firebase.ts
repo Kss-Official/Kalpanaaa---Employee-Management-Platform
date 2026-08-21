@@ -3,6 +3,7 @@ import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-ch
 import { 
   getAuth, 
   signInWithEmailAndPassword, 
+  signInAnonymously,
   signOut, 
   sendPasswordResetEmail,
   onAuthStateChanged,
@@ -31,7 +32,7 @@ import {
 } from "firebase/firestore";
 import { isRetryableListenerError, nextBackoffMs } from './errors';
 
-export { runTransaction, serverTimestamp, Timestamp };
+export { runTransaction, serverTimestamp, Timestamp, signInAnonymously };
 
 // Config explicitly targeting kalpanaaa-employees-website
 export const firebaseConfig = {

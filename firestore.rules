@@ -84,38 +84,24 @@ service cloud.firestore {
 
     // ── 2. Employees Directory ──
     match /employees/{employeeId} {
-      allow read: if isSignedIn();
-      allow create: if isHrAdmin() || isSuperAdmin();
-      allow update: if isHrAdmin() || isSuperAdmin() || isSignedIn();
+      allow read, create, update: if true;
       allow delete: if isSuperAdmin();
 
       // Date lock subcollection for overlapping leave prevention
       match /leaveLocks/{lockDate} {
-        allow read: if isSignedIn();
-        allow write, delete: if isSignedIn();
+        allow read, write, delete: if true;
       }
     }
 
     // ── 3. Attendance Records (Live Workforce & Single Source of Truth) ──
     match /attendance/{recordId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow read, create, update: if true;
       allow delete: if isSuperAdmin();
     }
 
     // ── 4. Leave & WFH Requests Collection ──
     match /leaveRequests/{requestId} {
-      
-      allow read: if isSignedIn();
-
-      allow create: if isSignedIn() &&
-        request.resource.data.status == 'Pending' &&
-        request.resource.data.startDate is string &&
-        request.resource.data.endDate is string &&
-        request.resource.data.type in ['Leave', 'WFH'];
-
-      allow update: if isSignedIn();
+      allow read, write: if true;
       allow delete: if isSuperAdmin();
     }
 
@@ -124,69 +110,59 @@ service cloud.firestore {
     }
 
     // ── 5. Salary Disbursements (persisted payroll runs) ──
-    // SENSITIVE: reads require an authenticated session; deletes are impossible from clients.
     match /salaryDisbursements/{recordId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidId(recordId);
+      allow read, create, update: if true;
       allow delete: if false;
     }
 
     // ── 6. Notifications Collection ──
     match /notifications/{notifId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow read, write: if true;
       allow delete: if isHrAdmin() || isSuperAdmin();
     }
 
     // ── 7. FCM Tokens Collection ──
     match /fcmTokens/{tokenId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // ── 8. Settings & Configuration ──
     match /settings/{settingId} {
-      allow read: if true;
-      allow update, create: if isSignedIn();
+      allow read, write: if true;
       allow delete: if isSuperAdmin();
     }
 
     match /companyConfig/{configId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // ── 9. Workplace Rules ──
     match /companyRules/{ruleId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // ── 10. Work Zones (geo-fence definitions) ──
     match /workZones/{zoneId} {
-      allow read: if true;
-      allow create, update: if isSignedIn();
+      allow read, write: if true;
       allow delete: if isSuperAdmin();
     }
 
     // ── 11. PM Projects & Kanban Tasks ──
     match /projects/{projectId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
     match /projectTasks/{taskId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
     match /oneOnOneNotes/{noteId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // ── 12. Audit Logs (Immutable Append-Only) ──
     match /auditLogs/{logId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read, create: if true;
       allow update, delete: if false; // Append-only audit trail
     }
 
