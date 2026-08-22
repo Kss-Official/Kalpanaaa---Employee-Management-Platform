@@ -715,3 +715,152 @@ test('P2 calculateBreakBreakdown: team breaks no longer leak into the tea bucket
   assert.equal(r.teaSecs, 300, 'only the genuine tea break lands in tea');
   assert.equal(r.totalBreakSecs, 2100);
 });
+
+// ── Items #6 / #10: month roster + calendar ─────────────────────────────────
+
+test('#6 buildEmployeeMonthRoster: one row per elapsed working day, absences included', () => {
+  const emp = { id: 'emp-A', employeeId: 'KSS001', fullName: 'Alice A', uid: 'uid-A', status: 'Active', department: 'Eng' };
+  // August 2026: the 1st is a Saturday, so the 2nd/9th/16th/23rd/30th are Sundays.
+  const attendance = [
+    { id: 'r1', employeeId: 'emp-A', date: '2026-08-03', status: 'Present', checkInAt: '2026-08-03T04:30:00.000Z', workingMinutes: 480, totalBreakMinutes: 45 },
+    { id: 'r2', employeeId: 'emp-A', date: '2026-08-04', status: 'Late', checkInAt: '2026-08-04T05:10:00.000Z', workingMinutes: 450, totalBreakMinutes: 30 },
+    { id: 'r3', employeeId: 'emp-A', date: '2026-08-05', status: 'Work From Home', isWfh: true, checkInAt: '2026-08-05T04:30:00.000Z', workingMinutes: 470, totalBreakMinutes: 20 }
+  ];
+  // Freeze "now" at 2026-08-08 18:00 IST so the 8th has fully elapsed but the
+  // rest of the month has not happened yet.
+  const nowMs = Date.parse('2026-08-08T12:30:00.000Z');
+
+  const roster = engine.buildEmployeeMonthRoster(emp, attendance, '2026-08', { nowMs });
+  const dates = roster.map(r => r.date);
+
+  // Every elapsed day Aug 1 (Sat) .. Aug 8 (Sat), plus the remaining Sundays:
+  // a future day is materialised ONLY when it carries positive information (a
+  // weekly off, a declared holiday, or approved upcoming leave). A future
+  // WORKING day is never materialised, because absence cannot be asserted for a
+  // day nobody has lived through yet.
+  assert.deepEqual(dates, [
+    '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04',
+    '2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08',
+    '2026-08-09', '2026-08-16', '2026-08-23', '2026-08-30'
+  ]);
+  for (const d of dates.filter(x => x > '2026-08-08')) {
+    assert.equal(
+      roster.find(r => r.date === d).status, 'Holiday',
+      `future day ${d} may only appear as a non-working day`
+    );
+  }
+
+  const byDate = Object.fromEntries(roster.map(r => [r.date, r]));
+  assert.equal(byDate['2026-08-02'].status, 'Holiday', 'Sunday is the weekly off');
+  assert.equal(byDate['2026-08-01'].status, 'Absent', 'Saturday IS a working day here');
+  assert.equal(byDate['2026-08-03'].status, 'Present');
+  assert.equal(byDate['2026-08-04'].status, 'Late');
+  assert.equal(byDate['2026-08-05'].status, 'Work From Home');
+  assert.equal(byDate['2026-08-06'].status, 'Absent');
+  assert.equal(byDate['2026-08-03'].isSynthetic, undefined, 'real records are not marked synthetic');
+  assert.equal(byDate['2026-08-06'].isSynthetic, true, 'derived absences are marked synthetic');
+
+  // An unknown month key must not throw or invent rows.
+  assert.deepEqual(engine.buildEmployeeMonthRoster(emp, attendance, 'garbage', { nowMs }), []);
+  assert.deepEqual(engine.buildEmployeeMonthRoster(null, attendance, '2026-08', { nowMs }), []);
+});
+
+test('#6 summarizeMonthRoster: attendance rate excludes holidays from the denominator', () => {
+  const emp = { id: 'emp-A', employeeId: 'KSS001', fullName: 'Alice A', uid: 'uid-A', status: 'Active' };
+  const attendance = [
+    { id: 'r1', employeeId: 'emp-A', date: '2026-08-03', status: 'Present', checkInAt: '2026-08-03T04:30:00.000Z', workingMinutes: 480, totalBreakMinutes: 45 },
+    { id: 'r2', employeeId: 'emp-A', date: '2026-08-04', status: 'Late', checkInAt: '2026-08-04T05:10:00.000Z', workingMinutes: 450, totalBreakMinutes: 30 },
+    { id: 'r3', employeeId: 'emp-A', date: '2026-08-05', status: 'Work From Home', isWfh: true, checkInAt: '2026-08-05T04:30:00.000Z', workingMinutes: 470, totalBreakMinutes: 20 }
+  ];
+  const nowMs = Date.parse('2026-08-08T12:30:00.000Z');
+  const roster = engine.buildEmployeeMonthRoster(emp, attendance, '2026-08', { nowMs });
+  const s = engine.summarizeMonthRoster(roster, '2026-08', { nowMs });
+
+  assert.equal(s.monthKey, '2026-08');
+  // 8 elapsed rows, one of them a Sunday => 7 elapsed working days. The four
+  // UPCOMING Sundays in the roster must not inflate this.
+  assert.equal(s.workingDays, 7);
+  assert.equal(s.holiday, 5, 'holiday reports the whole month, upcoming Sundays included');
+  assert.equal(s.present, 3, 'Present + Late + WFH all count as attended');
+  assert.equal(s.late, 1);
+  assert.equal(s.wfh, 1);
+  assert.equal(s.absent, 4);
+  // 3 of 7 elapsed working days, NOT 3 of 12 — future days and Sundays must not
+  // count against attendance.
+  assert.equal(s.attendanceRate, Math.round((3 / 7) * 100));
+  assert.equal(s.totalWorkedMinutes, 1400);
+  assert.equal(s.totalBreakMinutes, 95);
+  assert.equal(s.averageWorkedMinutes, Math.round(1400 / 3));
+
+  // Approved UPCOMING leave must be reported without being charged as an elapsed
+  // working day — otherwise booking leave silently lowers this month's rate.
+  const withFutureLeave = engine.summarizeMonthRoster(
+    roster.concat([
+      { id: 'f1', date: '2026-08-20', status: 'On Leave', isSynthetic: true, workingMinutes: 0, totalBreakMinutes: 0 },
+      { id: 'f2', date: '2026-08-21', status: 'On Leave', isSynthetic: true, workingMinutes: 0, totalBreakMinutes: 0 }
+    ]),
+    '2026-08',
+    { nowMs }
+  );
+  assert.equal(withFutureLeave.onLeave, 2, 'upcoming leave is still surfaced');
+  assert.equal(withFutureLeave.workingDays, 7, 'upcoming leave adds no elapsed working days');
+  assert.equal(withFutureLeave.attendanceRate, s.attendanceRate, 'booking leave cannot lower the rate');
+
+  // An empty month must not divide by zero.
+  const zero = engine.summarizeMonthRoster([], '2026-01', { nowMs });
+  assert.equal(zero.attendanceRate, 0);
+  assert.equal(zero.averageWorkedMinutes, 0);
+  assert.equal(zero.workingDays, 0);
+});
+
+test('#10 buildMonthCalendar: Monday-first grid, rectangular, days land on the right weekday', () => {
+  const roster = [
+    { id: 'r1', date: '2026-08-03', status: 'Present', workingMinutes: 480 },
+    { id: 'r2', date: '2026-08-06', status: 'Absent', isSynthetic: true }
+  ];
+  const cells = engine.buildMonthCalendar('2026-08', roster, { todayStr: '2026-08-08' });
+
+  // Rectangular grid, whole weeks only.
+  assert.equal(cells.length % 7, 0);
+
+  // 2026-08-01 is a Saturday. Monday-first => index 5 within the first week.
+  const first = cells.findIndex(c => c.dateStr === '2026-08-01');
+  assert.equal(first, 5, 'Aug 1 2026 is a Saturday and must sit in the 6th column');
+  assert.equal(cells.slice(0, 5).every(c => c.dateStr === null), true, 'leading cells are padding');
+
+  // All 31 days present exactly once.
+  const real = cells.filter(c => c.dateStr);
+  assert.equal(real.length, 31);
+  assert.equal(new Set(real.map(c => c.dateStr)).size, 31);
+
+  const byDate = Object.fromEntries(real.map(c => [c.dateStr, c]));
+  assert.equal(byDate['2026-08-03'].record.status, 'Present', 'roster rows are attached to their day');
+  assert.equal(byDate['2026-08-06'].record.status, 'Absent');
+  assert.equal(byDate['2026-08-04'].record, null, 'days with no roster row carry null, not undefined');
+  assert.equal(byDate['2026-08-08'].isToday, true);
+  assert.equal(byDate['2026-08-09'].isFuture, true);
+  assert.equal(byDate['2026-08-08'].isFuture, false);
+  assert.equal(byDate['2026-08-02'].isNonWorking, true, 'Aug 2 2026 is a Sunday');
+  assert.equal(byDate['2026-08-03'].isNonWorking, false);
+
+  assert.deepEqual(engine.buildMonthCalendar('nope', roster, {}), []);
+});
+
+test('#10 month key helpers roll over years and are timezone-independent', () => {
+  assert.equal(engine.getMonthKey('2026-08-22'), '2026-08');
+  assert.equal(engine.shiftMonthKey('2026-01', -1), '2025-12');
+  assert.equal(engine.shiftMonthKey('2026-12', 1), '2027-01');
+  assert.equal(engine.shiftMonthKey('2026-08', -8), '2025-12');
+  assert.equal(engine.formatMonthKey('2026-08'), 'August 2026');
+
+  // Weekday names must not shift with the host timezone: 'YYYY-MM-DD' parses as
+  // UTC midnight, so any device behind UTC would otherwise read a day early.
+  assert.equal(engine.getDayName('2026-08-22'), 'Sat');
+  assert.equal(engine.getDayName('2026-08-23', true), 'Sunday');
+  assert.equal(engine.getDayName(''), '');
+
+  assert.equal(engine.listDatesInMonth('2026-02').length, 28);
+  assert.equal(engine.listDatesInMonth('2024-02').length, 29, 'leap year');
+  assert.equal(engine.listDatesInMonth('2026-08').length, 31);
+  assert.deepEqual(engine.listDatesInMonth('2026-13'), [], 'invalid month yields nothing');
+});

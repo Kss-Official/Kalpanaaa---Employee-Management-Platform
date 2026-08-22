@@ -73,6 +73,13 @@ import {
   formatDuration,
   formatClock,
   classifyBreakType,
+  buildEmployeeMonthRoster,
+  summarizeMonthRoster,
+  buildMonthCalendar,
+  getMonthKey,
+  shiftMonthKey,
+  formatMonthKey,
+  getDayName,
   SHIFT_LABEL,
   SHIFT_TOTAL_MINUTES
 } from '../../lib/attendanceEngine';
@@ -216,11 +223,68 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const shiftComplete = isShiftComplete(todayRecord);
 
   const rawHistory = attendance.filter(a => isAttendanceForEmployee(a, activeEmployee));
-  const empHistory = rawHistory.filter(rec => {
+
+  // ── Item #6: month-wise attendance ─────────────────────────────────────────
+  // The history list used to be a plain filter over /attendance, which can only
+  // ever show the days the employee turned UP: absence is the absence of a
+  // document, so absent days, weekly offs and holidays were all equally invisible.
+  // buildEmployeeMonthRoster materialises a row per calendar day using the very
+  // same precedence rules as the admin roster, so the two can never disagree.
+  const [monthKey, setMonthKey] = useState<string>(() => getMonthKey(new Date()));
+  const holidayDates = React.useMemo<string[]>(
+    () => ((settings as any)?.holidayDates || []) as string[],
+    [settings]
+  );
+
+  const monthRoster = React.useMemo(
+    () => buildEmployeeMonthRoster(activeEmployee, attendance, monthKey, {
+      leaveRequests,
+      holidayDates,
+      nowMs: Date.now()
+    }),
+    [activeEmployee, attendance, monthKey, leaveRequests, holidayDates]
+  );
+
+  const monthSummary = React.useMemo(
+    () => summarizeMonthRoster(monthRoster, monthKey, { nowMs: Date.now() }),
+    [monthRoster, monthKey]
+  );
+
+  const monthCalendar = React.useMemo(
+    () => buildMonthCalendar(monthKey, monthRoster, { holidayDates, todayStr }),
+    [monthKey, monthRoster, holidayDates, todayStr]
+  );
+
+  const applyStatusFilter = React.useCallback((rec: any) => {
     if (attendanceFilter === 'All') return true;
-    if (attendanceFilter === 'Leave') return rec.status === 'On Leave' || rec.status === 'Leave';
+    if (attendanceFilter === 'Leave') {
+      return rec.status === 'On Leave' || rec.status === 'Leave' ||
+        rec.status === 'Work From Home' || rec.isWfh;
+    }
+    if (attendanceFilter === 'Present') {
+      // Late and WFH employees ARE at work — filtering them out of "Present" made
+      // the list disagree with the headline present count.
+      return rec.status === 'Present' || rec.status === 'Late' ||
+        rec.status === 'Work From Home' || rec.isWfh;
+    }
     return rec.status === attendanceFilter;
-  });
+  }, [attendanceFilter]);
+
+  // 'all' shows the raw lifetime history; a month key shows the derived roster.
+  const [historyScope, setHistoryScope] = useState<'month' | 'all'>('month');
+  const empHistory = React.useMemo(
+    () => (historyScope === 'all' ? (rawHistory as any[]) : monthRoster)
+      .filter(applyStatusFilter)
+      // A history list must not contain days that have not happened. The month
+      // roster deliberately carries future weekly offs and approved upcoming
+      // leave (the calendar wants them); the list does not.
+      .filter((rec: any) => !rec.date || rec.date <= todayStr)
+      // Newest first. The month roster is generated day 1 -> day N, which would
+      // otherwise flip the list order the moment the user switched scope.
+      .slice()
+      .sort((a: any, b: any) => String(b.date || '').localeCompare(String(a.date || ''))),
+    [historyScope, rawHistory, monthRoster, applyStatusFilter, todayStr]
+  );
 
   // Break & WFH state
   const [activeBreak, setActiveBreak] = useState<{ type: string; startAt: string } | null>(null);
@@ -280,7 +344,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const liveWorkSec = liveShift.workSecs;
   const breakElapsedSec = liveShift.activeBreakSecs;
 
-  const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list'>('cards');
+  const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list' | 'calendar'>('calendar');
   const [editingProfileField, setEditingProfileField] = useState<string | null>(null);
   const [isEditingProfileSheet, setIsEditingProfileSheet] = useState(false);
 
@@ -1205,6 +1269,74 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
               </div>
 
+              {/* Pre-shift state — the right panel used to render NOTHING at all
+                  before check-in (item #11: "employee right section is empty").
+                  It now always shows the shift plan and a zeroed live pie, so the
+                  panel is informative from the moment the portal loads. */}
+              {!todayRecord?.checkInAt && (
+                <div
+                  data-testid="preshift-panel"
+                  className="mt-4 pt-3 border-t border-slate-800/80 space-y-3"
+                >
+                  <div className="flex items-center justify-between text-[11px] font-bold">
+                    <span className="text-slate-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                      Shift Productivity Ratio
+                    </span>
+                    <span className="text-slate-500 font-mono">Awaiting check-in</span>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="relative shrink-0">
+                      <svg viewBox="0 0 100 100" className="w-[104px] h-[104px]" role="img" aria-label="Shift not started">
+                        <circle cx="50" cy="50" r="42" className="fill-slate-950" />
+                        <circle
+                          cx="50" cy="50" r="34"
+                          className="fill-none stroke-slate-800"
+                          strokeWidth="16"
+                          strokeDasharray="4 4"
+                        />
+                        <circle cx="50" cy="50" r="25" className="fill-slate-900" />
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span className="text-[15px] font-black text-slate-600 font-mono leading-none">--</span>
+                        <span className="text-[8px] font-bold text-slate-600 uppercase tracking-wider mt-0.5">Work</span>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Rostered Shift</span>
+                        <span className="font-mono font-bold text-slate-300 shrink-0">{SHIFT_LABEL}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Shift Length</span>
+                        <span className="font-mono font-bold text-slate-300 shrink-0">
+                          {formatDuration(SHIFT_TOTAL_MINUTES * 60)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Work Timer</span>
+                        <span className="font-mono font-bold text-slate-500 shrink-0">{formatClock(0)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Breaks Taken</span>
+                        <span className="font-mono font-bold text-slate-500 shrink-0">{formatClock(0)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800" />
+                  <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider text-center">
+                    Your live work, break and meal timings appear here once you check in
+                  </p>
+                </div>
+              )}
+
               {todayRecord?.checkInAt && (
                 <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2">
                   {/* Live Work Timer */}
@@ -1667,6 +1799,84 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
             <span className="text-xs text-slate-400 font-mono">{empHistory.length} Records</span>
           </div>
 
+          {/* ── Item #6: month navigator + month-wise present list summary ────── */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-1.5 rounded-xl">
+                <button
+                  onClick={() => { triggerHaptic(); setMonthKey(m => shiftMonthKey(m, -1)); setHistoryScope('month'); }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span
+                  data-testid="month-label"
+                  className="text-xs font-black text-white min-w-[110px] text-center tabular-nums"
+                >
+                  {formatMonthKey(monthKey)}
+                </span>
+                <button
+                  onClick={() => { triggerHaptic(); setMonthKey(m => shiftMonthKey(m, 1)); setHistoryScope('month'); }}
+                  disabled={monthKey >= getMonthKey(new Date())}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <button
+                  onClick={() => { triggerHaptic(); setHistoryScope('month'); }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    historyScope === 'month' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  This Month
+                </button>
+                <button
+                  onClick={() => { triggerHaptic(); setHistoryScope('all'); }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    historyScope === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  All Time
+                </button>
+              </div>
+            </div>
+
+            {/* Clickable month totals — each drills the list below into that status */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {([
+                { key: 'All', label: 'Working Days', value: monthSummary.workingDays, tone: 'text-white border-slate-800' },
+                { key: 'Present', label: 'Present', value: monthSummary.present, tone: 'text-emerald-400 border-emerald-500/25' },
+                { key: 'Late', label: 'Late', value: monthSummary.late, tone: 'text-amber-400 border-amber-500/25' },
+                { key: 'Leave', label: 'WFH / Leave', value: monthSummary.wfh + monthSummary.onLeave, tone: 'text-sky-400 border-sky-500/25' },
+                { key: 'Absent', label: 'Absent', value: monthSummary.absent, tone: 'text-rose-400 border-rose-500/25' },
+                { key: 'All', label: 'Attendance', value: `${monthSummary.attendanceRate}%`, tone: 'text-blue-400 border-blue-500/25' }
+              ] as const).map((card, idx) => (
+                <button
+                  key={`${card.key}-${idx}`}
+                  onClick={() => { triggerHaptic(); setAttendanceFilter(card.key as any); setHistoryScope('month'); }}
+                  data-testid={`month-kpi-${card.label.replace(/[^a-zA-Z]/g, '').toLowerCase()}`}
+                  className={`bg-slate-950/70 rounded-xl border p-2.5 text-left transition-all cursor-pointer hover:border-blue-500/50 ${card.tone} ${
+                    attendanceFilter === card.key ? 'ring-1 ring-blue-500/50' : ''
+                  }`}
+                >
+                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-wider truncate">{card.label}</p>
+                  <p className="text-lg font-mono font-black tabular-nums leading-tight">{card.value}</p>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider px-1">
+              <span>Total worked {formatDuration(monthSummary.totalWorkedMinutes * 60)}</span>
+              <span>Avg / day {formatDuration(monthSummary.averageWorkedMinutes * 60)}</span>
+              <span className="hidden sm:inline">Breaks {formatDuration(monthSummary.totalBreakMinutes * 60)}</span>
+            </div>
+          </div>
+
           {/* View Mode Toggle & Filter Header */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-2">
             {/* Attendance Status Dropdown Filter */}
@@ -1711,10 +1921,95 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               >
                 <CreditCard className="w-3.5 h-3.5" /> Cards View
               </button>
+              <button
+                onClick={() => { setAttendanceViewMode('calendar'); setHistoryScope('month'); }}
+                data-testid="calendar-view-toggle"
+                className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  attendanceViewMode === 'calendar' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" /> Calendar
+              </button>
             </div>
           </div>
           
-          {attendanceViewMode === 'list' ? (
+          {attendanceViewMode === 'calendar' ? (
+            /* ── Item #10: attendance calendar ──────────────────────────────────
+               Mon-first grid so the Sunday weekly off lands in the last column
+               instead of splitting each work week across two rows. */
+            <div data-testid="attendance-calendar" className="space-y-3">
+              <div className="grid grid-cols-7 gap-1.5">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+                  <div key={d} className="text-center text-[9px] font-black text-slate-500 uppercase tracking-wider py-1">
+                    {d}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1.5">
+                {monthCalendar.map((cell, idx) => {
+                  if (!cell.dateStr) {
+                    return <div key={`pad-${idx}`} className="aspect-square rounded-xl bg-transparent" />;
+                  }
+
+                  const rec: any = cell.record;
+                  const status: string = rec?.status || (cell.isNonWorking ? 'Holiday' : cell.isFuture ? '' : '');
+                  const cfg = (() => {
+                    if (status === 'Present') return { bg: 'bg-emerald-500/10 border-emerald-500/30', text: 'text-emerald-400', dot: 'bg-emerald-500' };
+                    if (status === 'Late') return { bg: 'bg-amber-500/10 border-amber-500/30', text: 'text-amber-400', dot: 'bg-amber-500' };
+                    if (status === 'Work From Home' || rec?.isWfh) return { bg: 'bg-sky-500/10 border-sky-500/30', text: 'text-sky-400', dot: 'bg-sky-500' };
+                    if (status === 'Absent') return { bg: 'bg-rose-500/10 border-rose-500/30', text: 'text-rose-400', dot: 'bg-rose-500' };
+                    if (status === 'On Leave') return { bg: 'bg-violet-500/10 border-violet-500/30', text: 'text-violet-400', dot: 'bg-violet-500' };
+                    if (status === 'Half Day') return { bg: 'bg-orange-500/10 border-orange-500/30', text: 'text-orange-400', dot: 'bg-orange-500' };
+                    if (status === 'Holiday' || cell.isNonWorking) return { bg: 'bg-slate-800/40 border-slate-800', text: 'text-slate-500', dot: 'bg-slate-600' };
+                    return { bg: 'bg-slate-950/50 border-slate-800/60', text: 'text-slate-600', dot: '' };
+                  })();
+
+                  const mins = Math.max(0, Number(rec?.workingMinutes) || 0);
+
+                  return (
+                    <div
+                      key={cell.dateStr}
+                      data-testid={`cal-day-${cell.dateStr}`}
+                      title={`${getDayName(cell.dateStr, true)} ${cell.dateStr}${status ? ` — ${status}` : cell.isFuture ? ' — upcoming' : ''}${mins > 0 ? ` — ${formatDuration(mins * 60)}` : ''}`}
+                      className={`aspect-square rounded-xl border p-1.5 flex flex-col justify-between transition-all ${cfg.bg} ${
+                        cell.isToday ? 'ring-2 ring-blue-500/60' : ''
+                      } ${cell.isFuture ? 'opacity-40' : ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-0.5">
+                        <span className={`text-[10px] font-black tabular-nums ${cell.isToday ? 'text-blue-400' : cfg.text}`}>
+                          {cell.dayOfMonth}
+                        </span>
+                        {cfg.dot && <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-0.5 ${cfg.dot}`} />}
+                      </div>
+                      {mins > 0 && (
+                        <span className="text-[8px] font-mono font-bold text-slate-400 leading-none">
+                          {Math.floor(mins / 60)}h{String(mins % 60).padStart(2, '0')}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Legend */}
+              <div className="flex items-center gap-3 flex-wrap text-[9px] font-bold text-slate-400 pt-2 border-t border-slate-800/60">
+                {[
+                  { label: 'Present', dot: 'bg-emerald-500' },
+                  { label: 'Late', dot: 'bg-amber-500' },
+                  { label: 'Work From Home', dot: 'bg-sky-500' },
+                  { label: 'Absent', dot: 'bg-rose-500' },
+                  { label: 'On Leave', dot: 'bg-violet-500' },
+                  { label: 'Holiday / Weekly Off', dot: 'bg-slate-600' }
+                ].map(l => (
+                  <span key={l.label} className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${l.dot} inline-block`} />
+                    {l.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : attendanceViewMode === 'list' ? (
             <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/80 shadow-md custom-scrollbar">
               {/* Mobile Scroll Swipe Indicator */}
               <div className="sm:hidden px-4 py-2 bg-slate-900/90 border-b border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400 font-mono">
@@ -1743,13 +2038,16 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     empHistory.map(rec => (
                       <tr key={rec.id} className="hover:bg-slate-900/40 transition-colors">
                         <td className="px-4 py-3.5 font-bold text-white font-mono whitespace-nowrap w-36">
-                          {new Date(rec.date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}
+                          {new Date(`${rec.date}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' })}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap w-32">
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
                             rec.status === 'Present' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
                             rec.status === 'Late' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
                             rec.status === 'Work From Home' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                            rec.status === 'Absent' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                            rec.status === 'Half Day' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
+                            rec.status === 'Holiday' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
                             'bg-violet-500/10 text-violet-400 border border-violet-500/20'
                           }`}>
                             <span className="w-1.5 h-1.5 rounded-full bg-current" />
@@ -1760,7 +2058,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                           {rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--:--'}
                         </td>
                         <td className="px-4 py-3.5 font-mono text-slate-200 whitespace-nowrap w-32">
-                          {rec.checkOutAt ? toISTTimeString(rec.checkOutAt) : <span className="text-emerald-400 text-[11px] font-bold">Active Shift</span>}
+                          {rec.checkOutAt
+                            ? toISTTimeString(rec.checkOutAt)
+                            : rec.checkInAt
+                              ? <span className="text-emerald-400 text-[11px] font-bold">Active Shift</span>
+                              : '--:--'}
                         </td>
                         <td className="px-4 py-3.5 font-mono text-slate-400 whitespace-nowrap w-24">
                           {rec.totalBreakMinutes ? `${rec.totalBreakMinutes}m` : '0m'}

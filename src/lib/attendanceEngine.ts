@@ -1441,3 +1441,211 @@ export function buildPieSlices(
     return { key: s.key, label: s.label, color: s.color, percent: s.percent, seconds: s.seconds, d };
   });
 }
+
+/**
+ * ── Month roster: one row per calendar day for a single employee ──────────────
+ *
+ * Item #6 ("month wise present lists") and #10 ("calendar features") both need
+ * the SAME thing the admin roster needed: a row for every day, including the days
+ * on which nothing was written. Absence is the absence of a document, so a plain
+ * filter over /attendance can only ever show the days an employee turned up — the
+ * calendar would be full of blanks that mean "absent", "Sunday", "on leave" and
+ * "hasn't happened yet" indistinguishably.
+ *
+ * This delegates day-by-day to buildDailyRoster so the precedence rules
+ * (terminated > holiday > approved leave > employee on leave > not-yet-knowable >
+ * absent) are defined in exactly one place and cannot drift between the admin
+ * table and the employee calendar.
+ */
+export function listDatesInMonth(monthKey: string): string[] {
+  // monthKey is 'YYYY-MM'.
+  const [y, m] = String(monthKey || '').split('-').map(Number);
+  if (!y || !m || m < 1 || m > 12) return [];
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const out: string[] = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    out.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+export function buildEmployeeMonthRoster(
+  employee: Employee | null | undefined,
+  attendance: AttendanceRecord[],
+  monthKey: string,
+  opts: DailyRosterOptions = {}
+): RosterRecord[] {
+  if (!employee) return [];
+  const dates = listDatesInMonth(monthKey);
+  if (dates.length === 0) return [];
+
+  const single = [employee];
+  const rows: RosterRecord[] = [];
+  for (const dateStr of dates) {
+    // buildDailyRoster returns 0 or 1 rows for a single employee: 0 when the day
+    // is not yet knowable (future, or before today's shift start).
+    const dayRows = buildDailyRoster(single, attendance, dateStr, opts);
+    for (const r of dayRows) rows.push(r);
+  }
+  return rows;
+}
+
+/** 'YYYY-MM' for a date string or Date, in company time. */
+export function getMonthKey(input: string | Date = new Date()): string {
+  if (typeof input === 'string' && /^\d{4}-\d{2}/.test(input)) return input.slice(0, 7);
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d.getTime())) return getWorkDate().slice(0, 7);
+  return getWorkDate(d).slice(0, 7);
+}
+
+/** Shift the 'YYYY-MM' key by `delta` months. */
+export function shiftMonthKey(monthKey: string, delta: number): string {
+  const [y, m] = String(monthKey || '').split('-').map(Number);
+  if (!y || !m) return monthKey;
+  const total = y * 12 + (m - 1) + delta;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}`;
+}
+
+/** 'August 2026' for a 'YYYY-MM' key. */
+export function formatMonthKey(monthKey: string): string {
+  const [y, m] = String(monthKey || '').split('-').map(Number);
+  if (!y || !m) return monthKey;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
+    month: 'long', year: 'numeric', timeZone: 'UTC'
+  });
+}
+
+/** Short weekday name ('Mon') for a 'YYYY-MM-DD' key, timezone-independent. */
+export function getDayName(dateStr: string, long: boolean = false): string {
+  if (!dateStr) return '';
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { weekday: long ? 'long' : 'short', timeZone: 'UTC' });
+}
+
+export interface MonthAttendanceSummary {
+  monthKey: string;
+  /** Days that have actually happened and count as working days. */
+  workingDays: number;
+  present: number;
+  onTime: number;
+  late: number;
+  wfh: number;
+  absent: number;
+  onLeave: number;
+  holiday: number;
+  halfDay: number;
+  totalWorkedMinutes: number;
+  totalBreakMinutes: number;
+  /** present / workingDays as an integer 0-100. */
+  attendanceRate: number;
+  averageWorkedMinutes: number;
+}
+
+export function summarizeMonthRoster(
+  roster: RosterRecord[],
+  monthKey: string,
+  opts: { nowMs?: number } = {}
+): MonthAttendanceSummary {
+  const todayStr = getWorkDate(new Date(opts.nowMs ?? Date.now()));
+
+  // buildDailyRoster deliberately materialises a FUTURE day when it carries
+  // positive information — a declared holiday, a weekly off, or approved upcoming
+  // leave — because for the single explicit day the admin picked, that is the
+  // right answer. Rolled up over a month, though, those future rows must not be
+  // counted as working days that have elapsed: two leave days booked for next
+  // week would otherwise drag this month's attendance rate down for time nobody
+  // has lived through yet. Counts that describe what HAPPENED come from the
+  // elapsed slice; the headline leave/holiday figures still report the whole
+  // month so upcoming leave stays visible.
+  const elapsed = roster.filter(r => !r.date || r.date <= todayStr);
+  const c = summarizeRoster(roster);
+  const e = summarizeRoster(elapsed);
+
+  // Holidays and weekly offs are not working days, so they must not dilute the
+  // attendance rate — an employee is not "70% attendant" because 9 of 30 days
+  // were Sundays.
+  const workingDays = Math.max(0, e.total - e.holiday - e.onLeave);
+
+  let totalWorkedMinutes = 0;
+  let totalBreakMinutes = 0;
+  for (const r of elapsed) {
+    totalWorkedMinutes += Math.max(0, Number((r as any).workingMinutes) || 0);
+    totalBreakMinutes += Math.max(0, Number((r as any).totalBreakMinutes) || 0);
+  }
+
+  const attended = e.present + e.halfDay;
+  return {
+    monthKey,
+    workingDays,
+    // What actually happened: these states can only be reached by a day that has
+    // elapsed, so they read off the elapsed slice.
+    present: e.present,
+    onTime: e.onTime,
+    late: e.late,
+    wfh: e.wfh,
+    absent: e.absent,
+    halfDay: e.halfDay,
+    // Whole-month figures, so booked leave and upcoming holidays stay visible.
+    onLeave: c.onLeave,
+    holiday: c.holiday,
+    totalWorkedMinutes,
+    totalBreakMinutes,
+    attendanceRate: workingDays > 0 ? Math.round((attended / workingDays) * 100) : 0,
+    averageWorkedMinutes: e.present > 0 ? Math.round(totalWorkedMinutes / e.present) : 0
+  };
+}
+
+/**
+ * Calendar grid for a month: leading blanks so day 1 lands on the right weekday,
+ * then one cell per day. `weekStartsOn` defaults to Monday (1) because the
+ * company work week is Mon–Sat with Sunday off, so a Monday-first grid puts the
+ * weekly off in the last column instead of splitting the week across two rows.
+ */
+export interface CalendarCell {
+  dateStr: string | null;
+  dayOfMonth: number | null;
+  record: RosterRecord | null;
+  isToday: boolean;
+  isFuture: boolean;
+  isNonWorking: boolean;
+}
+
+export function buildMonthCalendar(
+  monthKey: string,
+  roster: RosterRecord[],
+  opts: { holidayDates?: string[]; weeklyOffDays?: number[]; todayStr?: string; weekStartsOn?: number } = {}
+): CalendarCell[] {
+  const dates = listDatesInMonth(monthKey);
+  if (dates.length === 0) return [];
+
+  const weekStartsOn = opts.weekStartsOn ?? 1;
+  const todayStr = opts.todayStr || getWorkDate();
+  const byDate = new Map<string, RosterRecord>();
+  for (const r of roster) if (r.date) byDate.set(r.date, r);
+
+  const firstDow = new Date(`${dates[0]}T00:00:00Z`).getUTCDay();
+  const lead = (firstDow - weekStartsOn + 7) % 7;
+
+  const cells: CalendarCell[] = [];
+  for (let i = 0; i < lead; i++) {
+    cells.push({ dateStr: null, dayOfMonth: null, record: null, isToday: false, isFuture: false, isNonWorking: false });
+  }
+  for (const dateStr of dates) {
+    cells.push({
+      dateStr,
+      dayOfMonth: Number(dateStr.slice(8, 10)),
+      record: byDate.get(dateStr) || null,
+      isToday: dateStr === todayStr,
+      isFuture: dateStr > todayStr,
+      isNonWorking: isNonWorkingDay(dateStr, opts.holidayDates || [], opts.weeklyOffDays)
+    });
+  }
+  // Pad the final row so the grid stays rectangular.
+  while (cells.length % 7 !== 0) {
+    cells.push({ dateStr: null, dayOfMonth: null, record: null, isToday: false, isFuture: false, isNonWorking: false });
+  }
+  return cells;
+}
