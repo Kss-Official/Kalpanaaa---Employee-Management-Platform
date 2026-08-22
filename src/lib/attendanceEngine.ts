@@ -41,6 +41,15 @@ export const SHIFT_TOTAL_MINUTES =
 export const SHIFT_LABEL = '10:00 AM – 7:00 PM IST';
 
 /**
+ * IST is a fixed UTC+05:30 with no daylight saving, so a company wall-clock time
+ * on a given calendar date is an exact offset from that date's UTC midnight.
+ * Anything that needs "7 PM IST on 2026-08-17" as an instant must use this
+ * rather than `new Date(y, m, d, 19)`, which silently means 7 PM in whatever
+ * timezone the device happens to be in.
+ */
+export const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
  * Wall-clock hour/minute of an instant IN COMPANY TIME (IST), independent of the
  * device timezone. Returns { hour: 0-23, minute: 0-59 }.
  */
@@ -1267,7 +1276,11 @@ export function apportionPercentages(values: number[]): number[] {
   return result;
 }
 
-export function computeLiveShiftBreakdown(record: any, nowMs: number = Date.now()): LiveShiftBreakdown {
+export function computeLiveShiftBreakdown(
+  record: any,
+  nowMs: number = Date.now(),
+  opts: { endCapMs?: number } = {}
+): LiveShiftBreakdown {
   const empty: LiveShiftBreakdown = {
     elapsedSecs: 0, workSecs: 0, breakSecs: 0,
     teaSecs: 0, mealSecs: 0, huddleSecs: 0, meetingSecs: 0, trainingSecs: 0, activitySecs: 0,
@@ -1281,7 +1294,15 @@ export function computeLiveShiftBreakdown(record: any, nowMs: number = Date.now(
 
   const outMs = safeGetTimestampMillis(record?.checkOutAt);
   const complete = outMs !== null && outMs > startMs;
-  const endMs = complete ? Math.min(outMs as number, Math.max(nowMs, outMs as number)) : nowMs;
+
+  // An OPEN shift normally runs to `now`. `endCapMs` lets a caller stop it at a
+  // hard boundary -- 7:00 PM of the record's own work date -- so a check-in that
+  // was never closed on Monday freezes at one rostered shift instead of billing
+  // every hour since, which is what an uncapped `now` would do in a week table.
+  const openEndMs = typeof opts.endCapMs === 'number' && Number.isFinite(opts.endCapMs)
+    ? Math.min(nowMs, opts.endCapMs)
+    : nowMs;
+  const endMs = complete ? (outMs as number) : Math.max(startMs, openEndMs);
   const elapsedSecs = Math.max(0, Math.floor((endMs - startMs) / 1000));
 
   const buckets: Record<Exclude<ShiftSegmentKey, 'work'>, number> = {
@@ -1648,4 +1669,254 @@ export function buildMonthCalendar(
     cells.push({ dateStr: null, dayOfMonth: null, record: null, isToday: false, isFuture: false, isNonWorking: false });
   }
   return cells;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WORK-WEEK TABLES (PM capacity heatmap, admin duration tables)
+//
+// A week table asks a different question from a live portal widget: "how many
+// minutes did this person work on THIS day", for six days at once, where some
+// days are finished, one is in progress, and some have not happened yet. Getting
+// that wrong in three different components is how the same shift ends up showing
+// three different durations, so it is answered once, here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Epoch ms of 7:00 PM IST on `dateStr`, or null when the date is unparseable. */
+export function getShiftEndMs(dateStr: string): number | null {
+  const parts = String(dateStr || '').split('-').map(Number);
+  const [y, m, d] = parts;
+  if (!y || !m || !d) return null;
+  // IST is UTC+5:30 with no DST, so the shift end is a fixed UTC offset from
+  // midnight UTC of the same calendar date. Building it this way keeps the
+  // boundary identical on a server in UTC and a laptop in IST -- `new Date(y, m,
+  // d, 19, ...)` would silently mean 7 PM in whatever zone the device is in.
+  return Date.UTC(y, m - 1, d, SHIFT_END_HOUR, SHIFT_END_MINUTE, 0, 0) - IST_OFFSET_MS;
+}
+
+/** Epoch ms of 10:00 AM IST on `dateStr`, or null when the date is unparseable. */
+export function getShiftStartMs(dateStr: string): number | null {
+  const parts = String(dateStr || '').split('-').map(Number);
+  const [y, m, d] = parts;
+  if (!y || !m || !d) return null;
+  return Date.UTC(y, m - 1, d, SHIFT_START_HOUR, SHIFT_START_MINUTE, 0, 0) - IST_OFFSET_MS;
+}
+
+export type DayWorkState =
+  | 'none'              // no record: never checked in
+  | 'live'              // checked in today, still working
+  | 'on-break'          // checked in today, currently on a break
+  | 'complete'          // checked out
+  | 'missing-checkout'; // checked in on a past day and never checked out
+
+export interface DayWorkSummary {
+  dateStr: string;
+  state: DayWorkState;
+  workedSecs: number;
+  breakSecs: number;
+  workedMinutes: number;
+  breakMinutes: number;
+  workedHours: number;        // one decimal, for compact cells
+  checkInMs: number | null;
+  checkOutMs: number | null;
+  isLive: boolean;            // duration is still increasing
+  isOnBreak: boolean;
+  activeBreakType: string | null;
+  status: string | null;      // the stored AttendanceStatus, when present
+  isWfh: boolean;
+  isFuture: boolean;
+  shiftPercent: number;       // worked vs the rostered shift, capped at 100
+}
+
+const EMPTY_DAY_WORK: Omit<DayWorkSummary, 'dateStr' | 'isFuture'> = {
+  state: 'none',
+  workedSecs: 0, breakSecs: 0, workedMinutes: 0, breakMinutes: 0, workedHours: 0,
+  checkInMs: null, checkOutMs: null,
+  isLive: false, isOnBreak: false, activeBreakType: null,
+  status: null, isWfh: false, shiftPercent: 0
+};
+
+/**
+ * How much of `dateStr` this person actually worked.
+ *
+ * Duration comes from the timestamps, never from the stored `workingMinutes`
+ * field: that field is only written at check-out, so trusting it makes a live
+ * shift read 0h all day and a corrected record keep showing its pre-correction
+ * total. Break time is subtracted at second precision by the shared breakdown
+ * engine, and an open shift is capped at 7:00 PM of its own work date.
+ */
+export function resolveDayWorkSummary(
+  record: any,
+  dateStr: string,
+  nowMs: number = Date.now()
+): DayWorkSummary {
+  const todayStr = getWorkDate(new Date(nowMs));
+  const isFuture = !!dateStr && dateStr > todayStr;
+  const base = { ...EMPTY_DAY_WORK, dateStr, isFuture };
+
+  const checkInMs = safeGetTimestampMillis(record?.checkInAt);
+  if (!record || !checkInMs) return base;
+
+  const capMs = getShiftEndMs(dateStr);
+  const bd = computeLiveShiftBreakdown(record, nowMs, capMs !== null ? { endCapMs: capMs } : {});
+  const checkOutMs = safeGetTimestampMillis(record?.checkOutAt);
+
+  // "Live" means the number on screen will be different a second from now: only
+  // true for an open shift on today's date that has not yet hit the 7 PM cap.
+  const isOpen = !bd.isShiftComplete;
+  const pastCap = capMs !== null && nowMs >= capMs;
+  const isLive = isOpen && dateStr === todayStr && !pastCap;
+
+  const state: DayWorkState = bd.isShiftComplete
+    ? 'complete'
+    : isLive
+      ? (bd.isOnBreak ? 'on-break' : 'live')
+      : 'missing-checkout';
+
+  return {
+    ...base,
+    state,
+    workedSecs: bd.workSecs,
+    breakSecs: bd.breakSecs,
+    workedMinutes: Math.floor(bd.workSecs / 60),
+    breakMinutes: Math.floor(bd.breakSecs / 60),
+    workedHours: Math.round((bd.workSecs / 3600) * 10) / 10,
+    checkInMs,
+    checkOutMs,
+    isLive,
+    isOnBreak: isLive && bd.isOnBreak,
+    activeBreakType: isLive ? bd.activeBreakType : null,
+    status: record?.status ?? null,
+    isWfh: record?.isWfh === true || record?.status === 'Work From Home',
+    shiftPercent: bd.shiftProgressPercent
+  };
+}
+
+/** `2026-08-17` -> `17-8-26`, the compact form used in the PM duration table. */
+export function formatShortDate(dateStr: string): string {
+  const parts = String(dateStr || '').split('-');
+  if (parts.length !== 3) return String(dateStr || '');
+  const [y, m, d] = parts;
+  return `${Number(d)}-${Number(m)}-${y.slice(-2)}`;
+}
+
+export interface WorkWeekDay {
+  dateStr: string;
+  dayName: string;      // Mon
+  dayNameLong: string;  // Monday
+  shortDate: string;    // 17-8-26
+  dayOfMonth: number;
+  isToday: boolean;
+  isFuture: boolean;
+  isNonWorking: boolean;
+}
+
+/**
+ * The six-day work week (Mon..Sat) containing `anchor`.
+ *
+ * The week is anchored on Monday and always returns WORK_WEEK_DAYS entries, so
+ * Saturday -- a full working day on this roster -- can never be dropped from a
+ * capacity table the way a hardcoded Mon..Fri loop drops it.
+ */
+export function buildWorkWeek(
+  anchor: string | Date = new Date(),
+  opts: { nowMs?: number; holidayDates?: string[]; days?: number } = {}
+): WorkWeekDay[] {
+  const nowMs = opts.nowMs ?? Date.now();
+  const todayStr = getWorkDate(new Date(nowMs));
+  const anchorStr = typeof anchor === 'string' ? anchor : getWorkDate(anchor);
+
+  const parts = anchorStr.split('-').map(Number);
+  const anchorUtc = Date.UTC(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+  // getUTCDay(): 0=Sun..6=Sat. Distance back to Monday, treating Sunday as the
+  // END of the preceding week rather than the start of this one.
+  const dow = new Date(anchorUtc).getUTCDay();
+  const backToMonday = (dow + 6) % 7;
+  const mondayUtc = anchorUtc - backToMonday * 86400000;
+
+  const count = Math.max(1, Math.min(7, opts.days ?? WORK_WEEK_DAYS));
+  const out: WorkWeekDay[] = [];
+  for (let i = 0; i < count; i++) {
+    const dayUtc = mondayUtc + i * 86400000;
+    const dateStr = new Date(dayUtc).toISOString().slice(0, 10);
+    out.push({
+      dateStr,
+      dayName: getDayName(dateStr),
+      dayNameLong: getDayName(dateStr, true),
+      shortDate: formatShortDate(dateStr),
+      dayOfMonth: new Date(dayUtc).getUTCDate(),
+      isToday: dateStr === todayStr,
+      isFuture: dateStr > todayStr,
+      isNonWorking: isNonWorkingDay(dateStr, opts.holidayDates || [])
+    });
+  }
+  return out;
+}
+
+export interface WeekWorkRow {
+  days: DayWorkSummary[];
+  totalWorkedSecs: number;
+  totalBreakSecs: number;
+  totalWorkedMinutes: number;
+  totalWorkedHours: number;      // one decimal
+  daysPresent: number;
+  daysAbsent: number;            // elapsed working days with no check-in
+  expectedMinutes: number;       // rostered minutes across elapsed working days
+  utilizationPercent: number;    // worked vs expected, 0 when nothing expected
+  isLive: boolean;               // any day still accruing
+}
+
+/**
+ * Roll a single employee's week into per-day summaries plus totals.
+ *
+ * Totals only count days that have already happened: an unworked Thursday later
+ * this week must not be booked as an absence, and must not drag utilisation down
+ * before it arrives.
+ */
+export function buildWeekWorkRow(
+  week: WorkWeekDay[],
+  employee: any,
+  attendance: AttendanceRecord[],
+  opts: { nowMs?: number; leaveRequests?: any[] } = {}
+): WeekWorkRow {
+  const nowMs = opts.nowMs ?? Date.now();
+  const days = week.map(d =>
+    resolveDayWorkSummary(resolveAttendanceRecord(attendance, employee, d.dateStr), d.dateStr, nowMs)
+  );
+
+  let totalWorkedSecs = 0;
+  let totalBreakSecs = 0;
+  let daysPresent = 0;
+  let daysAbsent = 0;
+  let expectedMinutes = 0;
+  let isLive = false;
+
+  days.forEach((s, i) => {
+    const meta = week[i];
+    totalWorkedSecs += s.workedSecs;
+    totalBreakSecs += s.breakSecs;
+    if (s.isLive) isLive = true;
+    if (s.checkInMs) daysPresent++;
+
+    if (meta.isFuture || meta.isNonWorking) return;
+    const onLeave = hasApprovedLeaveOn(opts.leaveRequests, employee, meta.dateStr);
+    if (onLeave) return;
+    expectedMinutes += SHIFT_TOTAL_MINUTES;
+    if (!s.checkInMs) daysAbsent++;
+  });
+
+  const totalWorkedMinutes = Math.floor(totalWorkedSecs / 60);
+  return {
+    days,
+    totalWorkedSecs,
+    totalBreakSecs,
+    totalWorkedMinutes,
+    totalWorkedHours: Math.round((totalWorkedSecs / 3600) * 10) / 10,
+    daysPresent,
+    daysAbsent,
+    expectedMinutes,
+    utilizationPercent: expectedMinutes > 0
+      ? Math.round((totalWorkedMinutes / expectedMinutes) * 100)
+      : 0,
+    isLive
+  };
 }

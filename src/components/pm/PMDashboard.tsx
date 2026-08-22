@@ -10,6 +10,7 @@ import {
   Users, 
   Calendar, 
   TrendingUp, 
+  ChevronLeft,
   ChevronRight,
   Flame,
   FileText,
@@ -20,15 +21,20 @@ import {
 import { Project, LeaveRequest } from '../../types';
 import { db, subscribeWithRecovery } from '../../lib/firebase';
 import { collection, setDoc, doc } from 'firebase/firestore';
-import { 
-  getEmployeeWorkDate, 
-  getAttendanceDocId, 
-  getCanonicalEmployeeUid, 
+import {
+  getEmployeeWorkDate,
   resolveAttendanceRecord,
   isShiftComplete,
-  safeGetTimestampMillis, 
-  formatTimestampToISO 
+  buildWorkWeek,
+  buildWeekWorkRow,
+  hasApprovedLeaveOn,
+  formatDuration,
+  formatShortDate,
+  SHIFT_LABEL,
+  SHIFT_TOTAL_MINUTES,
+  WORK_WEEK_DAYS
 } from '../../lib/attendanceEngine';
+import type { DayWorkSummary, WorkWeekDay } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface PMDashboardProps {
@@ -81,14 +87,16 @@ const DEFAULT_PROJECTS: Project[] = [
 ];
 
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
-  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated } = useAuth();
+  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings } = useAuth();
 
   const todayStr = getEmployeeWorkDate(new Date());
 
-  // Real-time live attendance ticker: re-computes live working hours every 10 seconds
-  const [, setLiveTick] = useState(0);
+  // One clock drives every live duration on this screen. Holding the timestamp
+  // itself (rather than an opaque counter) means the memos below can depend on
+  // it explicitly, so a cell can never render a duration from a stale `now`.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const interval = setInterval(() => setLiveTick(t => t + 1), 10000);
+    const interval = setInterval(() => setNowMs(Date.now()), 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -170,26 +178,29 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     );
   };
 
-  // Calculate current week's Monday through Friday dates
-  const getWeekDays = () => {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const distanceToMon = (dayOfWeek + 6) % 7;
-    const mon = new Date(now);
-    mon.setDate(now.getDate() - distanceToMon);
-
-    const days: { label: string; dateStr: string }[] = [];
-    for (let i = 0; i < 5; i++) {
-      const d = new Date(mon);
-      d.setDate(mon.getDate() + i);
-      const dateStr = getEmployeeWorkDate(d);
-      const label = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][i];
-      days.push({ label, dateStr });
-    }
-    return days;
-  };
-
-  const weekDays = getWeekDays();
+  // Item #15: the roster is a SIX day week (Mon–Sat). The previous loop ran
+  // `i < 5` and hardcoded ['Mon'..'Fri'], so Saturday — a full working day here —
+  // was structurally invisible in the capacity table: an employee could work
+  // every Saturday of the month and the heatmap would never show one hour of it.
+  const [weekOffset, setWeekOffset] = useState(0);
+  const weekAnchor = React.useMemo(
+    () => new Date(nowMs + weekOffset * 7 * 86400000),
+    // Re-anchoring on every tick would be wasteful and would fight the arrows;
+    // the anchor only needs the CURRENT week, which changes at most daily.
+    [todayStr, weekOffset] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const holidayDates = React.useMemo<string[]>(
+    () => (((settings as any)?.holidayDates) || []) as string[],
+    [settings]
+  );
+  const weekDays = React.useMemo(
+    () => buildWorkWeek(weekAnchor, { nowMs, holidayDates }),
+    [weekAnchor, holidayDates, todayStr] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const weekLabel = weekDays.length
+    ? `${formatShortDate(weekDays[0].dateStr)} → ${formatShortDate(weekDays[weekDays.length - 1].dateStr)}`
+    : '';
+  const isCurrentWeek = weekOffset === 0;
 
   const pendingTeamRequests = leaveRequests.filter(r => {
     if (r.status !== 'Pending') return false;
@@ -378,52 +389,195 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
           </div>
         ))}
       </div>
-      {/* Zone 3: Team Workload Heatmap Grid */}
+      {/* Zone 3: Team Capacity — Mon–Sat real hours, live and closed */}
       {(() => {
         // Pure role-based filter: Super Admins & HR Admins excluded; EMPLOYEE and PROJECT_MANAGER included
         const teamMembersOnly = employees.filter(emp => {
           return emp.role !== 'SUPER_ADMIN' && emp.role !== 'HR_ADMIN';
         });
 
+        // One roll-up per person, computed once per tick. Every cell, the week
+        // total and the duty badge all read from this same object, so a row can
+        // no longer disagree with its own total.
+        const rows = teamMembersOnly.map(emp => ({
+          emp,
+          week: buildWeekWorkRow(weekDays, emp, attendance, { nowMs, leaveRequests })
+        }));
+
+        const teamWorkedMinutes = rows.reduce((acc, r) => acc + r.week.totalWorkedMinutes, 0);
+        const liveNow = rows.filter(r => r.week.isLive).length;
+        const cellBase = 'inline-block min-w-[46px] px-1.5 h-8 rounded-lg font-mono font-bold text-[11px] leading-8 border';
+
+        const renderDayCell = (s: DayWorkSummary, meta: WorkWeekDay, emp: any) => {
+          // Not yet happened: an empty cell is the honest answer. It is NOT an
+          // absence and must not be coloured like one.
+          if (meta.isFuture) {
+            return (
+              <span title={meta.dayNameLong + ' ' + meta.shortDate + ' — upcoming'}
+                className={cellBase + ' bg-slate-950/40 text-slate-700 border-slate-900/60'}>·</span>
+            );
+          }
+          if (meta.isNonWorking) {
+            return (
+              <span title={meta.dayNameLong + ' ' + meta.shortDate + ' — weekly off / holiday'}
+                className={cellBase + ' bg-slate-800/40 text-slate-500 border-slate-700/40'}>Off</span>
+            );
+          }
+          if (!s.checkInMs) {
+            // Sanctioned leave is not truancy, so it gets its own colour rather
+            // than being lumped in with an unexplained no-show.
+            if (hasApprovedLeaveOn(leaveRequests, emp, meta.dateStr)) {
+              return (
+                <span title={meta.dayNameLong + ' ' + meta.shortDate + ' — approved leave'}
+                  className={cellBase + ' bg-violet-500/15 text-violet-300 border-violet-500/25'}>Leave</span>
+              );
+            }
+            return (
+              <span title={'No check-in on ' + meta.dayNameLong + ' ' + meta.shortDate}
+                className={cellBase + ' bg-rose-500/10 text-rose-400/80 border-rose-500/20'}>A</span>
+            );
+          }
+
+          const hrs = s.workedHours;
+          const tone =
+            s.state === 'missing-checkout' ? 'bg-orange-500/15 text-orange-300 border-orange-500/30' :
+            hrs >= 8 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+            hrs >= 6 ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+            'bg-amber-500/20 text-amber-300 border-amber-500/30';
+
+          const tip =
+            meta.dayNameLong + ' ' + meta.shortDate + ' • ' + formatDuration(s.workedSecs) + ' worked'
+            + (s.breakSecs > 0 ? ' • ' + formatDuration(s.breakSecs) + ' break' : '')
+            + (s.checkInMs ? ' • In ' + toISTTimeString(new Date(s.checkInMs).toISOString()) : '')
+            + (s.checkOutMs ? ' • Out ' + toISTTimeString(new Date(s.checkOutMs).toISOString()) : '')
+            + (s.state === 'missing-checkout' ? ' • no check-out (capped at shift end)' : '')
+            + (s.isOnBreak ? ' • on break: ' + s.activeBreakType : s.isLive ? ' • live' : '');
+
+          return (
+            <span title={tip} className={cellBase + ' ' + tone + ' relative'} data-testid={'pm-cell-' + meta.dateStr}>
+              {hrs}h
+              {s.isLive && (
+                <span className={'absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ' +
+                  (s.isOnBreak ? 'bg-amber-400' : 'bg-emerald-400') + ' animate-pulse'} />
+              )}
+              {s.state === 'missing-checkout' && (
+                <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-orange-400" />
+              )}
+            </span>
+          );
+        };
+
         return (
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-md space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-              <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
-                <Flame className="w-4 h-4 text-amber-400 shrink-0" /> 
-                <span>Team Capacity &amp; Workload Heatmap (Real Attendance Hours)</span>
-              </h3>
-              <span className="text-xs text-slate-400 font-mono">Live Workforce ({teamMembersOnly.length} Members)</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                  <Flame className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Team Work Duration — {WORK_WEEK_DAYS}-Day Week (Mon–Sat)</span>
+                </h3>
+                <p className="text-[10px] text-slate-500 mt-1 font-medium">
+                  Shift {SHIFT_LABEL} · durations come from real check-in/out timestamps only
+                </p>
+              </div>
+
+              {/* Week navigator */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setWeekOffset(o => o - 1)}
+                  title="Previous week"
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <span data-testid="pm-week-label" className="text-[11px] font-mono font-bold text-white bg-slate-950/70 border border-slate-800 px-2.5 py-1.5 rounded-lg min-w-[140px] text-center">
+                  {weekLabel}
+                </span>
+                <button
+                  onClick={() => setWeekOffset(o => Math.min(0, o + 1))}
+                  disabled={isCurrentWeek}
+                  title={isCurrentWeek ? 'Already on the current week' : 'Next week'}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                {!isCurrentWeek && (
+                  <button
+                    onClick={() => setWeekOffset(0)}
+                    className="text-[10px] font-bold text-blue-400 hover:text-blue-300 px-2 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 transition-colors cursor-pointer"
+                  >
+                    This Week
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Team roll-up strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Members</p>
+                <p className="text-lg font-black text-white font-mono">{teamMembersOnly.length}</p>
+              </div>
+              <div className="bg-slate-950/60 border border-emerald-500/20 rounded-2xl p-3">
+                <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wide">Working Now</p>
+                <p className="text-lg font-black text-emerald-300 font-mono flex items-center gap-1.5">
+                  {liveNow}
+                  {liveNow > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+                </p>
+              </div>
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Team Hours</p>
+                <p className="text-lg font-black text-white font-mono">{Math.round((teamWorkedMinutes / 60) * 10) / 10}h</p>
+              </div>
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Rostered / Person</p>
+                <p className="text-lg font-black text-slate-300 font-mono">{Math.round((SHIFT_TOTAL_MINUTES * WORK_WEEK_DAYS) / 60)}h</p>
+              </div>
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-slate-800/80 custom-scrollbar">
-              <table className="w-full text-left text-xs min-w-[720px]">
+              <table className="w-full text-left text-xs min-w-[860px]">
                 <thead>
                   <tr className="text-slate-500 font-bold uppercase text-[10px] bg-slate-950/50">
                     <th className="py-2.5 px-3">Team Member</th>
                     <th className="py-2.5 px-3">Department &amp; Role</th>
                     {weekDays.map(d => (
-                      <th key={d.dateStr} className="py-2.5 px-2 text-center font-mono">{d.label} ({d.dateStr.slice(5)})</th>
+                      <th
+                        key={d.dateStr}
+                        className={'py-2 px-2 text-center ' + (d.isToday ? 'text-blue-400' : d.isNonWorking ? 'text-slate-700' : '')}
+                      >
+                        {/* Item #15: day NAME above the 17-8-26 date, so a column
+                            is readable without counting across from Monday. */}
+                        <span className="block text-[10px] font-extrabold tracking-wide">{d.dayName}</span>
+                        <span className="block text-[9px] font-mono font-semibold text-slate-600 normal-case">{d.shortDate}</span>
+                      </th>
                     ))}
+                    <th className="py-2.5 px-3 text-center text-slate-400">Week Total</th>
                     <th className="py-2.5 px-3 text-right">Duty Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50 font-semibold">
-                  {teamMembersOnly.map(emp => {
-                    const empAtt = resolveAttendanceRecord(attendance, emp, todayStr);
-                    const isCheckedIn = !!empAtt?.checkInAt;
-                    const isWfh = isCheckedIn && (empAtt?.isWfh === true || empAtt?.status === 'Work From Home');
-
+                  {rows.length === 0 && (
+                    <tr>
+                      <td colSpan={weekDays.length + 4} className="py-8 text-center text-slate-500 text-xs">
+                        No team members assigned yet.
+                      </td>
+                    </tr>
+                  )}
+                  {rows.map(({ emp, week }) => {
+                    const today = week.days.find((_, i) => weekDays[i].isToday);
                     return (
                       <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 px-3 font-bold text-white flex items-center gap-2">
-                          <img
-                            src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=1e293b&color=fff`}
-                            alt={emp.fullName}
-                            className="w-7 h-7 rounded-full object-cover border border-slate-700 shrink-0"
-                          />
-                          <div>
-                            <span className="block text-xs font-bold text-white">{emp.fullName}</span>
-                            <span className="text-[10px] font-mono text-slate-500">{emp.employeeId}</span>
+                        <td className="py-3 px-3 font-bold text-white">
+                          <div className="flex items-center gap-2">
+                            <img
+                              src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=1e293b&color=fff`}
+                              alt={emp.fullName}
+                              className="w-7 h-7 rounded-full object-cover border border-slate-700 shrink-0"
+                            />
+                            <div>
+                              <span className="block text-xs font-bold text-white">{emp.fullName}</span>
+                              <span className="text-[10px] font-mono text-slate-500">{emp.employeeId}</span>
+                            </div>
                           </div>
                         </td>
                         <td className="py-3 px-3 text-slate-400 text-xs">
@@ -431,80 +585,64 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                           <span className="text-[10px] text-slate-500">{emp.designation}</span>
                         </td>
 
-                        {/* Exact Real Hours Calculated per Date via Safe Parsing */}
-                        {weekDays.map(d => {
-                          const rec = resolveAttendanceRecord(attendance, emp, d.dateStr);
+                        {week.days.map((s, i) => (
+                          <td key={weekDays[i].dateStr} className={'py-3 px-2 text-center ' + (weekDays[i].isToday ? 'bg-blue-500/5' : '')}>
+                            {renderDayCell(s, weekDays[i], emp)}
+                          </td>
+                        ))}
 
-                          let hours: number | null = null;
-                          let isLive = false;
+                        {/* Six-day total. Recomputed from timestamps on every tick,
+                            so it moves the moment someone checks out. */}
+                        <td className="py-3 px-3 text-center">
+                          <span
+                            data-testid={'pm-week-total-' + emp.id}
+                            title={formatDuration(week.totalWorkedSecs) + ' worked over ' + week.daysPresent + ' day(s)'
+                              + (week.expectedMinutes > 0 ? ' • ' + week.utilizationPercent + '% of ' + Math.round(week.expectedMinutes / 60) + 'h rostered so far' : '')}
+                            className={'block font-mono font-black text-sm ' +
+                              (week.utilizationPercent >= 95 ? 'text-emerald-300' :
+                               week.utilizationPercent >= 80 ? 'text-blue-300' :
+                               week.expectedMinutes === 0 ? 'text-slate-500' : 'text-amber-300')}
+                          >
+                            {week.totalWorkedHours}h
+                          </span>
+                          <span className="block text-[9px] font-mono text-slate-500">
+                            {week.expectedMinutes > 0 ? week.utilizationPercent + '%' : '—'}
+                            {week.daysAbsent > 0 && <span className="text-rose-400/80"> · {week.daysAbsent}A</span>}
+                          </span>
+                        </td>
 
-                          if (rec) {
-                            // 1. Explicit workingMinutes stored and > 0
-                            if (typeof rec.workingMinutes === 'number' && rec.workingMinutes > 0) {
-                              hours = Math.round((rec.workingMinutes / 60) * 10) / 10;
-                            } else {
-                              const startMs = safeGetTimestampMillis(rec.checkInAt);
-                              const endMs = safeGetTimestampMillis(rec.checkOutAt);
-                              const totalBreakMins = rec.totalBreakMinutes || (rec.breaks || []).reduce((acc, b) => acc + (b.durationMinutes || 0), 0) || 0;
-
-                              if (startMs && endMs && endMs > startMs) {
-                                // Both check-in and check-out exist: exact recorded duration
-                                const diffMins = Math.max(0, Math.floor((endMs - startMs) / 60000) - totalBreakMins);
-                                hours = Math.round((diffMins / 60) * 10) / 10;
-                              } else if (startMs && !endMs && d.dateStr === todayStr) {
-                                // Live shift in progress today: exact real-time live elapsed duration
-                                isLive = true;
-                                const liveMins = Math.max(1, Math.floor((Date.now() - startMs) / 60000) - totalBreakMins);
-                                hours = Math.round((liveMins / 60) * 10) / 10;
-                              } else if (rec.status === 'Half Day') {
-                                hours = 4.5;
-                              }
-                            }
-                          } else if (d.dateStr <= '2026-08-21') {
-                            // Historical baseline for past sprint weekdays up to August 21
-                            const isOnLeave = leaveRequests.some(r =>
-                              r.status === 'Approved' &&
-                              (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
-                              d.dateStr >= r.startDate && d.dateStr <= r.endDate
-                            );
-                            if (!isOnLeave) {
-                              const empCodeNum = parseInt(emp.employeeId.replace(/\D/g, '') || '1', 10);
-                              const pseudoOffset = (empCodeNum % 3) * 0.1;
-                              hours = Math.round((9.4 + pseudoOffset) * 10) / 10;
-                            }
-                          }
-
-                          const hasCheckIn = (hours !== null && hours > 0) || isLive || (d.dateStr === todayStr && !!rec?.checkInAt);
-
-                          return (
-                            <td key={d.dateStr} className="py-3 px-2 text-center">
-                              <span 
-                                title={hasCheckIn ? `${hours || 0}h worked on ${d.dateStr}${isLive ? ` (Live • In: ${toISTTimeString(rec?.checkInAt)})` : rec?.checkInAt ? ` (In: ${toISTTimeString(rec.checkInAt)})` : ''}` : `No check-in on ${d.dateStr}`}
-                                className={`inline-block min-w-[36px] px-1.5 h-8 rounded-lg font-mono font-bold text-xs leading-8 ${
-                                  hasCheckIn && (hours || 0) >= 8.0 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                                  hasCheckIn && (hours || 0) >= 6.0 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
-                                  hasCheckIn && ((hours || 0) > 0 || isLive) ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
-                                  'bg-slate-950/60 text-slate-600 border border-slate-900'
-                                }`}
-                              >
-                                {hasCheckIn ? `${hours || 0}h` : '--'}
-                              </span>
-                            </td>
-                          );
-                        })}
-
+                        {/* Item #15: this badge used to be driven by `!!checkInAt`
+                            alone, so it read "On Duty (Office)" from check-in until
+                            midnight — a PM could not tell who was still working from
+                            who had gone home hours ago. It now follows the resolved
+                            state of today's record. */}
                         <td className="py-3 px-3 text-right">
-                          {isWfh ? (
-                            <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20">
-                              WFH Active {empAtt?.checkInAt ? `• ${toISTTimeString(empAtt.checkInAt)}` : ''}
-                            </span>
-                          ) : isCheckedIn ? (
-                            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-                              On Duty (Office) {empAtt?.checkInAt ? `• ${toISTTimeString(empAtt.checkInAt)}` : ''}
-                            </span>
-                          ) : (
+                          {!today || !today.checkInMs ? (
                             <span className="text-[10px] font-bold text-slate-500 bg-slate-800/50 px-2.5 py-1 rounded-lg border border-slate-700/50">
                               Off Duty
+                            </span>
+                          ) : today.state === 'complete' ? (
+                            <span
+                              title={'Checked out at ' + toISTTimeString(new Date(today.checkOutMs as number).toISOString())}
+                              className="text-[10px] font-bold text-slate-300 bg-slate-700/40 px-2.5 py-1 rounded-lg border border-slate-600/40"
+                            >
+                              Checked Out • {today.workedHours}h
+                            </span>
+                          ) : today.state === 'missing-checkout' ? (
+                            <span className="text-[10px] font-bold text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg border border-orange-500/25">
+                              No Check-out
+                            </span>
+                          ) : today.isOnBreak ? (
+                            <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/25 animate-pulse">
+                              On Break • {today.activeBreakType}
+                            </span>
+                          ) : today.isWfh ? (
+                            <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20">
+                              WFH Active • {toISTTimeString(new Date(today.checkInMs).toISOString())}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                              On Duty • {toISTTimeString(new Date(today.checkInMs).toISOString())}
                             </span>
                           )}
                         </td>
@@ -513,6 +651,23 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-semibold text-slate-500 pt-1">
+              {[
+                { c: 'bg-emerald-500/60', l: 'Full shift (8h+)' },
+                { c: 'bg-blue-500/60', l: '6–8h' },
+                { c: 'bg-amber-500/60', l: 'Under 6h' },
+                { c: 'bg-orange-500/60', l: 'No check-out' },
+                { c: 'bg-violet-500/60', l: 'Approved leave' },
+                { c: 'bg-rose-500/50', l: 'Absent' },
+                { c: 'bg-slate-700', l: 'Off / upcoming' }
+              ].map(x => (
+                <span key={x.l} className="flex items-center gap-1.5">
+                  <span className={'w-2 h-2 rounded-sm ' + x.c} />{x.l}
+                </span>
+              ))}
             </div>
           </div>
         );

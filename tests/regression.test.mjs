@@ -864,3 +864,182 @@ test('#10 month key helpers roll over years and are timezone-independent', () =>
   assert.equal(engine.listDatesInMonth('2026-08').length, 31);
   assert.deepEqual(engine.listDatesInMonth('2026-13'), [], 'invalid month yields nothing');
 });
+
+// ── Item #15: PM work-duration table (Mon–Sat, live + checked-out) ───────────
+const IST = 5.5 * 60 * 60 * 1000;
+/** Build an epoch ms for a wall-clock IST time on a date, device-timezone-proof. */
+const ist = (dateStr, h, m = 0, s = 0) => {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  return Date.UTC(y, mo - 1, d, h, m, s, 0) - IST;
+};
+
+test('#15 buildWorkWeek spans Monday to Saturday and carries date + day name', () => {
+  // 2026-08-20 is a Thursday; its work week is Mon 17th → Sat 22nd.
+  const week = engine.buildWorkWeek('2026-08-20', { nowMs: ist('2026-08-20', 14) });
+  assert.equal(week.length, 6, 'Saturday is a working day and must not be dropped');
+  assert.deepEqual(week.map(d => d.dateStr), [
+    '2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21', '2026-08-22'
+  ]);
+  assert.deepEqual(week.map(d => d.dayName), ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+
+  // The exact compact format the table header asks for: 17-8-26.
+  assert.equal(week[0].shortDate, '17-8-26');
+  assert.equal(engine.formatShortDate('2026-12-05'), '5-12-26');
+  assert.equal(engine.formatShortDate('garbage'), 'garbage');
+
+  assert.deepEqual(week.map(d => d.isToday), [false, false, false, true, false, false]);
+  assert.deepEqual(week.map(d => d.isFuture), [false, false, false, false, true, true]);
+  // Sunday is the only weekly off, so no Mon–Sat day is non-working by default.
+  assert.ok(week.every(d => !d.isNonWorking));
+
+  // Sunday belongs to the week that just ENDED, not the one starting next day.
+  const sun = engine.buildWorkWeek('2026-08-23', { nowMs: ist('2026-08-23', 12) });
+  assert.equal(sun[0].dateStr, '2026-08-17', 'Sunday anchors back to the preceding Monday');
+
+  // A declared holiday inside the work week is flagged.
+  const withHoliday = engine.buildWorkWeek('2026-08-20', {
+    nowMs: ist('2026-08-20', 14), holidayDates: ['2026-08-19']
+  });
+  assert.deepEqual(withHoliday.map(d => d.isNonWorking), [false, false, true, false, false, false]);
+});
+
+test('#15 resolveDayWorkSummary: checking out updates the duration and the status', () => {
+  const now = ist('2026-08-20', 15, 0);
+
+  // Live shift: in at 10:00, on-screen at 15:00, one closed 30m meal break.
+  const live = {
+    checkInAt: new Date(ist('2026-08-20', 10, 0)).toISOString(),
+    breaks: [{
+      type: 'Meal Break',
+      startAt: new Date(ist('2026-08-20', 13, 0)).toISOString(),
+      endAt: new Date(ist('2026-08-20', 13, 30)).toISOString()
+    }],
+    status: 'Present'
+  };
+  const a = engine.resolveDayWorkSummary(live, '2026-08-20', now);
+  assert.equal(a.state, 'live');
+  assert.equal(a.isLive, true, 'an open shift today is still accruing');
+  assert.equal(a.workedMinutes, 4 * 60 + 30, '5h elapsed minus 30m break');
+  assert.equal(a.breakMinutes, 30);
+  assert.equal(a.workedHours, 4.5);
+
+  // Checking out at 15:00 must FREEZE the same number, not zero it and not keep
+  // climbing: this is the "once checked out the data must update" contract.
+  const closed = { ...live, checkOutAt: new Date(ist('2026-08-20', 15, 0)).toISOString() };
+  const later = ist('2026-08-20', 18, 30);
+  const b = engine.resolveDayWorkSummary(closed, '2026-08-20', later);
+  assert.equal(b.state, 'complete');
+  assert.equal(b.isLive, false);
+  assert.equal(b.workedMinutes, a.workedMinutes, 'checkout freezes the duration');
+  assert.ok(b.checkOutMs !== null);
+
+  // A stale stored workingMinutes must never win over the timestamps -- it is
+  // only written at check-out, so trusting it made live shifts read 0h all day.
+  const stale = { ...closed, workingMinutes: 0 };
+  assert.equal(engine.resolveDayWorkSummary(stale, '2026-08-20', later).workedMinutes, 270);
+
+  // No record at all: zeroed, and explicitly NOT fabricated into a full day.
+  const none = engine.resolveDayWorkSummary(null, '2026-08-20', now);
+  assert.equal(none.state, 'none');
+  assert.equal(none.workedMinutes, 0);
+  assert.equal(none.checkInMs, null);
+});
+
+test('#15 resolveDayWorkSummary caps a forgotten check-out at its own 7 PM', () => {
+  // Checked in Monday, never checked out. Viewed on Saturday.
+  const rec = { checkInAt: new Date(ist('2026-08-17', 10, 0)).toISOString(), breaks: [] };
+  const saturday = ist('2026-08-22', 16, 0);
+  const s = engine.resolveDayWorkSummary(rec, '2026-08-17', saturday);
+
+  assert.equal(s.state, 'missing-checkout');
+  assert.equal(s.isLive, false, 'a past open shift is not live');
+  assert.equal(s.workedMinutes, engine.SHIFT_TOTAL_MINUTES,
+    'capped at one rostered shift, not the 126 hours since Monday morning');
+
+  // Today's shift after 7 PM stops growing too.
+  const todayLate = ist('2026-08-22', 21, 0);
+  const t = engine.resolveDayWorkSummary(
+    { checkInAt: new Date(ist('2026-08-22', 10, 0)).toISOString(), breaks: [] },
+    '2026-08-22', todayLate
+  );
+  assert.equal(t.isLive, false, 'past the 7 PM cap it is no longer ticking');
+  assert.equal(t.workedMinutes, engine.SHIFT_TOTAL_MINUTES);
+
+  assert.equal(engine.getShiftEndMs('2026-08-17'), ist('2026-08-17', 19, 0));
+  assert.equal(engine.getShiftStartMs('2026-08-17'), ist('2026-08-17', 10, 0));
+  assert.equal(engine.getShiftEndMs('nope'), null);
+});
+
+test('#15 resolveDayWorkSummary flags an open break and never over-bills it', () => {
+  const now = ist('2026-08-20', 14, 0);
+  const rec = {
+    checkInAt: new Date(ist('2026-08-20', 10, 0)).toISOString(),
+    breaks: [{ type: 'Team Huddle', startAt: new Date(ist('2026-08-20', 13, 45)).toISOString() }]
+  };
+  const s = engine.resolveDayWorkSummary(rec, '2026-08-20', now);
+  assert.equal(s.state, 'on-break');
+  assert.equal(s.isOnBreak, true);
+  assert.equal(s.activeBreakType, 'Team Huddle');
+  // 4h elapsed, 15m of it inside the still-open break.
+  assert.equal(s.breakMinutes, 15);
+  assert.equal(s.workedMinutes, 225);
+
+  // A break left open across check-out cannot outlive the shift.
+  const closed = { ...rec, checkOutAt: new Date(ist('2026-08-20', 14, 0)).toISOString() };
+  const s2 = engine.resolveDayWorkSummary(closed, '2026-08-20', ist('2026-08-20', 23, 0));
+  assert.equal(s2.breakMinutes, 15);
+  assert.equal(s2.workedMinutes, 225);
+  assert.equal(s2.isOnBreak, false, 'a closed shift has no active break');
+});
+
+test('#15 buildWeekWorkRow totals six days and ignores days that have not happened', () => {
+  const emp = { id: 'emp-KSS2407003', uid: 'uid-KSS2407003', employeeId: 'KSS2407003', fullName: 'Asha R' };
+  const now = ist('2026-08-20', 15, 0); // Thursday afternoon
+  const week = engine.buildWorkWeek('2026-08-20', { nowMs: now });
+
+  const day = (dateStr, inH, outH) => ({
+    id: `${emp.uid}_${dateStr}`,
+    employeeId: emp.id,
+    employeeCode: emp.employeeId,
+    date: dateStr,
+    status: 'Present',
+    breaks: [],
+    checkInAt: new Date(ist(dateStr, inH, 0)).toISOString(),
+    ...(outH ? { checkOutAt: new Date(ist(dateStr, outH, 0)).toISOString() } : {})
+  });
+
+  const attendance = [
+    day('2026-08-17', 10, 19),  // 9h
+    day('2026-08-18', 10, 19),  // 9h
+    // Wednesday absent
+    day('2026-08-20', 10, null) // live, 5h so far
+  ];
+
+  const row = engine.buildWeekWorkRow(week, emp, attendance, { nowMs: now });
+  assert.equal(row.days.length, 6);
+  assert.equal(row.totalWorkedMinutes, 9 * 60 + 9 * 60 + 5 * 60);
+  assert.equal(row.totalWorkedHours, 23);
+  assert.equal(row.daysPresent, 3);
+  assert.equal(row.isLive, true);
+
+  // Fri + Sat have not happened: they are neither absences nor expected hours.
+  assert.equal(row.daysAbsent, 1, 'only Wednesday is an absence');
+  assert.equal(row.expectedMinutes, 4 * engine.SHIFT_TOTAL_MINUTES, 'Mon–Thu only');
+
+  // Approved leave removes the day from the denominator instead of counting as
+  // an absence, so taking sanctioned leave cannot look like truancy.
+  const leave = [{
+    status: 'Approved', type: 'Casual', employeeId: emp.employeeId,
+    startDate: '2026-08-19', endDate: '2026-08-19'
+  }];
+  const onLeave = engine.buildWeekWorkRow(week, emp, attendance, { nowMs: now, leaveRequests: leave });
+  assert.equal(onLeave.daysAbsent, 0);
+  assert.equal(onLeave.expectedMinutes, 3 * engine.SHIFT_TOTAL_MINUTES);
+  assert.ok(onLeave.utilizationPercent > row.utilizationPercent);
+
+  // Nothing expected yet (Monday 9 AM, before the shift) must not divide by zero.
+  const monday = engine.buildWorkWeek('2026-08-17', { nowMs: ist('2026-08-17', 9, 0) });
+  const empty = engine.buildWeekWorkRow(monday, emp, [], { nowMs: ist('2026-08-17', 9, 0) });
+  assert.equal(empty.utilizationPercent, 0);
+  assert.equal(empty.totalWorkedMinutes, 0);
+});
