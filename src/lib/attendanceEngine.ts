@@ -279,13 +279,18 @@ export function calculateBreakBreakdown(
     // Protection against corrupted numbers
     durSec = Math.max(0, durSec);
 
-    const type = (b.type || '').toLowerCase();
-    if (type.includes('tea') || type.includes('coffee') || type.includes('snack')) teaSecs += durSec;
-    else if (type.includes('meal') || type.includes('lunch') || type.includes('dinner')) mealSecs += durSec;
-    else if (type.includes('huddle')) huddleSecs += durSec;
-    else if (type.includes('meeting')) meetingSecs += durSec;
-    else if (type.includes('train') || type.includes('attainment')) trainingSecs += durSec;
-    else activitySecs += durSec;
+    // Delegated to the single shared classifier. This block previously inlined its
+    // own `type.includes('tea')` chain, which matched the 'tea' inside "TEAm
+    // Huddle" / "TEAm Meeting" and filed every team break as a Tea Break — so the
+    // huddle and meeting buckets were always 0 and tea was always inflated.
+    switch (classifyBreakType(b.type)) {
+      case 'tea': teaSecs += durSec; break;
+      case 'meal': mealSecs += durSec; break;
+      case 'huddle': huddleSecs += durSec; break;
+      case 'meeting': meetingSecs += durSec; break;
+      case 'training': trainingSecs += durSec; break;
+      default: activitySecs += durSec; break;
+    }
   });
 
   const totalBreakSecs = teaSecs + mealSecs + huddleSecs + meetingSecs + trainingSecs + activitySecs;
@@ -1139,4 +1144,300 @@ export function summarizeRoster(roster: RosterRecord[]) {
     }
   }
   return counts;
+}
+
+/**
+ * -- Live shift breakdown: single source of truth for every shift timer --------
+ *
+ * P2 FIX: "Proficiency -> timer is not accurate".
+ *
+ * The employee portal derived its productivity ratio from two numbers computed
+ * from DIFFERENT sources that could not agree:
+ *
+ *   - the live work counter subtracted `record.totalBreakMinutes * 60000` --
+ *     minute-granular, and every stored break duration is
+ *     `Math.max(1, Math.round(ms / 60000))`, so a 20-second break is recorded as
+ *     a full minute. Break time was systematically over-reported and work time
+ *     under-reported, and the error compounded with every short break taken.
+ *   - the ratio's break total came from calculateBreakBreakdown, which reads
+ *     timestamps for some entries and stored minutes for others.
+ *
+ * Their SUM was then used as the denominator ("grand total"), so the denominator
+ * was a reconstruction of elapsed time rather than elapsed time itself, and the
+ * percentages drifted away from reality as the shift went on.
+ *
+ * On top of that, the distribution bar computed six independently rounded
+ * percentages and dumped the residue into "Activity" (`100 - sum(others)`), so
+ * rounding noise rendered as a phantom cyan Activity segment for employees who
+ * had never taken an activity break.
+ *
+ * This helper replaces both: elapsed time is measured once, per-break seconds
+ * come from timestamps whenever both ends exist, work is the remainder, and
+ * percentages are apportioned by LARGEST REMAINDER so they sum to exactly 100
+ * with no residual bucket and no phantom segment.
+ */
+export type ShiftSegmentKey = 'work' | 'tea' | 'meal' | 'huddle' | 'meeting' | 'training' | 'activity';
+
+export interface ShiftSegment {
+  key: ShiftSegmentKey;
+  label: string;
+  seconds: number;
+  percent: number;
+  color: string;
+}
+
+export interface LiveShiftBreakdown {
+  /** Wall-clock seconds since check-in, frozen at check-out once the shift ends. */
+  elapsedSecs: number;
+  workSecs: number;
+  breakSecs: number;
+  teaSecs: number;
+  mealSecs: number;
+  huddleSecs: number;
+  meetingSecs: number;
+  trainingSecs: number;
+  activitySecs: number;
+  /** Seconds elapsed on the break currently open; 0 when not on a break. */
+  activeBreakSecs: number;
+  activeBreakType: string | null;
+  isOnBreak: boolean;
+  isCheckedIn: boolean;
+  isShiftComplete: boolean;
+  /** Non-zero segments, work first -- ready to feed a pie / donut chart. */
+  segments: ShiftSegment[];
+  /** work / elapsed as an integer 0-100. */
+  productivityPercent: number;
+  /** Rostered shift completion as an integer 0-100. */
+  shiftProgressPercent: number;
+}
+
+export const SHIFT_SEGMENT_META: Record<ShiftSegmentKey, { label: string; color: string }> = {
+  work: { label: 'Work', color: '#10b981' },
+  tea: { label: 'Tea Break', color: '#f59e0b' },
+  meal: { label: 'Meal Break', color: '#f43f5e' },
+  huddle: { label: 'Team Huddle', color: '#0ea5e9' },
+  meeting: { label: 'Team Meeting', color: '#a855f7' },
+  training: { label: 'Training', color: '#34d399' },
+  activity: { label: 'Activity', color: '#06b6d4' }
+};
+
+/** Canonical bucket for a raw break `type` string. */
+export function classifyBreakType(type: any): Exclude<ShiftSegmentKey, 'work'> {
+  const t = String(type || '').toLowerCase();
+  // ORDER MATTERS, and 'tea' must be word-bounded: the substring 'tea' occurs
+  // inside "TEAm Huddle" and "TEAm Meeting", so a naive includes('tea') check
+  // silently filed every team break under Tea Break. The specific compound
+  // labels are therefore matched first, and 'tea' only matches as a whole word.
+  if (t.includes('huddle')) return 'huddle';
+  if (t.includes('meeting')) return 'meeting';
+  if (t.includes('train') || t.includes('attainment')) return 'training';
+  if (t.includes('meal') || t.includes('lunch') || t.includes('dinner')) return 'meal';
+  if (/\btea\b/.test(t) || t.includes('coffee') || t.includes('snack')) return 'tea';
+  return 'activity';
+}
+
+/**
+ * Apportion `values` over a 100% budget with the largest-remainder method, so the
+ * returned integers sum to EXACTLY 100 (or all-zero when the total is 0).
+ * Per-value Math.round() has no such guarantee -- which is precisely why the old
+ * code had to invent a residual bucket to absorb the difference.
+ */
+export function apportionPercentages(values: number[]): number[] {
+  const safe = values.map(v => (Number.isFinite(v) && v > 0 ? v : 0));
+  const total = safe.reduce((a, b) => a + b, 0);
+  if (total <= 0) return safe.map(() => 0);
+
+  const exact = safe.map(v => (v / total) * 100);
+  const result = exact.map(Math.floor);
+  let remaining = 100 - result.reduce((a, b) => a + b, 0);
+
+  // Hand the leftover whole points to the largest fractional parts first. Ties
+  // break on index so the output is deterministic for identical inputs.
+  const order = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => (b.frac - a.frac) || (a.i - b.i));
+
+  for (let k = 0; k < order.length && remaining > 0; k++) {
+    // Never award a point to a bucket that has no time in it -- that is exactly
+    // the phantom-segment bug this function exists to prevent.
+    if (safe[order[k].i] <= 0) continue;
+    result[order[k].i] += 1;
+    remaining--;
+  }
+  return result;
+}
+
+export function computeLiveShiftBreakdown(record: any, nowMs: number = Date.now()): LiveShiftBreakdown {
+  const empty: LiveShiftBreakdown = {
+    elapsedSecs: 0, workSecs: 0, breakSecs: 0,
+    teaSecs: 0, mealSecs: 0, huddleSecs: 0, meetingSecs: 0, trainingSecs: 0, activitySecs: 0,
+    activeBreakSecs: 0, activeBreakType: null,
+    isOnBreak: false, isCheckedIn: false, isShiftComplete: false,
+    segments: [], productivityPercent: 0, shiftProgressPercent: 0
+  };
+
+  const startMs = safeGetTimestampMillis(record?.checkInAt);
+  if (!record || !startMs) return empty;
+
+  const outMs = safeGetTimestampMillis(record?.checkOutAt);
+  const complete = outMs !== null && outMs > startMs;
+  const endMs = complete ? Math.min(outMs as number, Math.max(nowMs, outMs as number)) : nowMs;
+  const elapsedSecs = Math.max(0, Math.floor((endMs - startMs) / 1000));
+
+  const buckets: Record<Exclude<ShiftSegmentKey, 'work'>, number> = {
+    tea: 0, meal: 0, huddle: 0, meeting: 0, training: 0, activity: 0
+  };
+  let activeBreakSecs = 0;
+  let activeBreakType: string | null = null;
+
+  for (const b of (record.breaks || [])) {
+    if (!b) continue;
+    const bStart = safeGetTimestampMillis(b.startAt || b.startTime);
+    const bEnd = safeGetTimestampMillis(b.endAt || b.endTime);
+    const isOpen = !bEnd;
+
+    let secs = 0;
+    if (isOpen && bStart) {
+      // An open break runs to `now`, or to check-out when the shift was closed
+      // while a break was still open -- a forgotten break must not outlive the
+      // shift it belongs to.
+      secs = Math.max(0, Math.floor((endMs - bStart) / 1000));
+      secs = Math.min(secs, MAX_BREAK_MINUTES * 60);
+      if (activeBreakType === null && !complete) {
+        activeBreakSecs = secs;
+        activeBreakType = b.type || 'Break';
+      }
+    } else if (bStart && bEnd && bEnd > bStart) {
+      // Timestamps FIRST: exact to the second. `durationMinutes` is a rounded
+      // convenience field, so it is only ever a fallback.
+      secs = Math.floor((bEnd - bStart) / 1000);
+    } else if (typeof b.durationMinutes === 'number' && b.durationMinutes > 0) {
+      secs = Math.round(b.durationMinutes * 60);
+    }
+
+    buckets[classifyBreakType(b.type)] += Math.max(0, secs);
+  }
+
+  // Breaks cannot exceed the shift that contains them; clamping keeps work from
+  // going negative on corrupted or clock-skewed data.
+  const rawBreakSecs = buckets.tea + buckets.meal + buckets.huddle + buckets.meeting + buckets.training + buckets.activity;
+  const breakSecs = Math.min(rawBreakSecs, elapsedSecs);
+  const workSecs = Math.max(0, elapsedSecs - breakSecs);
+
+  const ordered: Array<{ key: ShiftSegmentKey; seconds: number }> = [
+    { key: 'work', seconds: workSecs },
+    { key: 'tea', seconds: buckets.tea },
+    { key: 'meal', seconds: buckets.meal },
+    { key: 'huddle', seconds: buckets.huddle },
+    { key: 'meeting', seconds: buckets.meeting },
+    { key: 'training', seconds: buckets.training },
+    { key: 'activity', seconds: buckets.activity }
+  ];
+  const percents = apportionPercentages(ordered.map(s => s.seconds));
+
+  const segments: ShiftSegment[] = ordered
+    .map((s, i) => ({
+      key: s.key,
+      label: SHIFT_SEGMENT_META[s.key].label,
+      color: SHIFT_SEGMENT_META[s.key].color,
+      seconds: s.seconds,
+      percent: percents[i]
+    }))
+    .filter(s => s.seconds > 0);
+
+  return {
+    elapsedSecs,
+    workSecs,
+    breakSecs,
+    teaSecs: buckets.tea,
+    mealSecs: buckets.meal,
+    huddleSecs: buckets.huddle,
+    meetingSecs: buckets.meeting,
+    trainingSecs: buckets.training,
+    activitySecs: buckets.activity,
+    activeBreakSecs,
+    activeBreakType,
+    isOnBreak: activeBreakType !== null,
+    isCheckedIn: true,
+    isShiftComplete: complete,
+    segments,
+    productivityPercent: elapsedSecs > 0 ? Math.round((workSecs / elapsedSecs) * 100) : 0,
+    shiftProgressPercent: Math.min(100, Math.round((workSecs / (SHIFT_TOTAL_MINUTES * 60)) * 100))
+  };
+}
+
+/** `7h 05m 12s` when showSeconds, else `7h 05m`. Never negative, never NaN. */
+export function formatDuration(totalSeconds: number, showSeconds: boolean = false): string {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (!showSeconds) return `${h}h ${String(m).padStart(2, '0')}m`;
+  return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+/** `1:05:12` / `05:12` -- compact monospace clock for the live ticker. */
+export function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(sec).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/**
+ * SVG conic pie/donut geometry for `segments`. Returns one path per segment on a
+ * 100x100 viewBox centred at (50,50). A single 100% segment is emitted as two
+ * half-arcs because a 360-degree arc collapses to a zero-length path in SVG.
+ */
+export function buildPieSlices(
+  segments: ShiftSegment[],
+  radius: number = 42,
+  innerRadius: number = 0
+): Array<{ key: ShiftSegmentKey; label: string; color: string; percent: number; seconds: number; d: string }> {
+  const usable = segments.filter(s => s.percent > 0);
+  if (usable.length === 0) return [];
+
+  const cx = 50;
+  const cy = 50;
+  const point = (angleDeg: number, r: number) => {
+    const rad = ((angleDeg - 90) * Math.PI) / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  };
+  const fmt = (n: number) => Math.round(n * 1000) / 1000;
+
+  // A lone full-circle slice: draw it as two 180-degree arcs.
+  if (usable.length === 1) {
+    const s = usable[0];
+    const [ox1, oy1] = point(0, radius);
+    const [ox2, oy2] = point(180, radius);
+    let d = `M ${fmt(ox1)} ${fmt(oy1)} A ${radius} ${radius} 0 1 1 ${fmt(ox2)} ${fmt(oy2)} A ${radius} ${radius} 0 1 1 ${fmt(ox1)} ${fmt(oy1)}`;
+    if (innerRadius > 0) {
+      const [ix1, iy1] = point(0, innerRadius);
+      const [ix2, iy2] = point(180, innerRadius);
+      d += ` M ${fmt(ix1)} ${fmt(iy1)} A ${innerRadius} ${innerRadius} 0 1 0 ${fmt(ix2)} ${fmt(iy2)} A ${innerRadius} ${innerRadius} 0 1 0 ${fmt(ix1)} ${fmt(iy1)}`;
+    }
+    return [{ key: s.key, label: s.label, color: s.color, percent: s.percent, seconds: s.seconds, d }];
+  }
+
+  let cursor = 0;
+  return usable.map(s => {
+    const start = (cursor / 100) * 360;
+    cursor += s.percent;
+    const end = (cursor / 100) * 360;
+    const largeArc = end - start > 180 ? 1 : 0;
+    const [ox1, oy1] = point(start, radius);
+    const [ox2, oy2] = point(end, radius);
+
+    let d: string;
+    if (innerRadius > 0) {
+      const [ix2, iy2] = point(end, innerRadius);
+      const [ix1, iy1] = point(start, innerRadius);
+      d = `M ${fmt(ox1)} ${fmt(oy1)} A ${radius} ${radius} 0 ${largeArc} 1 ${fmt(ox2)} ${fmt(oy2)} L ${fmt(ix2)} ${fmt(iy2)} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${fmt(ix1)} ${fmt(iy1)} Z`;
+    } else {
+      d = `M ${cx} ${cy} L ${fmt(ox1)} ${fmt(oy1)} A ${radius} ${radius} 0 ${largeArc} 1 ${fmt(ox2)} ${fmt(oy2)} Z`;
+    }
+    return { key: s.key, label: s.label, color: s.color, percent: s.percent, seconds: s.seconds, d };
+  });
 }

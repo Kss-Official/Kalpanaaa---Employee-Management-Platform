@@ -66,9 +66,15 @@ import {
   resolveAttendanceRecord,
   isShiftComplete,
   safeGetTimestampMillis,
-  calculateBreakBreakdown,
   calculateTotalBreakMinutes,
-  isLateCheckIn
+  isLateCheckIn,
+  computeLiveShiftBreakdown,
+  buildPieSlices,
+  formatDuration,
+  formatClock,
+  classifyBreakType,
+  SHIFT_LABEL,
+  SHIFT_TOTAL_MINUTES
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
@@ -218,7 +224,6 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   // Break & WFH state
   const [activeBreak, setActiveBreak] = useState<{ type: string; startAt: string } | null>(null);
-  const [breakElapsedSec, setBreakElapsedSec] = useState(0);
   const [isWfh, setIsWfh] = useState(false);
 
   // ── BUG 7 FIX — Stable scalar derived from the open (in-progress) break. ──
@@ -245,72 +250,35 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     setIsWfh(!!todayRecord?.isWfh || todayRecord?.status === 'Work From Home');
   }, [todayRecord?.breaks, todayRecord?.isWfh, todayRecord?.status]);
 
-  // Multi-Device Real-Time Live Shift Sync (Fixes E37 Contract)
-  const [, setLiveSyncTick] = useState(0);
+  // ── Single live clock for the whole shift panel ──────────────────────────────
+  // P2 FIX (proficiency timer accuracy): there used to be THREE independent
+  // tickers — a 2s multi-device sync tick, a 1s break ticker and a 1s work
+  // ticker — each with its own arithmetic. The work ticker subtracted the
+  // minute-rounded `totalBreakMinutes` while the productivity ratio used
+  // timestamp-exact seconds, so the two disagreed and the displayed percentages
+  // drifted further apart the more short breaks an employee took.
+  //
+  // Now ONE 1-second clock drives ONE memoised breakdown
+  // (computeLiveShiftBreakdown), and every timer, bar and pie slice on this
+  // screen is read off that single object. They cannot disagree by construction.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const syncInterval = setInterval(() => {
-      setLiveSyncTick(t => t + 1);
-    }, 2000);
-    return () => clearInterval(syncInterval);
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Break live timer — driven by the stable openBreakStartAt scalar.
-  // Resets cleanly when a new break starts or the current break ends.
-  useEffect(() => {
-    if (!openBreakStartAt) { setBreakElapsedSec(0); return; }
-    const startMs = safeGetTimestampMillis(openBreakStartAt);
-    if (!startMs) { setBreakElapsedSec(0); return; }
-    const calc = () => {
-      setBreakElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
-    };
-    calc();
-    const interval = setInterval(calc, 1000);
-    return () => clearInterval(interval);
-  }, [openBreakStartAt]);
+  const liveShift = React.useMemo(
+    () => computeLiveShiftBreakdown(todayRecord, nowMs),
+    // Stable scalar deps only — never JSON.stringify(todayRecord), which fired on
+    // every Firestore field write (BUG 7) and reset the counter mid-shift.
+    // `nowMs` advances every second, so open breaks stay live regardless.
+    [todayRecord?.checkInAt, todayRecord?.checkOutAt, todayRecord?.breaks, nowMs]
+  );
 
-  // Live WORK seconds ticker.
-  // BUG 7 FIX: Deps use only stable scalar values — never JSON.stringify(todayRecord)
-  // which fired on every Firestore field write and reset the counter mid-shift.
-  // Also reads the active break directly from openBreakStartAt (stable scalar)
-  // instead of from the activeBreak React state, which could lag one render behind.
-  const [liveWorkSec, setLiveWorkSec] = useState(0);
-  useEffect(() => {
-    const startMs = safeGetTimestampMillis(todayRecord?.checkInAt);
-    const endMs = safeGetTimestampMillis(todayRecord?.checkOutAt);
-    if (!startMs) {
-      setLiveWorkSec(0);
-      return;
-    }
-    const completedBreakMs = (todayRecord?.totalBreakMinutes ?? 0) * 60000;
-
-    // If shift is completed (checked out), compute total finished shift work seconds
-    if (endMs && endMs > startMs) {
-      const totalElapsedMs = Math.max(0, endMs - startMs);
-      const workMs = Math.max(0, totalElapsedMs - completedBreakMs);
-      setLiveWorkSec(Math.floor(workMs / 1000));
-      return;
-    }
-
-    const activeBreakStartMs = safeGetTimestampMillis(openBreakStartAt);
-
-    const computeWorkSec = () => {
-      const totalElapsedMs = Math.max(0, Date.now() - startMs);
-      const activeBreakMs = openBreakStartAt && activeBreakStartMs
-        ? Math.max(0, Date.now() - activeBreakStartMs)
-        : 0;
-      const workMs = Math.max(0, totalElapsedMs - completedBreakMs - activeBreakMs);
-      setLiveWorkSec(Math.floor(workMs / 1000));
-    };
-
-    computeWorkSec();
-    const interval = setInterval(computeWorkSec, 1000);
-    return () => clearInterval(interval);
-  }, [
-    todayRecord?.checkInAt,
-    todayRecord?.checkOutAt,
-    todayRecord?.totalBreakMinutes,
-    openBreakStartAt,
-  ]);
+  // Kept as named values so the existing render code reads unchanged, but both
+  // now come from the same source of truth.
+  const liveWorkSec = liveShift.workSecs;
+  const breakElapsedSec = liveShift.activeBreakSecs;
 
   const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list'>('cards');
   const [editingProfileField, setEditingProfileField] = useState<string | null>(null);
@@ -1279,83 +1247,104 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     );
                   })()}
 
-                  {/* Live Productivity & Multi-Color Shift Distribution Meter */}
+                  {/* Live Productivity — Pie + Segmented Bar, one source of truth */}
                   {(() => {
-                    const breakdown = calculateBreakBreakdown(todayRecord.breaks || [], breakElapsedSec);
-                    const { teaSecs, mealSecs, huddleSecs, meetingSecs, trainingSecs, activitySecs, totalBreakSecs } = breakdown;
-                    const grandTotalSecs = liveWorkSec + totalBreakSecs;
-
-                    const workPct = grandTotalSecs > 0 ? Math.round((liveWorkSec / grandTotalSecs) * 100) : 100;
-                    const teaPct = grandTotalSecs > 0 ? Math.round((teaSecs / grandTotalSecs) * 100) : 0;
-                    const mealPct = grandTotalSecs > 0 ? Math.round((mealSecs / grandTotalSecs) * 100) : 0;
-                    const huddlePct = grandTotalSecs > 0 ? Math.round((huddleSecs / grandTotalSecs) * 100) : 0;
-                    const meetingPct = grandTotalSecs > 0 ? Math.round((meetingSecs / grandTotalSecs) * 100) : 0;
-                    const trainingPct = grandTotalSecs > 0 ? Math.round((trainingSecs / grandTotalSecs) * 100) : 0;
-                    const activityPct = Math.max(0, 100 - (workPct + teaPct + mealPct + huddlePct + meetingPct + trainingPct));
+                    /*
+                     * P2 FIX (proficiency timer accuracy).
+                     *
+                     * BEFORE: six percentages were each Math.round()ed independently
+                     * against a denominator that was itself a reconstruction
+                     * (liveWorkSec + totalBreakSecs), and the leftover was dumped into
+                     * `activityPct = 100 - sum(others)`. That made rounding noise render
+                     * as a phantom cyan "Activity" slice for employees who had never
+                     * taken an activity break, and the ratio drifted from reality
+                     * because work-seconds were minute-rounded while break-seconds were
+                     * timestamp-exact.
+                     *
+                     * AFTER: `liveShift` measures elapsed time once, derives work as the
+                     * remainder, and apportions percentages by largest remainder, so
+                     * they total exactly 100 with no residual bucket.
+                     */
+                    const segments = liveShift.segments;
+                    const slices = buildPieSlices(segments, 42, 26);
+                    const workPct = segments.find(s => s.key === 'work')?.percent ?? 0;
 
                     return (
-                      <div className="pt-2 space-y-2 border-t border-slate-800/60">
+                      <div className="pt-3 space-y-3 border-t border-slate-800/60">
                         <div className="flex items-center justify-between text-[11px] font-bold">
                           <span className="text-slate-300 flex items-center gap-1.5">
                             <Sparkles className="w-3.5 h-3.5 text-blue-400" />
                             Shift Productivity Ratio
                           </span>
-                          <span className="text-emerald-400 font-mono">{workPct}% Work ({Math.floor(liveWorkSec / 3600)}h {Math.floor((liveWorkSec % 3600) / 60)}m)</span>
-                        </div>
-
-                        {/* Multi-Color Segmented Progress Bar */}
-                        <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden flex border border-slate-800">
-                          {workPct > 0 && <div style={{ width: `${workPct}%` }} className="bg-emerald-500 transition-all duration-500 h-full" title={`Work: ${workPct}%`} />}
-                          {teaPct > 0 && <div style={{ width: `${teaPct}%` }} className="bg-amber-500 transition-all duration-500 h-full" title={`Tea Break: ${teaPct}%`} />}
-                          {mealPct > 0 && <div style={{ width: `${mealPct}%` }} className="bg-rose-500 transition-all duration-500 h-full" title={`Meal Break: ${mealPct}%`} />}
-                          {huddlePct > 0 && <div style={{ width: `${huddlePct}%` }} className="bg-sky-500 transition-all duration-500 h-full" title={`Team Huddle: ${huddlePct}%`} />}
-                          {meetingPct > 0 && <div style={{ width: `${meetingPct}%` }} className="bg-purple-500 transition-all duration-500 h-full" title={`Team Meeting: ${meetingPct}%`} />}
-                          {trainingPct > 0 && <div style={{ width: `${trainingPct}%` }} className="bg-emerald-400 transition-all duration-500 h-full" title={`Training: ${trainingPct}%`} />}
-                          {activityPct > 0 && <div style={{ width: `${activityPct}%` }} className="bg-cyan-500 transition-all duration-500 h-full" title={`Activity: ${activityPct}%`} />}
-                        </div>
-
-                        {/* Multi-Color Legend */}
-                        <div className="flex items-center gap-3 flex-wrap text-[10px] text-slate-400 font-semibold pt-0.5">
-                          <span className="flex items-center gap-1 text-emerald-400 font-bold">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                            Work ({workPct}%)
+                          <span
+                            className="text-emerald-400 font-mono"
+                            data-testid="productivity-pct"
+                          >
+                            {liveShift.productivityPercent}% Work ({formatDuration(liveShift.workSecs)})
                           </span>
-                          {teaPct > 0 && (
-                            <span className="flex items-center gap-1 text-amber-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                              Tea ({teaPct}%)
-                            </span>
-                          )}
-                          {mealPct > 0 && (
-                            <span className="flex items-center gap-1 text-rose-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
-                              Meal ({mealPct}%)
-                            </span>
-                          )}
-                          {huddlePct > 0 && (
-                            <span className="flex items-center gap-1 text-sky-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-sky-500 inline-block" />
-                              Huddle ({huddlePct}%)
-                            </span>
-                          )}
-                          {meetingPct > 0 && (
-                            <span className="flex items-center gap-1 text-purple-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />
-                              Meeting ({meetingPct}%)
-                            </span>
-                          )}
-                          {trainingPct > 0 && (
-                            <span className="flex items-center gap-1 text-emerald-300 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                              Training ({trainingPct}%)
-                            </span>
-                          )}
-                          {activityPct > 0 && (
-                            <span className="flex items-center gap-1 text-cyan-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block" />
-                              Activity ({activityPct}%)
-                            </span>
-                          )}
+                        </div>
+
+                        {/* Live donut pie of the whole shift */}
+                        <div className="flex items-center gap-4">
+                          <div className="relative shrink-0">
+                            <svg viewBox="0 0 100 100" className="w-[104px] h-[104px] -rotate-0" role="img" aria-label="Shift time distribution">
+                              <circle cx="50" cy="50" r="42" className="fill-slate-950" />
+                              {slices.map(sl => (
+                                <path
+                                  key={sl.key}
+                                  d={sl.d}
+                                  fill={sl.color}
+                                  className="transition-all duration-700"
+                                >
+                                  <title>{`${sl.label}: ${sl.percent}% (${formatDuration(sl.seconds, true)})`}</title>
+                                </path>
+                              ))}
+                              <circle cx="50" cy="50" r="25" className="fill-slate-900" />
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                              <span className="text-[15px] font-black text-emerald-400 font-mono leading-none">{workPct}%</span>
+                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">Work</span>
+                            </div>
+                          </div>
+
+                          {/* Per-segment live readout */}
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            {segments.map(seg => (
+                              <div key={seg.key} className="flex items-center gap-2 text-[10px]">
+                                <span
+                                  className="w-2 h-2 rounded-full inline-block shrink-0"
+                                  style={{ backgroundColor: seg.color }}
+                                />
+                                <span className="font-bold text-slate-300 truncate flex-1">{seg.label}</span>
+                                <span className="font-mono font-bold text-slate-400 shrink-0">
+                                  {formatDuration(seg.seconds, true)}
+                                </span>
+                                <span
+                                  className="font-mono font-black shrink-0 w-9 text-right"
+                                  style={{ color: seg.color }}
+                                >
+                                  {seg.percent}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Segmented bar — same numbers, linear view */}
+                        <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden flex border border-slate-800">
+                          {segments.map(seg => (
+                            <div
+                              key={seg.key}
+                              style={{ width: `${seg.percent}%`, backgroundColor: seg.color }}
+                              className="transition-all duration-500 h-full"
+                              title={`${seg.label}: ${seg.percent}%`}
+                            />
+                          ))}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                          <span>Elapsed {formatDuration(liveShift.elapsedSecs, true)}</span>
+                          <span>Shift {SHIFT_LABEL}</span>
                         </div>
                       </div>
                     );
@@ -1366,6 +1355,207 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
           </div>
 
 
+
+          {/* ── WORK TIME — its own dedicated section (no break data in here) ───── */}
+          {todayRecord?.checkInAt && (
+            <div
+              data-testid="work-time-section"
+              className="bg-slate-900/90 rounded-2xl border border-emerald-500/20 p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <Timer className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-white">Work Time</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Productive time only — breaks are excluded and tracked separately below.
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-[10px] font-bold text-slate-300 font-mono">
+                  {SHIFT_LABEL}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="bg-slate-950/70 rounded-xl border border-emerald-500/25 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Live Work Timer</p>
+                  <p
+                    data-testid="work-live-timer"
+                    className={`text-xl font-mono font-black tabular-nums ${liveShift.isOnBreak ? 'text-amber-300' : 'text-emerald-400'}`}
+                  >
+                    {formatClock(liveShift.workSecs)}
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    {liveShift.isOnBreak
+                      ? `Paused — ${liveShift.activeBreakType} running`
+                      : liveShift.isShiftComplete ? 'Shift closed' : 'Counting up'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 rounded-xl border border-slate-800 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Checked In</p>
+                  <p className="text-xl font-mono font-black text-white tabular-nums">
+                    {todayRecord.checkInAt ? toISTTimeString(todayRecord.checkInAt) : '--:--'}
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    {isLateCheckIn(todayRecord.checkInAt as any) ? 'After grace period' : 'On time'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 rounded-xl border border-slate-800 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Checked Out</p>
+                  <p className="text-xl font-mono font-black text-white tabular-nums">
+                    {todayRecord.checkOutAt ? toISTTimeString(todayRecord.checkOutAt) : '--:--'}
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    {todayRecord.checkOutAt ? 'Shift complete' : 'Still on shift'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 rounded-xl border border-slate-800 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Shift Target</p>
+                  <p className="text-xl font-mono font-black text-blue-400 tabular-nums">
+                    {liveShift.shiftProgressPercent}%
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    of {Math.floor(SHIFT_TOTAL_MINUTES / 60)}h {SHIFT_TOTAL_MINUTES % 60 > 0 ? `${SHIFT_TOTAL_MINUTES % 60}m ` : ''}rostered
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3.5">
+                <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
+                    style={{ width: `${liveShift.shiftProgressPercent}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider mt-1.5">
+                  <span>Work {formatDuration(liveShift.workSecs, true)}</span>
+                  <span>Remaining {formatDuration(Math.max(0, SHIFT_TOTAL_MINUTES * 60 - liveShift.workSecs))}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── BREAKS — its own dedicated section (no work time in here) ───────── */}
+          {todayRecord?.checkInAt && (
+            <div
+              data-testid="breaks-section"
+              className="bg-slate-900/90 rounded-2xl border border-amber-500/20 p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                    <Coffee className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-white">Breaks &amp; Meal Breaks</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Every break logged today, exact to the second.
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Break Time</p>
+                  <p
+                    data-testid="breaks-total"
+                    className="text-lg font-mono font-black text-amber-300 tabular-nums leading-tight"
+                  >
+                    {formatClock(liveShift.breakSecs)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Per-type totals — driven by the same breakdown as the pie */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {([
+                  { key: 'meal', label: 'Meal Break', secs: liveShift.mealSecs, color: '#f43f5e', icon: UtensilsCrossed },
+                  { key: 'tea', label: 'Tea Break', secs: liveShift.teaSecs, color: '#f59e0b', icon: Coffee },
+                  { key: 'huddle', label: 'Team Huddle', secs: liveShift.huddleSecs, color: '#0ea5e9', icon: Users },
+                  { key: 'meeting', label: 'Team Meeting', secs: liveShift.meetingSecs, color: '#a855f7', icon: Briefcase },
+                  { key: 'training', label: 'Training', secs: liveShift.trainingSecs, color: '#34d399', icon: GraduationCap },
+                  { key: 'activity', label: 'Activity', secs: liveShift.activitySecs, color: '#06b6d4', icon: Zap }
+                ] as const).map(b => {
+                  const Icon = b.icon;
+                  const isLive = liveShift.isOnBreak && classifyBreakType(liveShift.activeBreakType) === b.key;
+                  return (
+                    <div
+                      key={b.key}
+                      data-testid={`break-total-${b.key}`}
+                      className={`bg-slate-950/70 rounded-xl border p-3 ${
+                        isLive ? 'border-amber-400/60 ring-1 ring-amber-400/30' : 'border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: b.color }} />
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate">
+                          {b.label}
+                        </span>
+                        {isLive && (
+                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                        )}
+                      </div>
+                      <p
+                        className="text-base font-mono font-black tabular-nums"
+                        style={{ color: b.secs > 0 ? b.color : '#475569' }}
+                      >
+                        {formatClock(b.secs)}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Break log */}
+              {(todayRecord.breaks || []).length > 0 ? (
+                <div className="mt-4 pt-3.5 border-t border-slate-800/80 space-y-1.5 max-h-52 overflow-y-auto">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    Break Log ({(todayRecord.breaks || []).length})
+                  </p>
+                  {(todayRecord.breaks || []).map((b: any, idx: number) => {
+                    const startMs = safeGetTimestampMillis(b.startAt || b.startTime);
+                    const endMs = safeGetTimestampMillis(b.endAt || b.endTime);
+                    const open = !endMs;
+                    const secs = startMs
+                      ? Math.max(0, Math.floor(((open ? nowMs : (endMs as number)) - startMs) / 1000))
+                      : 0;
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex items-center gap-2.5 text-[10px] p-2.5 rounded-xl border ${
+                          open ? 'bg-amber-500/5 border-amber-500/30' : 'bg-slate-950/60 border-slate-800/60'
+                        }`}
+                      >
+                        <span className="font-mono text-slate-400 font-bold shrink-0 w-14 tabular-nums">
+                          {startMs ? toISTTimeString(b.startAt || b.startTime) : '--:--'}
+                        </span>
+                        <span className="text-slate-600 shrink-0">→</span>
+                        <span className="font-mono text-slate-400 font-bold shrink-0 w-14 tabular-nums">
+                          {open ? '· · ·' : toISTTimeString(b.endAt || b.endTime)}
+                        </span>
+                        <span className="font-bold text-slate-200 truncate flex-1">{b.type || 'Break'}</span>
+                        <span
+                          className={`font-mono font-black shrink-0 tabular-nums ${
+                            open ? 'text-amber-300 animate-pulse' : 'text-slate-300'
+                          }`}
+                        >
+                          {formatClock(secs)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-4 pt-3.5 border-t border-slate-800/80 text-[11px] text-slate-500 font-semibold text-center py-2">
+                  No breaks taken yet today.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Break & Activity Management */}
           {todayRecord?.checkInAt && !shiftComplete && (

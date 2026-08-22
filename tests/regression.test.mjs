@@ -503,3 +503,215 @@ test('P1 summarizeRoster: present is inclusive of Late and Work From Home', () =
   // The buckets must partition the roster exactly — no double counting, no gaps.
   assert.equal(c.present + c.absent + c.onLeave + c.holiday, c.total);
 });
+
+// ── P2: proficiency / shift timer accuracy ──────────────────────────────────
+
+test('P2 apportionPercentages: buckets always sum to exactly 100, never to a zero bucket', () => {
+  // Three equal thirds — naive Math.round gives 33+33+33 = 99, leaving a 1% hole
+  // that the old code dumped into "Activity".
+  const thirds = engine.apportionPercentages([100, 100, 100]);
+  assert.equal(thirds.reduce((a, b) => a + b, 0), 100);
+
+  // Seven buckets of awkward sizes: still exactly 100.
+  const awkward = engine.apportionPercentages([3601, 137, 89, 41, 17, 7, 3]);
+  assert.equal(awkward.reduce((a, b) => a + b, 0), 100);
+
+  // THE PHANTOM-SEGMENT GUARD: a bucket with zero seconds must never be handed a
+  // leftover point, because the UI renders any non-zero percent as a slice.
+  const withZeros = engine.apportionPercentages([100, 100, 100, 0, 0, 0, 0]);
+  assert.equal(withZeros.reduce((a, b) => a + b, 0), 100);
+  assert.deepEqual(withZeros.slice(3), [0, 0, 0, 0], 'zero-second buckets stay at 0%');
+
+  // All-zero input must not divide by zero or fabricate 100%.
+  assert.deepEqual(engine.apportionPercentages([0, 0, 0]), [0, 0, 0]);
+
+  // Deterministic for identical inputs — no tie-break jitter between renders.
+  assert.deepEqual(
+    engine.apportionPercentages([100, 100, 100]),
+    engine.apportionPercentages([100, 100, 100])
+  );
+});
+
+test('P2 computeLiveShiftBreakdown: break seconds are timestamp-exact, not minute-rounded', () => {
+  const base = Date.parse('2026-08-22T04:30:00.000Z'); // 10:00 IST
+  const now = base + 60 * 60 * 1000;                   // one hour later
+
+  // Three 20-second breaks. The stored durationMinutes field rounds each one UP
+  // to a full minute (Math.max(1, Math.round(20000/60000)) === 1), so the old
+  // work timer subtracted 180s of break for 60s actually taken — a 2-minute lie
+  // that grew with every short break.
+  const record = {
+    checkInAt: new Date(base).toISOString(),
+    checkOutAt: null,
+    totalBreakMinutes: 3,
+    breaks: [0, 1, 2].map(i => ({
+      type: 'Tea Break',
+      startAt: new Date(base + (i + 1) * 600000).toISOString(),
+      endAt: new Date(base + (i + 1) * 600000 + 20000).toISOString(),
+      durationMinutes: 1
+    }))
+  };
+
+  const r = engine.computeLiveShiftBreakdown(record, now);
+  assert.equal(r.elapsedSecs, 3600);
+  assert.equal(r.breakSecs, 60, 'timestamps win over the rounded durationMinutes field');
+  assert.equal(r.teaSecs, 60);
+  assert.equal(r.workSecs, 3540, 'work is elapsed minus the EXACT break time');
+  assert.equal(r.workSecs + r.breakSecs, r.elapsedSecs, 'work + break reconstructs elapsed exactly');
+
+  // durationMinutes is still honoured when timestamps are unusable (legacy rows).
+  const legacy = engine.computeLiveShiftBreakdown(
+    { checkInAt: new Date(base).toISOString(), breaks: [{ type: 'Meal Break', durationMinutes: 30 }] },
+    now
+  );
+  assert.equal(legacy.mealSecs, 1800);
+  assert.equal(legacy.workSecs, 1800);
+});
+
+test('P2 computeLiveShiftBreakdown: no phantom Activity segment and percentages total 100', () => {
+  const base = Date.parse('2026-08-22T04:30:00.000Z');
+  const now = base + 3 * 60 * 60 * 1000; // 3h elapsed
+
+  // Exactly three equal 20-minute breaks + work. Under the old arithmetic the six
+  // independently rounded percentages left a remainder that rendered as a cyan
+  // "Activity" slice even though no activity break was ever taken.
+  const record = {
+    checkInAt: new Date(base).toISOString(),
+    breaks: [
+      { type: 'Tea Break', startAt: new Date(base + 1000).toISOString(), endAt: new Date(base + 1000 + 1200000).toISOString() },
+      { type: 'Meal Break', startAt: new Date(base + 3600000).toISOString(), endAt: new Date(base + 3600000 + 1200000).toISOString() },
+      { type: 'Team Huddle', startAt: new Date(base + 7200000).toISOString(), endAt: new Date(base + 7200000 + 1200000).toISOString() }
+    ]
+  };
+
+  const r = engine.computeLiveShiftBreakdown(record, now);
+  assert.equal(r.activitySecs, 0);
+  assert.ok(!r.segments.some(s => s.key === 'activity'), 'no activity slice without an activity break');
+  assert.equal(r.segments.reduce((a, s) => a + s.percent, 0), 100, 'slices tile the pie exactly');
+  assert.deepEqual(r.segments.map(s => s.key), ['work', 'tea', 'meal', 'huddle'], 'work first, then breaks in order');
+  assert.equal(r.workSecs, 10800 - 3600);
+  assert.equal(r.productivityPercent, 67);
+
+  // Every non-zero segment must carry a non-zero percent, or it renders invisible.
+  for (const s of r.segments) assert.ok(s.percent > 0, `${s.key} has time but 0%`);
+});
+
+test('P2 computeLiveShiftBreakdown: open breaks tick live, closed shifts freeze, garbage never goes negative', () => {
+  const base = Date.parse('2026-08-22T04:30:00.000Z');
+
+  // An open break must be counted up to `now` and mark the shift as on-break.
+  const open = {
+    checkInAt: new Date(base).toISOString(),
+    breaks: [{ type: 'Meal Break', startAt: new Date(base + 3600000).toISOString() }]
+  };
+  const live = engine.computeLiveShiftBreakdown(open, base + 3600000 + 90000);
+  assert.equal(live.isOnBreak, true);
+  assert.equal(live.activeBreakType, 'Meal Break');
+  assert.equal(live.activeBreakSecs, 90);
+  assert.equal(live.mealSecs, 90);
+  assert.equal(live.workSecs, 3600, 'the work timer pauses for the whole open break');
+
+  // A checked-out shift is frozen: advancing the clock must not move any number.
+  const closed = {
+    checkInAt: new Date(base).toISOString(),
+    checkOutAt: new Date(base + 8 * 3600000).toISOString(),
+    breaks: [{ type: 'Tea Break', startAt: new Date(base + 3600000).toISOString(), endAt: new Date(base + 3600000 + 900000).toISOString() }]
+  };
+  const a = engine.computeLiveShiftBreakdown(closed, base + 8 * 3600000 + 1000);
+  const b = engine.computeLiveShiftBreakdown(closed, base + 30 * 3600000);
+  assert.equal(a.isShiftComplete, true);
+  assert.equal(a.elapsedSecs, 8 * 3600);
+  assert.equal(a.workSecs, 8 * 3600 - 900);
+  assert.equal(b.workSecs, a.workSecs, 'a closed shift does not keep accruing');
+  assert.equal(b.isOnBreak, false);
+
+  // A break left open when the shift closed must not outlive the shift.
+  const forgotten = engine.computeLiveShiftBreakdown(
+    {
+      checkInAt: new Date(base).toISOString(),
+      checkOutAt: new Date(base + 3600000).toISOString(),
+      breaks: [{ type: 'Tea Break', startAt: new Date(base + 1800000).toISOString() }]
+    },
+    base + 100 * 3600000
+  );
+  assert.equal(forgotten.elapsedSecs, 3600);
+  assert.equal(forgotten.teaSecs, 1800, 'the open break is capped at check-out, not at now');
+  assert.equal(forgotten.workSecs, 1800);
+
+  // Corrupted data: breaks longer than the shift must clamp, never produce
+  // negative work or a percent total above 100.
+  const corrupt = engine.computeLiveShiftBreakdown(
+    {
+      checkInAt: new Date(base).toISOString(),
+      breaks: [{ type: 'Meal Break', durationMinutes: 600 }]
+    },
+    base + 3600000
+  );
+  assert.equal(corrupt.workSecs, 0);
+  assert.equal(corrupt.breakSecs, 3600);
+  assert.ok(corrupt.segments.reduce((s, x) => s + x.percent, 0) <= 100);
+
+  // No check-in at all: everything zero, nothing thrown.
+  const none = engine.computeLiveShiftBreakdown({ checkInAt: null, breaks: [] }, base);
+  assert.equal(none.isCheckedIn, false);
+  assert.equal(none.elapsedSecs, 0);
+  assert.deepEqual(none.segments, []);
+  assert.equal(engine.computeLiveShiftBreakdown(null, base).workSecs, 0);
+});
+
+test('P2 formatDuration / formatClock / buildPieSlices render safely at the edges', () => {
+  assert.equal(engine.formatDuration(0), '0h 00m');
+  assert.equal(engine.formatDuration(3661, true), '1h 01m 01s');
+  assert.equal(engine.formatDuration(-500), '0h 00m', 'never renders a negative duration');
+  assert.equal(engine.formatDuration(NaN, true), '0h 00m 00s');
+  assert.equal(engine.formatClock(59), '00:59');
+  assert.equal(engine.formatClock(3600), '1:00:00');
+
+  // A single 100% slice cannot be drawn as one 360° arc (it collapses to a
+  // zero-length path), so it must come back as two half-arcs.
+  const solo = engine.buildPieSlices([{ key: 'work', label: 'Work', seconds: 100, percent: 100, color: '#000' }], 42, 26);
+  assert.equal(solo.length, 1);
+  assert.ok(solo[0].d.split(' A ').length - 1 >= 2, 'full circle is drawn with multiple arcs');
+
+  // Multi-slice: one path per segment, all non-empty.
+  const many = engine.buildPieSlices([
+    { key: 'work', label: 'Work', seconds: 60, percent: 60, color: '#0f0' },
+    { key: 'meal', label: 'Meal Break', seconds: 30, percent: 30, color: '#f00' },
+    { key: 'tea', label: 'Tea Break', seconds: 10, percent: 10, color: '#ff0' }
+  ], 42, 26);
+  assert.equal(many.length, 3);
+  for (const s of many) assert.ok(s.d.startsWith('M ') && s.d.length > 20, `${s.key} path is malformed`);
+  assert.deepEqual(engine.buildPieSlices([], 42, 26), []);
+});
+
+test('P2 classifyBreakType buckets every real break label used by the portal', () => {
+  assert.equal(engine.classifyBreakType('Tea Break'), 'tea');
+  assert.equal(engine.classifyBreakType('Coffee'), 'tea');
+  assert.equal(engine.classifyBreakType('Meal Break'), 'meal');
+  assert.equal(engine.classifyBreakType('Lunch'), 'meal');
+  assert.equal(engine.classifyBreakType('Team Huddle'), 'huddle');
+  assert.equal(engine.classifyBreakType('Team Meeting'), 'meeting');
+  assert.equal(engine.classifyBreakType('Training'), 'training');
+  assert.equal(engine.classifyBreakType('Skill Attainment'), 'training');
+  // Unknown / missing labels fall into activity rather than being dropped, so no
+  // logged break can ever vanish from the totals.
+  assert.equal(engine.classifyBreakType('Something Else'), 'activity');
+  assert.equal(engine.classifyBreakType(undefined), 'activity');
+});
+
+test('P2 calculateBreakBreakdown: team breaks no longer leak into the tea bucket', () => {
+  const base = Date.parse('2026-08-22T04:30:00.000Z');
+  const mk = (type, mins) => ({
+    type,
+    startAt: new Date(base).toISOString(),
+    endAt: new Date(base + mins * 60000).toISOString(),
+    durationMinutes: mins
+  });
+  // "Team Huddle" and "Team Meeting" both contain the substring 'tea'. The old
+  // inlined includes('tea') check ran first, so huddle/meeting were always 0.
+  const r = engine.calculateBreakBreakdown([mk('Team Huddle', 10), mk('Team Meeting', 20), mk('Tea Break', 5)]);
+  assert.equal(r.huddleSecs, 600);
+  assert.equal(r.meetingSecs, 1200);
+  assert.equal(r.teaSecs, 300, 'only the genuine tea break lands in tea');
+  assert.equal(r.totalBreakSecs, 2100);
+});

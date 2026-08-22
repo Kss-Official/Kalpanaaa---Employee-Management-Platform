@@ -63,6 +63,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetSent, setResetSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,15 +90,69 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     triggerHaptic('medium');
-    if (!resetEmail) return;
+    if (resetLoading) return; // guard double-submit → auth/too-many-requests
+
+    // Firebase rejects surrounding whitespace as auth/invalid-email, which the old
+    // blanket catch then reported as a successfully sent link.
+    const email = resetEmail.trim().toLowerCase();
+    if (!email) {
+      setResetError('Please enter your email address.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      triggerHaptic('error');
+      setResetError('That does not look like a valid email address.');
+      return;
+    }
+
+    setResetError(null);
+    setResetLoading(true);
     try {
-      await sendPasswordResetEmail(auth, resetEmail);
+      await sendPasswordResetEmail(auth, email);
       triggerHaptic('success');
+      setResetEmail(email);
       setResetSent(true);
     } catch (err: any) {
-      triggerHaptic('success'); // Show confirmation regardless for security
-      setResetSent(true); 
+      // P1 FIX: this catch previously swallowed EVERY error and rendered
+      // "Link Sent!" regardless, so a user whose reset genuinely failed — offline,
+      // rate-limited, or with Email/Password sign-in disabled in the Firebase
+      // console — was told to go check an inbox that would never receive anything,
+      // with no way to tell that reset was broken.
+      //
+      // Account-enumeration resistance only requires hiding whether the ADDRESS
+      // EXISTS. auth/user-not-found (and the invalid-email variant Firebase
+      // returns for some unregistered addresses) therefore still show the neutral
+      // success screen. Every other code is an operational failure that the user
+      // must be able to see and retry.
+      const code = String(err?.code || '');
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-email') {
+        triggerHaptic('success');
+        setResetEmail(email);
+        setResetSent(true);
+      } else if (code === 'auth/too-many-requests') {
+        triggerHaptic('error');
+        setResetError('Too many reset attempts. Please wait a few minutes and try again.');
+      } else if (code === 'auth/network-request-failed') {
+        triggerHaptic('error');
+        setResetError('No connection to the authentication server. Check your network and try again.');
+      } else if (code === 'auth/operation-not-allowed' || code === 'auth/unauthorized-continue-uri') {
+        triggerHaptic('error');
+        setResetError('Password reset is not enabled for this project. Please contact HR / IT support.');
+      } else {
+        triggerHaptic('error');
+        setResetError(err?.message || 'Could not send the reset link. Please try again.');
+      }
+    } finally {
+      setResetLoading(false);
     }
+  };
+
+  const closeForgotModal = () => {
+    setIsForgotModalOpen(false);
+    setResetSent(false);
+    setResetEmail('');
+    setResetError(null);
+    setResetLoading(false);
   };
 
   return (
@@ -265,7 +321,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
             <div className="flex justify-between items-center p-4 border-b border-[var(--border-subtle)]">
               <h3 className="font-bold text-[var(--text-primary)]">Reset Password</h3>
               <button 
-                onClick={() => { setIsForgotModalOpen(false); setResetSent(false); setResetEmail(''); }}
+                onClick={closeForgotModal}
                 className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -281,7 +337,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                   <h4 className="font-bold text-lg text-[var(--text-primary)]">Link Sent!</h4>
                   <p className="text-sm text-[var(--text-secondary)]">If {resetEmail} exists in our system, you will receive a password reset email shortly.</p>
                   <button
-                    onClick={() => { setIsForgotModalOpen(false); setResetSent(false); setResetEmail(''); }}
+                    onClick={closeForgotModal}
                     className="w-full h-[44px] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] font-bold text-sm rounded-xl transition-all cursor-pointer mt-2"
                   >
                     Back to Login
@@ -296,16 +352,34 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                       type="email"
                       required
                       value={resetEmail}
-                      onChange={e => setResetEmail(e.target.value)}
+                      onChange={e => { setResetEmail(e.target.value); setResetError(null); }}
+                      disabled={resetLoading}
+                      autoComplete="email"
                       placeholder="name@kalpanaaa.in"
-                      className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl px-4 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
+                      className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] focus:border-[var(--accent-blue)] rounded-xl px-4 h-[44px] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none disabled:opacity-60"
                     />
                   </div>
+                  {resetError && (
+                    <div
+                      role="alert"
+                      data-testid="reset-error"
+                      className="flex items-start gap-2 p-3 rounded-xl bg-[var(--accent-rose)]/10 border border-[var(--accent-rose)]/30 text-[11px] font-semibold text-[var(--accent-rose)]"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                      <span>{resetError}</span>
+                    </div>
+                  )}
                   <button
                     type="submit"
-                    className="w-full h-[44px] bg-[var(--accent-blue)] hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-md"
+                    disabled={resetLoading}
+                    className="w-full h-[44px] bg-[var(--accent-blue)] hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-2"
                   >
-                    Send Reset Link
+                    {resetLoading ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                        Sending…
+                      </>
+                    ) : 'Send Reset Link'}
                   </button>
                 </form>
               )}
