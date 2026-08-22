@@ -1,4 +1,4 @@
-import { CompanySettings, Employee, AttendanceRecord } from '../types';
+import { CompanySettings, Employee, AttendanceRecord, AttendanceStatus } from '../types';
 
 /**
  * Standard Company Timezone for Attendance & Work-Day calculations (IST)
@@ -13,6 +13,51 @@ export const COMPANY_TIMEZONE = 'Asia/Kolkata';
  * paths now share this constant so a break's recorded duration is path-independent.
  */
 export const MAX_BREAK_MINUTES = 180;
+
+/**
+ * ── Canonical shift definition ───────────────────────────────────────────────
+ * The company shift is 10:00 AM → 7:00 PM IST (9h rostered), Monday–Saturday,
+ * with Sunday as the weekly off. These were previously magic numbers scattered
+ * across the engine and the portals (10/19 in computeShiftWorkingMinutes, the
+ * `hh > 10 || (hh === 10 && mm > 15)` lateness test, hard-coded strings in the
+ * UI), so a shift change had to be made in a dozen places and they could drift
+ * apart. Everything that reasons about the shift now derives from these.
+ */
+export const SHIFT_START_HOUR = 10;
+export const SHIFT_START_MINUTE = 0;
+export const SHIFT_END_HOUR = 19;
+export const SHIFT_END_MINUTE = 0;
+/** Minutes after SHIFT_START before a check-in is counted Late. */
+export const SHIFT_LATE_GRACE_MINUTES = 15;
+/** 0 = Sunday … 6 = Saturday. Sunday is the weekly off; the work week is Mon–Sat. */
+export const WEEKLY_OFF_DAYS: number[] = [0];
+/** Rostered working days per week (Mon–Sat). */
+export const WORK_WEEK_DAYS = 6;
+/** Rostered shift length in minutes, breaks included. */
+export const SHIFT_TOTAL_MINUTES =
+  (SHIFT_END_HOUR * 60 + SHIFT_END_MINUTE) - (SHIFT_START_HOUR * 60 + SHIFT_START_MINUTE);
+
+/** Human-readable shift label for UI headers, e.g. "10:00 AM – 7:00 PM IST". */
+export const SHIFT_LABEL = '10:00 AM – 7:00 PM IST';
+
+/**
+ * Wall-clock hour/minute of an instant IN COMPANY TIME (IST), independent of the
+ * device timezone. Returns { hour: 0-23, minute: 0-59 }.
+ */
+export function getISTHourMinute(input: any = new Date()): { hour: number; minute: number } {
+  const d = input instanceof Date ? input : new Date(typeof input === 'number' ? input : String(input));
+  if (isNaN(d.getTime())) return { hour: 0, minute: 0 };
+  const hour = parseInt(
+    new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: COMPANY_TIMEZONE }).format(d),
+    10
+  );
+  const minute = parseInt(
+    new Intl.DateTimeFormat('en-US', { minute: 'numeric', timeZone: COMPANY_TIMEZONE }).format(d),
+    10
+  );
+  // Intl renders midnight as "24" in some ICU versions under hour12: false.
+  return { hour: hour === 24 ? 0 : hour, minute };
+}
 
 /**
  * Canonical helper resolving work-day date string (YYYY-MM-DD) strictly in the employee's timezone.
@@ -497,15 +542,34 @@ export function resolveAttendanceRecord(
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0];
 
-  // 1. ALWAYS prioritize records that have real check-in data (never let a blank duplicate mask an active shift)
+  const canonicalId = canonicalUid && date ? getAttendanceDocId(canonicalUid, date) : null;
+
+  // 1. The canonical document {uid}_{YYYY-MM-DD} ALWAYS wins when it carries a
+  //    real check-in. Every write path (recordCheckIn / startBreak / endBreak /
+  //    recordCheckOut) targets this exact id, so it is the authoritative doc.
+  //
+  //    P0 FIX (PM "taking a break rewrites my check-in time and zeroes my
+  //    hours"): ranking checked-in duplicates by `updatedAt` FIRST made the
+  //    winner flap. startBreak writes `updatedAt: serverTimestamp()`, which
+  //    Firestore reads back as `null` in the latency-compensated local snapshot
+  //    (serverTimestamps: 'none'). That collapsed the canonical doc's sort key
+  //    to its checkInAt, promoting any duplicate with a fresher updatedAt — so
+  //    the widget suddenly rendered the stale doc's checkInAt and its absent
+  //    workingMinutes. Anchoring on the canonical id removes the race entirely.
+  if (canonicalId) {
+    const canonicalCheckedIn = matches.find(rec => rec.id === canonicalId && !!rec.checkInAt);
+    if (canonicalCheckedIn) return canonicalCheckedIn;
+  }
+
+  // 2. Otherwise prefer any record with real check-in data (never let a blank
+  //    duplicate mask an active shift), most recently touched first.
   const checkedIn = matches
     .filter(rec => !!rec.checkInAt)
     .sort((a, b) => (safeGetTimestampMillis(b.updatedAt || b.checkInAt) || 0) - (safeGetTimestampMillis(a.updatedAt || a.checkInAt) || 0));
   if (checkedIn.length > 0) return checkedIn[0];
 
-  // 2. Exact canonical document ID: {uid}_{YYYY-MM-DD}
-  if (canonicalUid && date) {
-    const canonicalId = getAttendanceDocId(canonicalUid, date);
+  // 3. Exact canonical document ID, even without check-in data
+  if (canonicalId) {
     const byCanonicalId = matches.find(rec => rec.id === canonicalId);
     if (byCanonicalId) return byCanonicalId;
   }
@@ -646,10 +710,10 @@ export interface CheckInEvaluation {
 export function isLateCheckIn(checkInAt: any): boolean {
   const iso = formatTimestampToISO(checkInAt);
   if (!iso) return false;
-  const d = new Date(iso);
-  const hh = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: COMPANY_TIMEZONE }).format(d), 10);
-  const mm = parseInt(new Intl.DateTimeFormat('en-US', { minute: 'numeric', timeZone: COMPANY_TIMEZONE }).format(d), 10);
-  return hh > 10 || (hh === 10 && mm > 15);
+  const { hour: hh, minute: mm } = getISTHourMinute(new Date(iso));
+  // Derived from the canonical shift definition rather than hard-coded 10/15, so
+  // a shift change cannot leave the lateness test behind.
+  return hh * 60 + mm > SHIFT_START_HOUR * 60 + SHIFT_START_MINUTE + SHIFT_LATE_GRACE_MINUTES;
 }
 
 /**
@@ -884,4 +948,195 @@ export function generateHistoricalAttendance(employees: Employee[], daysBack: nu
   }
 
   return records;
+}
+
+/**
+ * ── Daily roster derivation ──────────────────────────────────────────────────
+ *
+ * P1 FIX: "Absentees and work-from-homes are not shown in the admin portal —
+ * only presentees are shown."
+ *
+ * ROOT CAUSE: absence is the ABSENCE of a document. Every admin/HR view filtered
+ * the `attendance` collection directly, but no code path has ever written an
+ * `Absent` record — an employee who never checks in simply has no doc for that
+ * date. So `status === 'Absent'` could not match anything, the Absent filter
+ * always returned an empty table, and the roster silently shrank to whoever had
+ * checked in. The same applied to any WFH employee who had not yet checked in.
+ *
+ * The fix is to derive the roster instead of reading it: start from the employee
+ * directory (the real source of truth for "who was expected today") and LEFT JOIN
+ * the attendance records onto it. Employees with no record are materialised as
+ * synthetic rows so they are visible, filterable and countable, and flagged
+ * `isSynthetic` so the UI can suppress actions that require a stored document.
+ *
+ * Precedence for a missing record, highest first:
+ *   Holiday / weekly off  →  'Holiday'    (Sunday is the weekly off; the shift
+ *                                          week is Mon–Sat)
+ *   Approved leave        →  'On Leave'
+ *   Directory status      →  'On Leave' when the employee record itself says so
+ *   Otherwise             →  'Absent'
+ *
+ * A future date, or today before the shift-start grace window has elapsed, is
+ * never reported as absent — nobody is absent for a day that has not happened.
+ */
+export interface DailyRosterOptions {
+  leaveRequests?: any[];
+  holidayDates?: string[];
+  weeklyOffDays?: number[]; // 0 = Sunday … 6 = Saturday
+  nowMs?: number;
+  /** Minutes past shift start after which a no-show counts as absent. */
+  absentAfterMinutes?: number;
+}
+
+export type RosterRecord = AttendanceRecord & { isSynthetic?: boolean };
+
+/** True when `dateStr` (YYYY-MM-DD, IST) is a non-working day for the company. */
+export function isNonWorkingDay(
+  dateStr: string,
+  holidayDates: string[] = [],
+  weeklyOffDays: number[] = WEEKLY_OFF_DAYS
+): boolean {
+  if (!dateStr) return false;
+  if (holidayDates.includes(dateStr)) return true;
+  // Parse as a plain calendar date — appending T00:00:00Z keeps the weekday
+  // independent of the machine timezone (a bare 'YYYY-MM-DD' is already UTC,
+  // but being explicit documents the intent).
+  const day = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return weeklyOffDays.includes(day);
+}
+
+/** True when an approved leave request of the given employee covers `dateStr`. */
+export function hasApprovedLeaveOn(
+  leaveRequests: any[] | undefined,
+  emp: any,
+  dateStr: string,
+  types?: string[]
+): boolean {
+  if (!Array.isArray(leaveRequests) || !emp) return false;
+  return leaveRequests.some(r => {
+    if (!r || r.status !== 'Approved') return false;
+    if (types && !types.includes(r.type)) return false;
+    const matchesEmployee =
+      r.employeeId === emp.employeeId ||
+      r.employeeId === emp.id ||
+      r.employeeUid === emp.uid ||
+      (!!r.employeeName && !!emp.fullName && r.employeeName === emp.fullName);
+    if (!matchesEmployee) return false;
+    const start = r.startDate || r.fromDate;
+    const end = r.endDate || r.toDate || start;
+    return !!start && dateStr >= start && dateStr <= end;
+  });
+}
+
+export function buildDailyRoster(
+  employees: any[],
+  attendance: AttendanceRecord[],
+  dateStr: string,
+  opts: DailyRosterOptions = {}
+): RosterRecord[] {
+  if (!Array.isArray(employees) || !dateStr) return [];
+
+  const {
+    leaveRequests = [],
+    holidayDates = [],
+    weeklyOffDays = WEEKLY_OFF_DAYS,
+    nowMs = Date.now(),
+    absentAfterMinutes = SHIFT_LATE_GRACE_MINUTES
+  } = opts;
+
+  const records = Array.isArray(attendance) ? attendance : [];
+  const todayStr = getWorkDate(new Date(nowMs));
+
+  // Absence cannot be asserted for a day that has not finished arriving.
+  const isFuture = dateStr > todayStr;
+  let shiftStartElapsed = true;
+  if (dateStr === todayStr) {
+    const istNow = getISTHourMinute(nowMs);
+    const minutesIntoDay = istNow.hour * 60 + istNow.minute;
+    shiftStartElapsed = minutesIntoDay >= SHIFT_START_HOUR * 60 + absentAfterMinutes;
+  }
+
+  const nonWorking = isNonWorkingDay(dateStr, holidayDates, weeklyOffDays);
+
+  const roster: RosterRecord[] = [];
+
+  for (const emp of employees) {
+    if (!emp) continue;
+    // Terminated / suspended staff are no longer expected to attend.
+    if (emp.status === 'Terminated' || emp.status === 'Suspended') continue;
+
+    const existing = resolveAttendanceRecord(records, emp, dateStr);
+    if (existing) {
+      roster.push(existing);
+      continue;
+    }
+
+    let status: AttendanceStatus;
+    if (nonWorking) status = 'Holiday';
+    else if (hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['Leave', 'Sick Leave', 'Casual Leave', 'Earned Leave', 'Comp Off', 'Maternity', 'Paternity'])) status = 'On Leave';
+    else if (emp.status === 'On Leave') status = 'On Leave';
+    else if (isFuture || !shiftStartElapsed) continue; // not yet knowable
+    else status = 'Absent';
+
+    const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']);
+
+    roster.push({
+      id: `synthetic_${emp.id}_${dateStr}`,
+      employeeId: emp.id,
+      employeeCode: emp.employeeId || '',
+      employeeName: emp.fullName || '',
+      department: emp.department || '',
+      pmUid: emp.pmUid || emp.reportingManagerUid || '',
+      date: dateStr,
+      checkInAt: null,
+      checkOutAt: null,
+      workingMinutes: 0,
+      status,
+      attendanceMethod: 'SYSTEM' as any,
+      locationVerified: false,
+      breaks: [],
+      totalBreakMinutes: 0,
+      isWfh: isWfhApproved,
+      createdAt: '',
+      updatedAt: '',
+      isSynthetic: true
+    } as RosterRecord);
+  }
+
+  return roster;
+}
+
+/** Roster KPI counters. `present` is deliberately INCLUSIVE of every state that
+ *  means "working today" — Present, Late and Work From Home — because a late or
+ *  remote employee is at work. */
+export function summarizeRoster(roster: RosterRecord[]) {
+  const isWfh = (r: RosterRecord) => r.status === 'Work From Home' || !!r.isWfh;
+  const counts = {
+    total: roster.length,
+    present: 0,
+    onTime: 0,
+    late: 0,
+    wfh: 0,
+    absent: 0,
+    onLeave: 0,
+    holiday: 0,
+    halfDay: 0,
+    checkedOut: 0,
+    onBreak: 0
+  };
+  for (const r of roster) {
+    if (r.status === 'Absent') counts.absent++;
+    else if (r.status === 'On Leave') counts.onLeave++;
+    else if (r.status === 'Holiday') counts.holiday++;
+    else {
+      if (r.status === 'Late') counts.late++;
+      else if (r.status === 'Half Day') counts.halfDay++;
+      else counts.onTime++;
+      if (isWfh(r)) counts.wfh++;
+      counts.present++;
+      if (r.checkOutAt) counts.checkedOut++;
+      else if ((r.breaks || []).some((b: any) => !b.endAt && !b.endTime)) counts.onBreak++;
+    }
+  }
+  return counts;
 }

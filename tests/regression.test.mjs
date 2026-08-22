@@ -358,3 +358,148 @@ test('B25 isLateCheckIn: grace through 10:15 AM IST, late afterwards', () => {
   assert.equal(engine.isLateCheckIn(null), false);
   assert.equal(engine.isLateCheckIn(''), false);
 });
+
+test('P0 resolveAttendanceRecord: canonical doc wins even while updatedAt is a pending serverTimestamp', () => {
+  // Reproduces the PM report "clicking Break rewrites my check-in time and my
+  // working hours drop to 0".
+  //
+  // startBreak writes `updatedAt: serverTimestamp()`. In the latency-compensated
+  // local snapshot Firestore materialises a pending server timestamp as NULL, so
+  // the canonical doc's sort key fell back to its checkInAt while a stale
+  // duplicate kept a real (later) updatedAt — and the duplicate won the
+  // "most recently updated" ranking. The widget then rendered the duplicate's
+  // checkInAt and its absent workingMinutes.
+  const emp = { id: 'emp-KSS2407009', employeeId: 'KSS2407009', uid: 'uid-KSS2407009' };
+  const date = '2026-08-20';
+  const canonicalId = engine.getAttendanceDocId('uid-KSS2407009', date);
+
+  const canonical = {
+    id: canonicalId,
+    employeeId: 'emp-KSS2407009',
+    uid: 'uid-KSS2407009',
+    date,
+    checkInAt: '2026-08-20T04:35:00.000Z', // 10:05 IST — the real check-in
+    workingMinutes: 180,
+    updatedAt: null                        // pending serverTimestamp mid-break-write
+  };
+  const staleDuplicate = {
+    id: 'legacy-KSS2407009-aug20',
+    employeeId: 'emp-KSS2407009',
+    date,
+    checkInAt: '2026-08-20T09:45:00.000Z', // migration-written, wrong
+    updatedAt: '2026-08-20T10:00:00.000Z'  // fresher than the canonical fallback key
+  };
+
+  const winner = engine.resolveAttendanceRecord([staleDuplicate, canonical], emp, date);
+  assert.equal(winner.id, canonicalId, 'canonical {uid}_{date} doc must win the tie-break');
+  assert.equal(winner.checkInAt, '2026-08-20T04:35:00.000Z', 'check-in time must not flap to the duplicate');
+  assert.equal(winner.workingMinutes, 180, 'working hours must not collapse to 0');
+
+  // Ordering of the input array must not matter.
+  assert.equal(
+    engine.resolveAttendanceRecord([canonical, staleDuplicate], emp, date).id,
+    canonicalId
+  );
+
+  // A blank canonical doc must still NOT mask a duplicate that holds a real shift.
+  const blankCanonical = { id: canonicalId, employeeId: 'emp-KSS2407009', date, updatedAt: null };
+  assert.equal(
+    engine.resolveAttendanceRecord([blankCanonical, staleDuplicate], emp, date).id,
+    'legacy-KSS2407009-aug20',
+    'a checked-in duplicate still beats a blank canonical doc'
+  );
+});
+
+// ── Daily roster derivation (absentees / WFH visibility) ─────────────────────
+
+test('P1 buildDailyRoster: absentees are materialised, not silently dropped', () => {
+  // The admin portal showed "only presentees" because absence is the ABSENCE of
+  // a document — nothing ever writes an 'Absent' record, so filtering the
+  // attendance collection by status could never surface a no-show.
+  const employees = [
+    { id: 'emp-A', employeeId: 'KSS001', fullName: 'Alice', department: 'Eng', status: 'Active', uid: 'uid-A' },
+    { id: 'emp-B', employeeId: 'KSS002', fullName: 'Bob', department: 'Eng', status: 'Active', uid: 'uid-B' },
+    { id: 'emp-C', employeeId: 'KSS003', fullName: 'Cara', department: 'Ops', status: 'Active', uid: 'uid-C' },
+    { id: 'emp-X', employeeId: 'KSS009', fullName: 'Gone', department: 'Ops', status: 'Terminated', uid: 'uid-X' }
+  ];
+  const date = '2026-08-20'; // a Thursday — a working day
+  const attendance = [
+    { id: 'uid-A_2026-08-20', employeeId: 'emp-A', employeeCode: 'KSS001', employeeName: 'Alice',
+      date, checkInAt: '2026-08-20T04:35:00.000Z', status: 'Present' }
+  ];
+
+  // nowMs well after the shift-start grace window so absence is knowable.
+  const nowMs = new Date('2026-08-20T14:00:00.000Z').getTime();
+  const roster = engine.buildDailyRoster(employees, attendance, date, { nowMs });
+
+  assert.equal(roster.length, 3, 'terminated staff are excluded; the other three appear');
+  const byName = Object.fromEntries(roster.map(r => [r.employeeName, r]));
+  assert.equal(byName.Alice.status, 'Present');
+  assert.equal(byName.Alice.isSynthetic, undefined, 'a real record is passed through untouched');
+  assert.equal(byName.Bob.status, 'Absent');
+  assert.equal(byName.Bob.isSynthetic, true);
+  assert.equal(byName.Bob.checkInAt, null);
+  assert.equal(byName.Cara.status, 'Absent');
+  assert.ok(!roster.some(r => r.employeeName === 'Gone'), 'terminated employee is not on the roster');
+});
+
+test('P1 buildDailyRoster: leave, weekly off and future dates never read as Absent', () => {
+  const employees = [
+    { id: 'emp-A', employeeId: 'KSS001', fullName: 'Alice', department: 'Eng', status: 'Active', uid: 'uid-A' }
+  ];
+  const nowMs = new Date('2026-08-20T14:00:00.000Z').getTime();
+
+  // Approved leave covering the day → On Leave, not Absent.
+  const leaveRequests = [
+    { type: 'Leave', status: 'Approved', employeeId: 'KSS001', startDate: '2026-08-20', endDate: '2026-08-21' }
+  ];
+  assert.equal(
+    engine.buildDailyRoster(employees, [], '2026-08-20', { nowMs, leaveRequests })[0].status,
+    'On Leave'
+  );
+
+  // 2026-08-23 is a Sunday — the weekly off. Nobody is absent on a non-working day.
+  assert.equal(engine.isNonWorkingDay('2026-08-23'), true, 'Sunday is the weekly off');
+  assert.equal(engine.isNonWorkingDay('2026-08-22'), false, 'Saturday is a working day (Mon-Sat week)');
+  const sunday = engine.buildDailyRoster(employees, [], '2026-08-23', {
+    nowMs: new Date('2026-08-23T14:00:00.000Z').getTime()
+  });
+  assert.equal(sunday[0].status, 'Holiday');
+
+  // A declared holiday behaves the same way.
+  assert.equal(
+    engine.buildDailyRoster(employees, [], '2026-08-20', { nowMs, holidayDates: ['2026-08-20'] })[0].status,
+    'Holiday'
+  );
+
+  // A future date yields no absence rows at all.
+  assert.equal(engine.buildDailyRoster(employees, [], '2026-08-25', { nowMs }).length, 0);
+
+  // Today, before 10:15 IST, is not yet knowable — 03:00 UTC is 08:30 IST.
+  const earlyMorning = new Date('2026-08-20T03:00:00.000Z').getTime();
+  assert.equal(engine.buildDailyRoster(employees, [], '2026-08-20', { nowMs: earlyMorning }).length, 0,
+    'nobody is absent before the shift-start grace window has elapsed');
+});
+
+test('P1 summarizeRoster: present is inclusive of Late and Work From Home', () => {
+  const roster = [
+    { status: 'Present', checkInAt: 'x' },
+    { status: 'Late', checkInAt: 'x' },
+    { status: 'Work From Home', checkInAt: 'x' },
+    { status: 'Present', checkInAt: 'x', isWfh: true },
+    { status: 'Absent' },
+    { status: 'Absent' },
+    { status: 'On Leave' },
+    { status: 'Holiday' }
+  ];
+  const c = engine.summarizeRoster(roster);
+  assert.equal(c.total, 8);
+  assert.equal(c.present, 4, 'Present + Late + WFH all count as at-work');
+  assert.equal(c.late, 1);
+  assert.equal(c.wfh, 2, 'status WFH and the isWfh flag both count');
+  assert.equal(c.absent, 2);
+  assert.equal(c.onLeave, 1);
+  assert.equal(c.holiday, 1);
+  // The buckets must partition the roster exactly — no double counting, no gaps.
+  assert.equal(c.present + c.absent + c.onLeave + c.holiday, c.total);
+});

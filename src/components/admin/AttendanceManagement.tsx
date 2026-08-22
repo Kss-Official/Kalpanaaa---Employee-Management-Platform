@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
 import { AttendanceRecord, AttendanceStatus, Employee } from '../../types';
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
-import { getEmployeeWorkDate, safeGetTimestampMillis, computeShiftWorkingMinutes } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, safeGetTimestampMillis, computeShiftWorkingMinutes, buildDailyRoster, summarizeRoster, RosterRecord } from '../../lib/attendanceEngine';
 import { toISTTimeString, toISTDateString } from '../../lib/absoluteTime';
 
 interface AttendanceManagementProps {
@@ -32,7 +32,9 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
   initialDateFilter = 'today',
   initialStatusFilter = 'ALL'
 }) => {
-  const { attendance, employees, updateAttendanceRecord, settings } = useAuth();
+  const { attendance, employees, updateAttendanceRecord, applyAttendanceCorrection, settings, leaveRequests } = useAuth();
+
+  const [editingRecord, setEditingRecord] = useState<RosterRecord | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
@@ -44,7 +46,6 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
     if (initialStatusFilter) setStatusFilter(initialStatusFilter);
   }, [initialDateFilter, initialStatusFilter]);
 
-  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
   const [editStatus, setEditStatus] = useState<AttendanceStatus>('Present');
   const [editNotes, setEditNotes] = useState('');
 
@@ -59,23 +60,50 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
 
   const departments = Array.from(new Set(employees.map(e => e.department)));
 
-  const filteredRecords = attendance.filter(rec => {
-    // Omit corrupted or empty records lacking valid employee name, employee code, or date
+  // P1 FIX: "Absentees / work-from-homes are not shown — only presentees."
+  //
+  // This view used to filter the `attendance` collection directly. But absence is
+  // the ABSENCE of a document: no code path writes an 'Absent' record, so the
+  // Absent filter matched nothing and the table silently degraded into a list of
+  // people who had checked in. buildDailyRoster() starts from the employee
+  // directory instead and LEFT JOINs attendance onto it, materialising a
+  // synthetic row (isSynthetic) for anyone with no record so absentees, approved
+  // WFH staff and employees on leave are all visible and countable.
+  //
+  // 'all' keeps reading raw attendance — a roster spanning all history would be
+  // employees x days of mostly-synthetic rows, which is neither useful nor cheap.
+  const baseRecords: RosterRecord[] = useMemo(() => {
+    if (dateFilter === 'all') return attendance as RosterRecord[];
+    const targetDate = dateFilter === 'yesterday' ? yesterdayStr : todayStr;
+    return buildDailyRoster(employees, attendance, targetDate, {
+      leaveRequests,
+      holidayDates: (settings as any)?.holidayDates || [],
+      nowMs: Date.now()
+    });
+  }, [dateFilter, attendance, employees, leaveRequests, settings, todayStr, yesterdayStr]);
+
+  const filteredRecords = baseRecords.filter(rec => {
+    // Omit corrupted records lacking a name or date. Synthetic roster rows always
+    // carry both (they are built from the directory), so they are never dropped.
     if (!rec || !rec.employeeName || rec.employeeName.trim() === '' || rec.employeeName === '.' || !rec.date) {
       return false;
     }
 
-    const matchesSearch = 
+    const matchesSearch =
       (rec.employeeName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (rec.employeeCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (rec.department || '').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesDept = deptFilter === 'ALL' || rec.department === deptFilter;
-    
-    const matchesStatus = 
+
+    const matchesStatus =
       statusFilter === 'ALL' ? true :
       (statusFilter === 'Work From Home' || statusFilter === 'WFH') ? (rec.status === 'Work From Home' || rec.isWfh) :
-      rec.status === statusFilter;
+      // 'Present' means "at work today" — a Late or WFH employee IS present.
+      // Filtering on the literal status hid them from the Present view entirely.
+      statusFilter === 'Present'
+        ? (rec.status === 'Present' || rec.status === 'Late' || rec.status === 'Work From Home' || rec.isWfh || (!!rec.checkInAt && rec.status !== 'Absent'))
+        : rec.status === statusFilter;
 
     let matchesDate = true;
     if (dateFilter === 'today') matchesDate = rec.date === todayStr;
@@ -83,6 +111,15 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
 
     return matchesSearch && matchesDept && matchesStatus && matchesDate;
   });
+
+  // KPI strip doubles as the status filter, so every bucket is one click away and
+  // the counts always agree with the table below them (same roster, same source).
+  const rosterCounts = useMemo(() => summarizeRoster(
+    baseRecords.filter(rec =>
+      (deptFilter === 'ALL' || rec.department === deptFilter) &&
+      (dateFilter === 'all' || rec.date === (dateFilter === 'yesterday' ? yesterdayStr : todayStr))
+    )
+  ), [baseRecords, deptFilter, dateFilter, todayStr, yesterdayStr]);
 
   const getStatusBadge = (status: AttendanceStatus) => {
     switch (status) {
@@ -116,8 +153,12 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
 
   const handleSaveCorrection = () => {
     if (!editingRecord) return;
-    updateAttendanceRecord(editingRecord.id, {
+    // Routed through applyAttendanceCorrection so a correction on an ABSENT
+    // employee (a synthetic roster row with no stored document) materialises a
+    // real record at the canonical id instead of merging onto the synthetic key.
+    applyAttendanceCorrection(editingRecord, {
       status: editStatus,
+      isWfh: editStatus === 'Work From Home' ? true : editingRecord.isWfh,
       notes: editNotes ? `HR Correction: ${editNotes}` : editingRecord.notes
     });
     setEditingRecord(null);
@@ -125,6 +166,11 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
 
   const handleUndoCheckout = () => {
     if (!editingRecord) return;
+    // A synthetic roster row has no stored document and no check-out to undo.
+    if (editingRecord.isSynthetic || !editingRecord.checkOutAt) {
+      window.alert('There is no check-out on this record to undo.');
+      return;
+    }
     const confirmUndo = window.confirm(
       "Are you sure you want to undo the Check-Out for this employee?\n\n" +
       "This will clear their Check-Out time and allow them to Check-Out again today."
@@ -145,6 +191,13 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
 
   const handleForceCheckout = () => {
     if (!editingRecord) return;
+    // Forcing a check-out requires a check-in to close. An absentee (synthetic
+    // row, no document) must be corrected via the status field instead —
+    // otherwise this would mint a record with a check-out and no check-in.
+    if (editingRecord.isSynthetic || !editingRecord.checkInAt) {
+      window.alert('This employee has no check-in today, so there is nothing to check out.\n\nUse the Status field to mark them Present, Work From Home, or On Leave instead.');
+      return;
+    }
 
     // B6 FIX: the standard shift end is 07:00 PM IST, not 07:30 — the old 19:30 literal
     // over-counted by 30 min and matched the fabricated-checkout signature the shift-
@@ -256,6 +309,40 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
           </select>
         </div>
       </div>
+
+      {/* Roster KPI strip — doubles as the status filter (item: "when i click on
+          present / late / absent / work from home, proper visualization of all
+          the employees"). Counts come from the SAME roster the table renders, so
+          a number and its drill-down can never disagree. */}
+      {dateFilter !== 'all' && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          {([
+            { key: 'ALL', label: 'Total Roster', value: rosterCounts.total, ring: 'border-slate-700', text: 'text-slate-200', dot: 'bg-slate-400' },
+            { key: 'Present', label: 'Present', value: rosterCounts.present, ring: 'border-emerald-500/40', text: 'text-emerald-300', dot: 'bg-emerald-400' },
+            { key: 'Late', label: 'Late', value: rosterCounts.late, ring: 'border-amber-500/40', text: 'text-amber-300', dot: 'bg-amber-400' },
+            { key: 'Work From Home', label: 'Work From Home', value: rosterCounts.wfh, ring: 'border-sky-500/40', text: 'text-sky-300', dot: 'bg-sky-400' },
+            { key: 'Absent', label: 'Absent', value: rosterCounts.absent, ring: 'border-rose-500/40', text: 'text-rose-300', dot: 'bg-rose-400' },
+            { key: 'On Leave', label: 'On Leave', value: rosterCounts.onLeave, ring: 'border-purple-500/40', text: 'text-purple-300', dot: 'bg-purple-400' }
+          ] as const).map(card => (
+            <button
+              key={card.key}
+              type="button"
+              onClick={() => setStatusFilter(card.key)}
+              aria-pressed={statusFilter === card.key}
+              data-testid={`roster-kpi-${card.key.toLowerCase().replace(/\s+/g, '-')}`}
+              className={`text-left p-3.5 rounded-2xl bg-slate-900 border transition-all hover:bg-slate-800/80 cursor-pointer ${
+                statusFilter === card.key ? `${card.ring} ring-2 ring-inset ring-current ${card.text}` : 'border-slate-800'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${card.dot}`} />
+                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 truncate">{card.label}</span>
+              </div>
+              <p className={`mt-1 text-2xl font-black ${card.text}`}>{card.value}</p>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Attendance Master Table & Cards View */}
       <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">

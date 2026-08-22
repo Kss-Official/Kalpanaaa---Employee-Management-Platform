@@ -172,6 +172,10 @@ interface AuthContextType {
   startBreak: (employeeId: string, breakType?: string) => Promise<{ success: boolean; message: string }>;
   endBreak: (employeeId: string) => Promise<{ success: boolean; message: string }>;
   updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => void;
+  applyAttendanceCorrection: (
+    record: AttendanceRecord & { isSynthetic?: boolean },
+    updates: Partial<AttendanceRecord>
+  ) => Promise<{ success: boolean; message: string }>;
   updateSettings: (newSettings: Partial<CompanySettings>) => void;
   saveCompanyWorkZone: (zone: Partial<WorkZone>) => Promise<void>;
   addAuditLog: (action: string, target: string, details: string) => void;
@@ -2385,6 +2389,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: recordId,
           uid: empUid,
           employeeUid: empUid,
+          // P0 FIX: the REAL Firebase auth uid of whoever performed this
+          // check-in. `uid`/`employeeUid` above both come from
+          // getCanonicalEmployeeUid(), which for the 15 seeded accounts returns
+          // the demoData PLACEHOLDER 'uid-KSS...' — so neither could ever match
+          // request.auth.uid, and the security rules had no cheap way to prove
+          // the owner. Recording it makes ownership provable from this document
+          // alone (see ownsAttendanceData() in firestore.rules) with no
+          // cross-document get() and no dependency on the fire-and-forget
+          // users/{uid} mapping. Self check-ins only: when HR/PM checks somebody
+          // else in, the field is left unset rather than falsely claiming them.
+          authUid: (user?.uid && getCanonicalEmployeeUid(emp, user.uid) === empUid && (
+            emp.uid === user.uid || emp.id === user.uid ||
+            (emp.email && user.email && emp.email.toLowerCase() === user.email.toLowerCase())
+          )) ? user.uid : null,
           employeeId: emp.id,
           employeeCode: emp.employeeId,
           employeeName: emp.fullName,
@@ -2863,6 +2881,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .catch(err => {
         handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
       });
+  };
+
+  /**
+   * Attendance correction for HR / PM — the ONLY sanctioned way to amend a day.
+   *
+   * Handles both cases the admin table can now surface:
+   *
+   *  • A STORED record → a plain merge onto its existing document.
+   *  • A SYNTHETIC roster row (an absentee, who by definition has no document —
+   *    see buildDailyRoster) → materialises a real record at the CANONICAL id
+   *    `{uid}_{YYYY-MM-DD}` with the full field set. Merging onto the synthetic
+   *    `synthetic_*` id would have created a junk document under a fabricated
+   *    key, invisible to every resolver and missing date/employeeId/status.
+   */
+  const applyAttendanceCorrection = async (
+    record: AttendanceRecord & { isSynthetic?: boolean },
+    updates: Partial<AttendanceRecord>
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!record) return { success: false, message: 'No attendance record supplied.' };
+
+    const emp = findEmployee(record.employeeId) || findEmployee(record.employeeCode);
+    const targetId = record.isSynthetic
+      ? getAttendanceDocId(getCanonicalEmployeeUid(emp || record, undefined), record.date)
+      : record.id;
+
+    // A synthetic row has no stored doc, so the write must carry every field the
+    // listeners and queries depend on — not just the corrected ones.
+    const seed = record.isSynthetic
+      ? {
+          id: targetId,
+          uid: getCanonicalEmployeeUid(emp || record, undefined),
+          employeeUid: getCanonicalEmployeeUid(emp || record, undefined),
+          employeeId: record.employeeId,
+          employeeCode: record.employeeCode,
+          employeeName: record.employeeName,
+          department: record.department || 'Engineering',
+          pmUid: emp?.pmUid || emp?.reportingManagerUid || '',
+          date: record.date,
+          checkInAt: null,
+          checkOutAt: null,
+          workingMinutes: 0,
+          attendanceMethod: 'HR_CORRECTION',
+          locationVerified: false,
+          breaks: [],
+          totalBreakMinutes: 0,
+          createdAt: serverTimestamp()
+        }
+      : {};
+
+    const payload = cleanFirestorePayload({
+      ...seed,
+      ...updates,
+      correctedBy: activeEmployee?.fullName || user?.email || 'System',
+      correctedByUid: user?.uid || null,
+      correctedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    try {
+      await setDoc(doc(db, 'attendance', targetId), payload, { merge: true });
+      addAuditLog(
+        'ATTENDANCE_CORRECTION',
+        record.employeeName || targetId,
+        `${record.isSynthetic ? 'Created' : 'Updated'} ${record.date}: ${Object.keys(updates).join(', ')}`
+      );
+      return { success: true, message: `Attendance for ${record.employeeName || 'employee'} updated.` };
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.UPDATE, `attendance/${targetId}`);
+      return { success: false, message: err?.message || 'Attendance correction failed.' };
+    }
   };
 
   const updateSettings = (newSettings: Partial<CompanySettings>) => {
@@ -3432,6 +3520,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       startBreak,
       endBreak,
       updateAttendanceRecord,
+      applyAttendanceCorrection,
       updateSettings,
       saveCompanyWorkZone,
       submitLeaveRequest,

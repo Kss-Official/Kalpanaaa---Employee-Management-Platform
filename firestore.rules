@@ -81,8 +81,22 @@ service cloud.firestore {
       return claimRole() != null ? claimRole() : (userDocExists() ? getUserDoc().role : null);
     }
 
+    // `.get(k, default)` rather than `.employeeId`: reading an ABSENT map key
+    // raises an error, and an error denies the ENTIRE rule — not just the one
+    // disjunct that touched it. A users/{uid} doc written before the employee
+    // mapping existed therefore made every rule referencing this helper fail
+    // closed. Returning null keeps the disjunct false while letting the rest of
+    // the expression be evaluated.
     function getEmployeeId() {
-      return userDocExists() ? getUserDoc().employeeId : null;
+      return userDocExists() ? getUserDoc().get('employeeId', null) : null;
+    }
+
+    // The /employees DOCUMENT id this account maps to ('emp-KSS2407003'), as
+    // opposed to the bare employee CODE returned by getEmployeeId()
+    // ('KSS2407003'). Written by the AuthContext login bootstrap as
+    // `employeeDocId`; attendance records store the same value in `employeeId`.
+    function getEmployeeDocId() {
+      return userDocExists() ? getUserDoc().get('employeeDocId', null) : null;
     }
 
     function isSuperAdmin() {
@@ -159,6 +173,55 @@ service cloud.firestore {
 
     function employeeRecord(docId) {
       return get(/databases/$(database)/documents/employees/$(docId)).data;
+    }
+
+    // ── Attendance-record ownership ──────────────────────────────────────────
+    // P0 FIX: "Missing or insufficient permissions" when ANY employee started a
+    // meal break (and, silently before the endBreak honesty fix, on checkout).
+    //
+    // Every owner disjunct of the previous revision could be false at once for
+    // the 15 seeded accounts — which is the entire company:
+    //
+    //   • `uid` AND `employeeUid` are both written by recordCheckIn from
+    //     getCanonicalEmployeeUid(), which for a seeded employee resolves to the
+    //     PLACEHOLDER 'uid-KSS2407003' seeded by demoData.ts. Neither can ever
+    //     equal a real request.auth.uid.
+    //   • recordId.split('_')[0] is that same placeholder, because the canonical
+    //     doc id is built from it — so that disjunct fails identically.
+    //   • `employeeCode == getEmployeeId()` was the sole survivor, and it hangs
+    //     entirely on users/{uid}.employeeId, which the login bootstrap writes
+    //     FIRE-AND-FORGET. While that write is in flight, denied, or absent,
+    //     getEmployeeId() is null and the rule denies. It also fails outright
+    //     when startBreak targets a legacy duplicate carrying no employeeCode.
+    //
+    // The durable signal is the one field every write path has always stored:
+    // `employeeId` = the /employees DOCUMENT id. That lets the rule fetch the
+    // referenced employee record and compare its admin-written `email` against
+    // the caller's Firebase-verified token email. Ownership then follows from the
+    // attendance document alone — no second self-service doc in the trust path.
+    //
+    // Safe against pointing at a colleague: substituting someone else's
+    // employeeId makes both the email and uid comparisons fail, and `email` /
+    // `uid` on /employees are admin-write-only (section 2). Document access
+    // stays well inside the 10-call budget — users/{uid} and employees/{id} are
+    // each touched once and cached for the rest of the evaluation.
+    function ownsAttendanceData(d) {
+      return isRealUser() && (
+        d.get('uid', '~none~') == request.auth.uid ||
+        d.get('employeeUid', '~none~') == request.auth.uid ||
+        d.get('authUid', '~none~') == request.auth.uid ||
+        d.get('employeeCode', '~none~') == getEmployeeId() ||
+        d.get('employeeId', '~none~') == getEmployeeDocId() ||
+        (
+          d.get('employeeId', '') != '' &&
+          exists(/databases/$(database)/documents/employees/$(d.employeeId)) &&
+          (
+            employeeRecord(d.employeeId).get('email', '~none~')
+              == request.auth.token.get('email', '~absent~') ||
+            employeeRecord(d.employeeId).get('uid', '~none~') == request.auth.uid
+          )
+        )
+      );
     }
 
     // ── users/{uid} role-mirror validation ──────────────────────────────────
@@ -361,14 +424,17 @@ service cloud.firestore {
       // left owners unable to update their own legacy attendance documents at all:
       // recordCheckOut's transaction.update failed permission-denied, and endBreak's
       // catch reported it to the user as success.
+      // Ownership is delegated to ownsAttendanceData() — see its definition for
+      // why the previous disjunct set could deny every seeded account at once.
+      // isProjectManager() is authorised here because the PM owns attendance
+      // administration and per-employee attendance correction for their team.
       allow create: if isRealUser() && (
         isHrAdmin() ||
         isSuperAdmin() ||
-        request.resource.data.get('uid', '~none~') == request.auth.uid ||
-        request.resource.data.get('employeeUid', '~none~') == request.auth.uid ||
-        request.resource.data.get('employeeCode', '~none~') == getEmployeeId() ||
+        isProjectManager() ||
         // Canonical ids are `{uid}_{YYYY-MM-DD}`; a doc so named is the caller's.
-        recordId.split('_')[0] == request.auth.uid
+        recordId.split('_')[0] == request.auth.uid ||
+        ownsAttendanceData(request.resource.data)
       );
 
       // P1 FIX: update previously authorised against request.resource.data — the
@@ -378,10 +444,9 @@ service cloud.firestore {
       allow update: if isRealUser() && (
         isHrAdmin() ||
         isSuperAdmin() ||
-        resource.data.get('uid', '~none~') == request.auth.uid ||
-        resource.data.get('employeeUid', '~none~') == request.auth.uid ||
-        resource.data.get('employeeCode', '~none~') == getEmployeeId() ||
-        recordId.split('_')[0] == request.auth.uid
+        isProjectManager() ||
+        recordId.split('_')[0] == request.auth.uid ||
+        ownsAttendanceData(resource.data)
       );
 
       allow delete: if isSuperAdmin();
