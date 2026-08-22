@@ -345,7 +345,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     dateOfBirth: '1997-02-19',
     department: 'HR Department',
     designation: 'HR Operations Manager',
-    joiningDate: '2024-02-01',
+    joiningDate: '2026-08-24',
     employmentType: 'Full-Time',
     reportingManager: 'Akshit Ujjain',
     workLocation: 'Main Office HQ',
@@ -360,9 +360,9 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     emergencyRelationship: 'Management',
     role: 'HR_ADMIN',
     qrToken: 'QR-KSS2407011',
-    createdAt: '2024-02-01T10:00:00Z',
+    createdAt: '2026-08-24T09:00:00Z',
     updatedAt: new Date().toISOString(),
-    approvedWfhDates: ['2026-09-14', '2026-09-15'],
+    approvedWfhDates: [],
     profilePhotoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300'
   },
   {
@@ -472,26 +472,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   }
 ];
 
-export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
-  {
-    id: 'LR-ABHINAYA-001',
-    employeeUid: 'uid-KSS2407011',
-    employeeId: 'KSS2407011',
-    employeeName: 'Abhinaya V',
-    department: 'HR Department',
-    type: 'WFH',
-    startDate: '2026-09-14',
-    endDate: '2026-09-15',
-    reason: 'health issue',
-    status: 'Approved',
-    pmStatus: 'Approved',
-    hrStatus: 'Approved',
-    ceoStatus: 'Approved',
-    ctoStatus: 'Approved',
-    reviewedBy: 'Gaurav Kumar Tripathi (CTO)',
-    requestDate: '2026-08-13T10:00:00.000Z'
-  }
-];
+export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [];
 
 export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
   {

@@ -28,6 +28,7 @@ import {
   buildWorkWeek,
   buildWeekWorkRow,
   hasApprovedLeaveOn,
+  EXCUSED_LEAVE_TYPES,
   formatDuration,
   formatShortDate,
   SHIFT_LABEL,
@@ -426,7 +427,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
           if (!s.checkInMs) {
             // Sanctioned leave is not truancy, so it gets its own colour rather
             // than being lumped in with an unexplained no-show.
-            if (hasApprovedLeaveOn(leaveRequests, emp, meta.dateStr)) {
+            if (hasApprovedLeaveOn(leaveRequests, emp, meta.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[])) {
               return (
                 <span title={meta.dayNameLong + ' ' + meta.shortDate + ' — approved leave'}
                   className={cellBase + ' bg-violet-500/15 text-violet-300 border-violet-500/25'}>Leave</span>

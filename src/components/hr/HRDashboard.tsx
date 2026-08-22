@@ -20,7 +20,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isShiftComplete, resolveAttendanceRecord } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isShiftComplete, resolveAttendanceRecord, isExecutiveOrLeadership } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface HRDashboardProps {
@@ -48,8 +48,11 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     targetEmployee?.employeeId === 'CEO001' ||
     targetEmployee?.employeeId === 'CTO001';
 
+  // Filter operational employees (exclude CEO, CTO, COO Rahul Pathak, Founders)
+  const operationalEmployees = employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
+
   // Canonical resolution of each employee's today record
-  const employeeTodayRecords = employees.map(emp => ({
+  const employeeTodayRecords = operationalEmployees.map(emp => ({
     emp,
     rec: resolveAttendanceRecord(attendance, emp, todayStr)
   }));
@@ -58,7 +61,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     .map(({ rec }) => rec)
     .filter((rec): rec is NonNullable<typeof rec> => !!rec && !!rec.checkInAt);
 
-  const totalEmployees = employees.length;
+  const totalEmployees = operationalEmployees.length;
   const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave').length;
   const onDutyCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec)).length;
   const lateCount = employeeTodayRecords.filter(({ rec }) => rec?.status === 'Late').length;

@@ -1029,7 +1029,7 @@ test('#15 buildWeekWorkRow totals six days and ignores days that have not happen
   // Approved leave removes the day from the denominator instead of counting as
   // an absence, so taking sanctioned leave cannot look like truancy.
   const leave = [{
-    status: 'Approved', type: 'Casual', employeeId: emp.employeeId,
+    status: 'Approved', type: 'Leave', employeeId: emp.employeeId,
     startDate: '2026-08-19', endDate: '2026-08-19'
   }];
   const onLeave = engine.buildWeekWorkRow(week, emp, attendance, { nowMs: now, leaveRequests: leave });
@@ -1042,4 +1042,142 @@ test('#15 buildWeekWorkRow totals six days and ignores days that have not happen
   const empty = engine.buildWeekWorkRow(monday, emp, [], { nowMs: ist('2026-08-17', 9, 0) });
   assert.equal(empty.utilizationPercent, 0);
   assert.equal(empty.totalWorkedMinutes, 0);
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Item #17 — "hr remove all the mock data and update on from this month"
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+test('#17 payroll basis is scoped to its own month, not to all history', () => {
+  const emp = { id: 'emp-KSS2407003', uid: 'uid-KSS2407003', employeeId: 'KSS2407003', fullName: 'Asha R' };
+  const day = dateStr => ({
+    id: `${emp.uid}_${dateStr}`,
+    employeeId: emp.id,
+    employeeCode: emp.employeeId,
+    date: dateStr,
+    status: 'Present',
+    breaks: [],
+    checkInAt: new Date(ist(dateStr, 10, 0)).toISOString(),
+    checkOutAt: new Date(ist(dateStr, 19, 0)).toISOString()
+  });
+
+  // Two July days and two August days. The old view filtered by employee but
+  // never by month, so August payroll counted all four.
+  const attendance = [day('2026-07-20'), day('2026-07-21'), day('2026-08-17'), day('2026-08-18')];
+  const now = ist('2026-08-20', 15, 0);
+
+  const aug = engine.buildPayrollAttendanceBasis(emp, attendance, '2026-08', { nowMs: now });
+  assert.equal(aug.presentDays, 2, 'July must not leak into August');
+  assert.equal(aug.payableDays, 2);
+  assert.equal(aug.monthKey, '2026-08');
+
+  const jul = engine.buildPayrollAttendanceBasis(emp, attendance, '2026-07', { nowMs: now });
+  assert.equal(jul.presentDays, 2);
+  assert.equal(jul.isPartialMonth, false, 'a month that has ended is final');
+  assert.equal(aug.isPartialMonth, true, 'the current month is still provisional');
+});
+
+test('#17 an employee with no records is never credited with days', () => {
+  const emp = { id: 'emp-KSS2407009', uid: 'uid-KSS2407009', employeeId: 'KSS2407009', fullName: 'Ravi K' };
+  const now = ist('2026-08-20', 15, 0);
+  const basis = engine.buildPayrollAttendanceBasis(emp, [], '2026-08', { nowMs: now });
+
+  // The old fallback paid `22 - (idx % 2)` days to someone who never checked in.
+  assert.equal(basis.hasNoData, true);
+  assert.equal(basis.presentDays, 0);
+  assert.equal(basis.payableDays, 0);
+
+  // Only ELAPSED rostered days can be absences; the rest of the month is unknown.
+  assert.equal(basis.absentDays, basis.workingDays);
+  assert.equal(basis.lossOfPayDays, basis.workingDays);
+  assert.ok(basis.workingDays > 0 && basis.workingDays < basis.rosteredDays,
+    'mid-month, elapsed rostered days are a strict subset of the month');
+});
+
+test('#17 approved leave and holidays are paid; only absence is loss of pay', () => {
+  const emp = { id: 'emp-KSS2407004', uid: 'uid-KSS2407004', employeeId: 'KSS2407004', fullName: 'Meera S' };
+  const now = ist('2026-08-20', 20, 0); // Thursday, after the shift closed
+
+  const day = (dateStr, status) => ({
+    id: `${emp.uid}_${dateStr}`,
+    employeeId: emp.id,
+    employeeCode: emp.employeeId,
+    date: dateStr,
+    status,
+    breaks: [],
+    checkInAt: new Date(ist(dateStr, status === 'Late' ? 10 : 10, 0)).toISOString(),
+    checkOutAt: new Date(ist(dateStr, status === 'Half Day' ? 14 : 19, 0)).toISOString()
+  });
+
+  // Aug 2026: 1st..20th elapsed. Mon–Sat rostered, Sundays (2,9,16) off.
+  const attendance = [
+    day('2026-08-17', 'Present'),
+    day('2026-08-18', 'Late'),
+    day('2026-08-19', 'Work From Home'),
+    day('2026-08-20', 'Half Day')
+  ];
+  const leaveRequests = [{
+    status: 'Approved', type: 'Leave', employeeId: emp.employeeId,
+    startDate: '2026-08-13', endDate: '2026-08-14'
+  }];
+  const holidayDates = ['2026-08-15']; // Independence Day, a rostered Saturday
+
+  const basis = engine.buildPayrollAttendanceBasis(emp, attendance, '2026-08', {
+    nowMs: now, leaveRequests, holidayDates
+  });
+
+  // `present` is inclusive of Late, WFH and Half Day everywhere in the engine.
+  assert.equal(basis.presentDays, 4);
+  assert.equal(basis.lateDays, 1);
+  assert.equal(basis.wfhDays, 1);
+  assert.equal(basis.halfDays, 1);
+  assert.equal(basis.leaveDays, 2);
+  // Elapsed non-working days only: Sundays Aug 2, 9, 16 plus the declared 15th.
+  // Counting the whole month here would report 6 against 15 working days.
+  assert.equal(basis.holidayDays, 4);
+
+  // 4 attended (one of them a half) + 2 paid leave = 5.5 payable days.
+  assert.equal(basis.payableDays, 5.5);
+  // The holiday is excluded from the roster entirely, so it is neither payable
+  // nor deductible -- it must not appear in loss of pay.
+  assert.equal(basis.lossOfPayDays, basis.absentDays);
+  assert.ok(basis.lossOfPayDays > 0, 'earlier August days really are unaccounted');
+
+  // Every elapsed rostered *working* day is either attended or an absence.
+  // `workingDays` already excludes leave and holidays (it is total − holiday −
+  // onLeave), so leave must NOT appear in this identity.
+  assert.equal(
+    basis.presentDays + basis.absentDays,
+    basis.workingDays,
+    'no elapsed working day is double-counted or dropped'
+  );
+
+  // A declared holiday shrinks the pro-rata denominator rather than the numerator.
+  const noHoliday = engine.buildPayrollAttendanceBasis(emp, attendance, '2026-08', { nowMs: now, leaveRequests });
+  assert.equal(basis.rosteredDays, noHoliday.rosteredDays - 1);
+});
+
+test('#17 listPayrollMonths starts at the current month and walks backwards', () => {
+  const now = ist('2026-08-20', 15, 0);
+  const months = engine.listPayrollMonths(3, now);
+  assert.deepEqual(months.map(m => m.key), ['2026-08', '2026-07', '2026-06']);
+  assert.equal(months[0].label, 'August 2026');
+
+  // Crossing a year boundary must not produce month 0 or 13.
+  const jan = engine.listPayrollMonths(3, ist('2026-01-05', 9, 0));
+  assert.deepEqual(jan.map(m => m.key), ['2026-01', '2025-12', '2025-11']);
+  assert.equal(jan[1].label, 'December 2025');
+
+  // The list always contains the month it was asked about, so "this month's
+  // payroll" is reachable on any date -- the hardcoded two-option selector was
+  // unable to open September 2026 at all.
+  assert.equal(engine.listPayrollMonths(12, ist('2026-09-01', 10, 0))[0].key, '2026-09');
+  assert.equal(engine.listPayrollMonths(0, now).length, 1, 'never returns an empty selector');
+});
+
+test('#17 the seeded historical-attendance generator is gone', () => {
+  // It fabricated 90 days of check-ins, breaks and Late/WFH statuses from
+  // Math.sin(seed). Nothing imported it, but any future import would have fed
+  // invented history straight into payroll.
+  assert.equal(typeof engine.generateHistoricalAttendance, 'undefined');
 });

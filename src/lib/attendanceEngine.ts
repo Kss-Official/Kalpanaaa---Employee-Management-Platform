@@ -883,86 +883,17 @@ export function evaluateAttendanceScan(
 }
 
 /**
- * Generate 90-day realistic historical attendance records for employees
+ * `generateHistoricalAttendance` was removed here (item #17).
+ *
+ * It fabricated 90 days of attendance per employee from `Math.sin(seed)` --
+ * check-in times, work durations, tea and meal breaks, even Late and WFH
+ * statuses -- and returned them as ordinary `AttendanceRecord`s. Nothing in
+ * `src/` called it, so it produced no live data, but it was the largest
+ * fabrication source in the repo and one import away from writing invented
+ * history into payroll, appraisals and compliance exports. Historical
+ * attendance must come from real check-ins or from an explicit HR
+ * correction (`applyAttendanceCorrection`), never from a seeded generator.
  */
-export function generateHistoricalAttendance(employees: Employee[], daysBack: number = 90): AttendanceRecord[] {
-  const records: AttendanceRecord[] = [];
-  const today = new Date();
-
-  for (let i = 1; i <= daysBack; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-
-    // Skip weekends (Sunday=0, Saturday=6)
-    if (d.getDay() === 0 || d.getDay() === 6) continue;
-
-    const dateStr = d.toISOString().split('T')[0];
-
-    employees.forEach((emp, empIdx) => {
-      // Deterministic pseudo-random seed per date + employee
-      const dateNum = parseInt(dateStr.replace(/-/g, ''), 10);
-      const seed = dateNum * 1 + empIdx * 101 + emp.id.length * 13;
-      const pseudoRand = (n: number) => Math.abs(Math.sin(seed + n) * 10000) % 1;
-
-      // Status probabilities
-      const randVal = pseudoRand(1);
-      const isLate = randVal > 0.85 && randVal <= 0.95;
-      const isWfh = randVal > 0.95;
-
-      // Realistic Check-In times IST (+05:30)
-      // Regular: 09:35 AM to 09:58 AM IST
-      // Late: 10:15 AM to 10:45 AM IST
-      const minOffset = isLate 
-        ? Math.floor(pseudoRand(2) * 30) + 15 
-        : Math.floor(pseudoRand(2) * 23) - 25;
-
-      const totalMinIST = 10 * 60 + minOffset;
-      const hrIST = Math.floor(totalMinIST / 60);
-      const mnIST = Math.abs(totalMinIST % 60);
-      const checkInISO = `${dateStr}T${String(hrIST).padStart(2, '0')}:${String(mnIST).padStart(2, '0')}:00+05:30`;
-
-      // Work duration: 8h 15m to 9h 30m
-      const durationMins = isLate 
-        ? 480 + Math.floor(pseudoRand(3) * 45)
-        : 510 + Math.floor(pseudoRand(3) * 60);
-
-      const checkOutTotalMinIST = totalMinIST + durationMins + 45;
-      const outHrIST = Math.floor(checkOutTotalMinIST / 60);
-      const outMnIST = Math.abs(checkOutTotalMinIST % 60);
-      const checkOutISO = `${dateStr}T${String(outHrIST).padStart(2, '0')}:${String(outMnIST).padStart(2, '0')}:00+05:30`;
-
-      const teaStart = `${dateStr}T11:${String(15 + Math.floor(pseudoRand(4) * 20)).padStart(2, '0')}:00+05:30`;
-      const teaEnd = `${dateStr}T11:${String(30 + Math.floor(pseudoRand(4) * 15)).padStart(2, '0')}:00+05:30`;
-      const mealStart = `${dateStr}T13:${String(15 + Math.floor(pseudoRand(5) * 30)).padStart(2, '0')}:00+05:30`;
-      const mealEnd = `${dateStr}T13:${String(45 + Math.floor(pseudoRand(5) * 15)).padStart(2, '0')}:00+05:30`;
-
-      records.push({
-        id: `att-hist-${dateStr}-${emp.id}`,
-        employeeId: emp.id,
-        employeeCode: emp.employeeId,
-        employeeName: emp.fullName,
-        department: emp.department || 'Engineering',
-        date: dateStr,
-        checkInAt: checkInISO,
-        checkOutAt: checkOutISO,
-        status: isWfh ? 'Work From Home' : isLate ? 'Late' : 'Present',
-        attendanceMethod: 'Self Portal',
-        locationVerified: !isWfh,
-        workingMinutes: durationMins,
-        totalBreakMinutes: 45,
-        isWfh,
-        breaks: [
-          { type: 'Tea Break', startAt: teaStart, endAt: teaEnd, durationMinutes: 15 },
-          { type: 'Meal Break', startAt: mealStart, endAt: mealEnd, durationMinutes: 30 }
-        ],
-        createdAt: checkInISO,
-        updatedAt: checkOutISO
-      });
-    });
-  }
-
-  return records;
-}
 
 /**
  * ── Daily roster derivation ──────────────────────────────────────────────────
@@ -1020,6 +951,20 @@ export function isNonWorkingDay(
 }
 
 /** True when an approved leave request of the given employee covers `dateStr`. */
+/**
+ * Leave types that excuse an employee from attending.
+ *
+ * `LeaveRequest.type` is only ever `'Leave' | 'WFH'` (src/types/index.ts); the
+ * remaining entries are tolerated for legacy or externally-imported rows. WFH is
+ * deliberately ABSENT: working from home is a working day, so an approved WFH
+ * request must not excuse a missing check-in or reduce expected hours. Callers
+ * that need "did not have to attend" must pass this list -- an unfiltered
+ * `hasApprovedLeaveOn` also matches WFH and silently forgives real absences.
+ */
+export const EXCUSED_LEAVE_TYPES = [
+  'Leave', 'Sick Leave', 'Casual Leave', 'Earned Leave', 'Comp Off', 'Maternity', 'Paternity'
+] as const;
+
 export function hasApprovedLeaveOn(
   leaveRequests: any[] | undefined,
   emp: any,
@@ -1079,6 +1024,12 @@ export function buildDailyRoster(
     // Terminated / suspended staff are no longer expected to attend.
     if (emp.status === 'Terminated' || emp.status === 'Suspended') continue;
 
+    // Pre-joining staff: if date is before their official joiningDate, they have not yet started (not absent)
+    const joinDate = emp.joiningDate || emp.joining_date;
+    if (joinDate && dateStr < joinDate) {
+      continue;
+    }
+
     const existing = resolveAttendanceRecord(records, emp, dateStr);
     if (existing) {
       roster.push(existing);
@@ -1087,7 +1038,7 @@ export function buildDailyRoster(
 
     let status: AttendanceStatus;
     if (nonWorking) status = 'Holiday';
-    else if (hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['Leave', 'Sick Leave', 'Casual Leave', 'Earned Leave', 'Comp Off', 'Maternity', 'Paternity'])) status = 'On Leave';
+    else if (hasApprovedLeaveOn(leaveRequests, emp, dateStr, EXCUSED_LEAVE_TYPES as unknown as string[])) status = 'On Leave';
     else if (emp.status === 'On Leave') status = 'On Leave';
     else if (isFuture || !shiftStartElapsed) continue; // not yet knowable
     else status = 'Absent';
@@ -1898,7 +1849,12 @@ export function buildWeekWorkRow(
     if (s.checkInMs) daysPresent++;
 
     if (meta.isFuture || meta.isNonWorking) return;
-    const onLeave = hasApprovedLeaveOn(opts.leaveRequests, employee, meta.dateStr);
+    // Filtered: an unfiltered call also matches an approved WFH request, which
+    // would drop a remote working day out of `expectedMinutes` and hide the
+    // absence of someone who was approved to work from home but never did.
+    const onLeave = hasApprovedLeaveOn(
+      opts.leaveRequests, employee, meta.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]
+    );
     if (onLeave) return;
     expectedMinutes += SHIFT_TOTAL_MINUTES;
     if (!s.checkInMs) daysAbsent++;
@@ -1920,3 +1876,141 @@ export function buildWeekWorkRow(
     isLive
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYROLL BASIS (item #17 — no fabricated inputs)
+//
+// Payroll must never invent an attendance figure. The HR view previously fell
+// back to `22 - (idx % 2)` days worked and a base salary of
+// `45000 + (idx % 3) * 5000` whenever an employee had no records -- numbers
+// derived from the employee's POSITION IN AN ARRAY, so adding one person could
+// silently change someone else's pay. Everything below is derived from the same
+// roster the attendance screens use, or reported as unset.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PayrollAttendanceBasis {
+  monthKey: string;
+  /** Elapsed rostered days, holidays and weekly offs excluded. */
+  workingDays: number;
+  /** Rostered days in the WHOLE month -- the pro-rata denominator. */
+  rosteredDays: number;
+  presentDays: number;      // inclusive of Late and WFH, as everywhere else
+  lateDays: number;
+  wfhDays: number;
+  halfDays: number;
+  leaveDays: number;        // approved leave
+  /** Elapsed non-working days (weekly offs + declared holidays), not the month total. */
+  holidayDays: number;
+  absentDays: number;       // elapsed working days with no record
+  /** Attended days for pay, counting a half day as 0.5 and paid leave as 1. */
+  payableDays: number;
+  /** Unpaid days: absences only. Leave and holidays are not deducted here. */
+  lossOfPayDays: number;
+  totalWorkedMinutes: number;
+  /** True while the month is still running -- pay is provisional. */
+  isPartialMonth: boolean;
+  /** True when the employee has no attendance document in this month at all. */
+  hasNoData: boolean;
+}
+
+export function buildPayrollAttendanceBasis(
+  employee: any,
+  attendance: AttendanceRecord[],
+  monthKey: string,
+  opts: { leaveRequests?: any[]; holidayDates?: string[]; nowMs?: number } = {}
+): PayrollAttendanceBasis {
+  const nowMs = opts.nowMs ?? Date.now();
+  const roster = buildEmployeeMonthRoster(employee, attendance, monthKey, {
+    leaveRequests: opts.leaveRequests,
+    holidayDates: opts.holidayDates,
+    nowMs
+  });
+  const s = summarizeMonthRoster(roster, monthKey, { nowMs });
+
+  const allDates = listDatesInMonth(monthKey);
+  const holidays = opts.holidayDates || [];
+  const rosteredDays = allDates.filter(d => !isNonWorkingDay(d, holidays)).length;
+
+  // `summarizeMonthRoster().holiday` spans the WHOLE month, because the roster
+  // emits a Holiday row for future weekly offs too. Every other counter here is
+  // elapsed-only, so reporting that number alongside them would mix two
+  // windows -- mid-August it claimed 6 holidays against 15 working days. Count
+  // the elapsed ones instead so the whole basis describes one period.
+  const todayStr = getWorkDate(new Date(nowMs));
+  const holidayDays = allDates.filter(d => d <= todayStr && isNonWorkingDay(d, holidays)).length;
+
+  // `present` already counts a half day as one attended day, so the half is
+  // subtracted back out rather than added on top.
+  const payableDays = Math.max(0, s.present - s.halfDay * 0.5 + s.onLeave);
+  // No check-in anywhere in the month: HR must be told the basis is empty rather
+  // than shown a plausible-looking day count derived from nothing.
+  const hasNoData = roster.every(r => !(r as any).checkInAt);
+
+  return {
+    monthKey,
+    workingDays: s.workingDays,
+    rosteredDays,
+    presentDays: s.present,
+    lateDays: s.late,
+    wfhDays: s.wfh,
+    halfDays: s.halfDay,
+    leaveDays: s.onLeave,
+    holidayDays,
+    absentDays: s.absent,
+    payableDays: Math.round(payableDays * 2) / 2,
+    lossOfPayDays: s.absent,
+    totalWorkedMinutes: s.totalWorkedMinutes,
+    isPartialMonth: monthKey >= getMonthKey(new Date(nowMs)),
+    hasNoData
+  };
+}
+
+/**
+ * Selectable payroll months, newest first, starting from the month containing
+ * `nowMs`. The HR selector previously hardcoded two `<option>` literals for
+ * August and July 2026, so from September onward it could not open the month it
+ * was actually in.
+ */
+export function listPayrollMonths(
+  count: number = 12,
+  nowMs: number = Date.now()
+): Array<{ key: string; label: string }> {
+  const current = getMonthKey(new Date(nowMs));
+  const out: Array<{ key: string; label: string }> = [];
+  for (let i = 0; i < Math.max(1, count); i++) {
+    const key = shiftMonthKey(current, -i);
+    out.push({ key, label: formatMonthKey(key) });
+  }
+  return out;
+}
+
+/**
+ * Checks if an employee is part of the Executive Leadership & Founders
+ * (CEO, CTO, COO / Rahul Pathak, Founders, Managing Directors, Super Admins)
+ * so they are excluded from operational graphs, analytics, and workforce calculations.
+ */
+export function isExecutiveOrLeadership(emp: any): boolean {
+  if (!emp) return false;
+  const name = (emp.fullName || emp.employeeName || '').toLowerCase();
+  const desig = (emp.designation || '').toLowerCase();
+  const role = (emp.role || '').toUpperCase();
+  const email = (emp.email || '').toLowerCase();
+
+  return (
+    role === 'SUPER_ADMIN' ||
+    desig.includes('ceo') ||
+    desig.includes('chief executive') ||
+    desig.includes('cto') ||
+    desig.includes('chief technology') ||
+    desig.includes('coo') ||
+    desig.includes('chief operating') ||
+    desig.includes('founder') ||
+    desig.includes('managing director') ||
+    name.includes('rahul pathak') ||
+    name.includes('akshit') ||
+    email.includes('rahul') ||
+    email.includes('founder') ||
+    email.includes('akshit')
+  );
+}
+
