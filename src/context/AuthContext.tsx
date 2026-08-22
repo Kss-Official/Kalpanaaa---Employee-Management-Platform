@@ -38,13 +38,14 @@ import {
   safeGetTimestampMillis,
   resolveAttendanceRecord,
   calculateTotalBreakMinutes,
+  MAX_BREAK_MINUTES,
   COMPANY_TIMEZONE
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
 import { classifyError, shouldFallbackToLocalLogin } from '../lib/errors';
 import { fetchAbsoluteTime, toISTTimeString } from '../lib/absoluteTime';
 import { sendKssNotification, sendAdminBroadcast, registerFcmToken, unregisterFcmToken, KssNotification } from '../lib/notifications';
-import { clearAllFaceEngineState } from '../lib/faceRecognitionEngine';
+import { clearAllFaceEngineState } from '../lib/faceDescriptorStore';
 import { LeaveService } from '../lib/leaveService';
 
 const generateDeviceFingerprint = () => {
@@ -223,19 +224,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // 24-Hour Token Expiry / Session Timeout Validation (Fixes C20 Contract)
   const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  const clearPersistedSessionKeys = () => {
+    localStorage.removeItem('kss_v1_session');
+    localStorage.removeItem('kss_v1_session_email');
+    localStorage.removeItem('kss_v1_session_id');
+    localStorage.removeItem('kss_v1_session_timestamp');
+  };
   const isSessionValidOnBoot = (): boolean => {
     const savedSessionId = localStorage.getItem('kss_v1_session');
     if (!savedSessionId) return false;
     const timestampStr = localStorage.getItem('kss_v1_session_timestamp');
-    if (timestampStr) {
-      const age = Date.now() - parseInt(timestampStr, 10);
-      if (age > SESSION_MAX_AGE_MS) {
-        localStorage.removeItem('kss_v1_session');
-        localStorage.removeItem('kss_v1_session_email');
-        localStorage.removeItem('kss_v1_session_id');
-        localStorage.removeItem('kss_v1_session_timestamp');
-        return false;
-      }
+    // P1 SECURITY FIX: fail CLOSED when the age stamp is missing or unparseable.
+    // Previously the whole expiry check sat inside `if (timestampStr)`, so deleting that
+    // single localStorage key made a session immortal and bypassed the 24-hour limit
+    // entirely. Every login path writes this key, so legitimate sessions are unaffected.
+    if (!timestampStr) {
+      clearPersistedSessionKeys();
+      return false;
+    }
+    const stamp = parseInt(timestampStr, 10);
+    if (!Number.isFinite(stamp) || Date.now() - stamp > SESSION_MAX_AGE_MS) {
+      clearPersistedSessionKeys();
+      return false;
     }
     return true;
   };
@@ -270,8 +280,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   // Synchronous role restore
+  // P0 SECURITY FIX: every fallback below previously returned 'SUPER_ADMIN'. A missing,
+  // expired, or unparseable session — and any employee record without an explicit `role`
+  // — silently booted the app with FULL administrative privileges. The default is now the
+  // least-privileged role; the real role is applied once Firebase Auth resolves the
+  // identity in onAuthStateChanged.
   const [role, setRole] = useState<UserRole>(() => {
-    if (!isSessionValidOnBoot()) return 'SUPER_ADMIN';
+    if (!isSessionValidOnBoot()) return 'EMPLOYEE';
     const savedSessionId = localStorage.getItem('kss_v1_session');
     const savedEmail = localStorage.getItem('kss_v1_session_email');
     const savedEmps = localStorage.getItem('kss_v1_employees');
@@ -285,11 +300,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
         if (found) {
           if (found.employeeId === 'CEO001' || found.employeeId === 'CTO001') return 'SUPER_ADMIN';
-          return found.role || 'SUPER_ADMIN';
+          return found.role || 'EMPLOYEE';
         }
       } catch (e) {}
     }
-    return 'SUPER_ADMIN';
+    return 'EMPLOYEE';
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -318,6 +333,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // effect from being re-registered on every Firestore snapshot, which would
   // create a snapshot → write → snapshot feedback loop.
   const attendanceRef = useRef<AttendanceRecord[]>([]);
+
+  // P1 FIX — WRONG AUDIT ATTRIBUTION: the auto-checkout effect is intentionally
+  // stable (it must not re-register on every snapshot), so it captured
+  // `addAuditLog` and `activeEmployee` from the FIRST render. Every automatic
+  // checkout was therefore attributed to whoever/whatever the actor was at mount —
+  // in practice the 'sys-admin' / 'System Admin' placeholder and the first-render
+  // role — instead of the real signed-in user. These refs give the stable effect
+  // access to live values without re-registering it.
+  const activeEmployeeRef = useRef<Employee | null>(null);
+  const addAuditLogRef = useRef<(action: string, target: string, details: string) => void>(() => {});
+
+  // Mirrors the live privilege level for the long-lived snapshot handlers, which must
+  // know whether this client is allowed to perform data-migration writes.
+  const roleRef = useRef<UserRole>('EMPLOYEE');
 
   // SINGLE SOURCE OF TRUTH: Firestore only. Initial state starts empty; hydrated via real-time onSnapshot
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -619,6 +648,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     attendanceRef.current = attendance;
   }, [attendance]);
 
+  // Keep the stable auto-checkout effect supplied with live values (see the ref
+  // declarations above for why this indirection is required).
+  useEffect(() => {
+    activeEmployeeRef.current = activeEmployee;
+  }, [activeEmployee]);
+
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+
   // Debounced localStorage persistence — batches all non-attendance state saves
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -776,7 +815,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [employees, activeEmployee?.id, activeEmployee?.role, role]);
 
 
-  // SYSTEM RULE: Auto-Checkout at 7:30 PM (19:30) for all employees.
+  // SYSTEM RULE: Auto-Checkout at the 7:15 PM IST shift cutoff.
   //
   // BUG 3 FIX: This effect previously had `[attendance]` as its dep, causing
   // it to re-register on every Firestore onSnapshot. The cycle was:
@@ -784,10 +823,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   //   → checkAutoCheckout() fires → setDoc write → new snapshot → repeat.
   // Fix: use attendanceRef (always current, zero re-registration) + a
   // processedIds Set so each record is written at most once per session.
+  //
+  // ── THIS REVISION (P0/P1 fixes) ──
+  //  1. TIMEZONE / PAYROLL CORRUPTION: the cutoff was built as
+  //     `new Date(\`${record.date}T19:15:00\`)` with NO offset, so it was parsed in
+  //     the DEVICE's timezone. Any employee or admin on a non-IST device (travel,
+  //     a mis-set phone clock, a VPS-hosted browser) wrote a `workingMinutes` value
+  //     off by the full UTC offset — up to ±12h of fabricated or erased paid time,
+  //     straight into the payroll input. The cutoff is now pinned to +05:30.
+  //  2. INFINITE RETRY LOOP: the write's catch did `processedIds.delete(record.id)`
+  //     unconditionally, so a PERMANENT failure (permission-denied — now the normal
+  //     outcome for another employee's record) retried every 30 seconds forever.
+  //     Retries are now bounded and permanent errors are never retried.
+  //  3. AUDIT-LOG WRITE SPAM: addAuditLog() fired on every attempt, before the write
+  //     resolved. Combined with (2) this appended an audit document to Firestore
+  //     every 30 seconds per stuck record, indefinitely. It now fires once, only
+  //     after the write actually succeeds.
+  //  4. WRITE AMPLIFICATION: the sweep ran on EVERY connected client against EVERY
+  //     employee's record, so N clients raced to write the same M documents. The
+  //     client now only closes the signed-in employee's OWN records; the
+  //     authoritative company-wide sweep belongs to the scheduled Cloud Function
+  //     `scheduledAutoCheckout` in functions/index.js, which runs exactly once.
+  //  5. WRONG CUTOFF IN THE AUDIT TRAIL: the note and audit text claimed "07:30 PM"
+  //     while the code used 19:15. Both now state 07:15 PM IST.
   useEffect(() => {
+    if (!authUid) return;
+
     // Tracks records already written this browser session to prevent duplicate
-    // Firestore writes when the 30-second interval fires repeatedly.
+    // Firestore writes when the interval fires repeatedly.
     const processedIds = new Set<string>();
+    const attemptCounts = new Map<string, number>();
+    const MAX_ATTEMPTS = 3;
+
+    const AUTO_CHECKOUT_CUTOFF_HOUR = 19;
+    const AUTO_CHECKOUT_CUTOFF_MINUTE = 15;
+
+    const isOwnRecord = (record: AttendanceRecord): boolean => {
+      const emp = activeEmployeeRef.current;
+      return (
+        (record as any).employeeUid === authUid ||
+        (record as any).uid === authUid ||
+        (!!emp && (record.employeeId === emp.id || (record as any).employeeCode === emp.employeeId))
+      );
+    };
 
     const checkAutoCheckout = () => {
       const now = new Date();
@@ -801,18 +879,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }).formatToParts(now);
       const currentHours = Number(istParts.find(p => p.type === 'hour')?.value || 0);
       const currentMinutes = Number(istParts.find(p => p.type === 'minute')?.value || 0);
-      const isPastSevenFifteenPm = currentHours > 19 || (currentHours === 19 && currentMinutes >= 15);
+      const isPastCutoff =
+        currentHours > AUTO_CHECKOUT_CUTOFF_HOUR ||
+        (currentHours === AUTO_CHECKOUT_CUTOFF_HOUR && currentMinutes >= AUTO_CHECKOUT_CUTOFF_MINUTE);
 
       attendanceRef.current.forEach(record => {
         if (processedIds.has(record.id)) return; // already handled this session
+        if (!isOwnRecord(record)) return;        // never race other clients (fix 4)
+
         const isPastDay = record.date < todayStr;
-        const isTodayPastCutoff = record.date === todayStr && isPastSevenFifteenPm;
+        const isTodayPastCutoff = record.date === todayStr && isPastCutoff;
 
         if (!record.checkOutAt && (isPastDay || isTodayPastCutoff)) {
           processedIds.add(record.id); // mark before async write to prevent double-write
 
-          // Construct 7:15 PM ISO cutoff timestamp for the record date
-          const autoCheckOutDate = new Date(`${record.date}T19:15:00`);
+          // Cutoff pinned to IST (+05:30) so the instant is identical on every
+          // device regardless of local timezone (fix 1).
+          const autoCheckOutDate = new Date(`${record.date}T19:15:00+05:30`);
+          if (Number.isNaN(autoCheckOutDate.getTime())) return;
           const forceCheckOutTime = autoCheckOutDate.toISOString();
 
           // Atomically close any open break on auto-checkout
@@ -851,7 +935,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           totalMins = Math.max(0, totalMins);
 
-          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:30 PM (Default Shift End)';
+          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:15 PM IST (Default Shift End)';
 
           // Auto close the record in Firestore
           setDoc(doc(db, 'attendance', record.id), {
@@ -861,13 +945,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             totalBreakMinutes: totalBreakMins,
             notes: updatedNotes,
             updatedAt: serverTimestamp()
-          }, { merge: true }).catch((err) => {
-            // Requirement 10: Unblock on failed write so retry can succeed on next 30s interval
-            processedIds.delete(record.id);
-            console.warn('[AuthContext] Auto-checkout write failed for record:', record.id, err);
-          });
-
-          addAuditLog('AUTO_CHECKOUT', `Att ID: ${record.id}`, `Auto-checked out at 7:30 PM for ${record.date}`);
+          }, { merge: true })
+            .then(() => {
+              // Audit only on confirmed success (fix 3).
+              addAuditLogRef.current(
+                'AUTO_CHECKOUT',
+                `Att ID: ${record.id}`,
+                `Auto-checked out at 07:15 PM IST for ${record.date}`
+              );
+            })
+            .catch((err) => {
+              // Bounded retry, and never retry a permanent authorization failure (fix 2).
+              const code = String(err?.code || '');
+              const permanent = code === 'permission-denied' || code === 'unauthenticated' || code === 'invalid-argument';
+              const attempts = (attemptCounts.get(record.id) || 0) + 1;
+              attemptCounts.set(record.id, attempts);
+              if (!permanent && attempts < MAX_ATTEMPTS) {
+                processedIds.delete(record.id);
+              }
+              console.warn(
+                `[AuthContext] Auto-checkout write failed for ${record.id} (attempt ${attempts}/${MAX_ATTEMPTS}, ${permanent ? 'permanent' : 'retryable'}):`,
+                err
+              );
+            });
         }
       });
     };
@@ -876,7 +976,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkAutoCheckout(); // Check immediately on mount
 
     return () => clearInterval(interval);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally stable; reads live data via attendanceRef
+  }, [authUid]);
 
 
   // Sync to & from Firestore
@@ -906,6 +1006,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let unsubLeaveReqs = () => { };
     let unsubNotifs = () => { };
 
+    // One-shot latches for the two bootstrap writes in the employees listener.
+    // Without them, any write that keeps failing (rules rejection, offline) is
+    // retried on every single snapshot for the lifetime of the session.
+    let didSeedInitialEmployees = false;
+    let didSeedProjectManager = false;
+    let didSeedSettings = false;
+    let didSeedWorkZone = false;
+    let didMigrateWorkZone = false;
+
     const initFirestore = () => {
       try {
         testConnection().then(connected => setIsFirestoreConnected(connected)).catch(() => {
@@ -914,6 +1023,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Subscribe to real-time updates IMMEDIATELY for employees
         unsubEmps = onSnapshot(collection(db, 'employees'), (snapshot) => {
+          // ── P0 FIX: WRITE AMPLIFICATION FROM A READ LISTENER ──
+          // This handler performed deleteDoc() and up to three setDoc() "live
+          // autocorrect" migrations per employee document — from EVERY connected
+          // client, on EVERY snapshot. With N browsers open, one snapshot produced
+          // N identical writes per affected document; each write then produced a new
+          // snapshot on all N clients, and any write that kept failing was retried on
+          // every snapshot forever. It also billed N× the writes and made the
+          // employees collection last-write-wins between racing clients.
+          //
+          // The corrections themselves are still applied IN MEMORY for everyone, so
+          // every portal renders clean data. Only the persistence is now restricted
+          // to an administrative session — which is also the only role the hardened
+          // firestore.rules permit to write another employee's document.
+          const canMigrate = roleRef.current === 'SUPER_ADMIN' || roleRef.current === 'HR_ADMIN';
+
           if (!snapshot.empty) {
             const fetched: Employee[] = [];
             snapshot.forEach(docSnap => {
@@ -921,10 +1045,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
               // PURGE ONLY OLD DUMMY EMP-003 RECORD (with old typo domain)
               if (
-                (data.id === 'emp-003' || data.employeeId === '003') && 
+                (data.id === 'emp-003' || data.employeeId === '003') &&
                 data.email?.toLowerCase() === 'd.koushik@kalpanaaa.in'
               ) {
-                deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                if (canMigrate) deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
                 return;
               }
 
@@ -937,7 +1061,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     needsUpdate = true;
                   }
                 }
-                if (needsUpdate) {
+                if (needsUpdate && canMigrate) {
                   setDoc(doc(db, 'employees', data.id), data, { merge: true }).catch(() => { });
                 }
               }
@@ -961,7 +1085,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 if (cleanId !== data.employeeId) {
                   data.employeeId = cleanId;
-                  setDoc(doc(db, 'employees', data.id), { employeeId: cleanId }, { merge: true }).catch(() => { });
+                  if (canMigrate) {
+                    setDoc(doc(db, 'employees', data.id), { employeeId: cleanId }, { merge: true }).catch(() => { });
+                  }
                 }
               }
 
@@ -969,7 +1095,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const validStatuses: EmployeeStatus[] = ['Active', 'On Leave', 'Terminated', 'Suspended'];
               if (!data.status || !validStatuses.includes(data.status as EmployeeStatus) || String(data.status).toLowerCase() === 'check' || String(data.status).toLowerCase() === 'checked in') {
                 data.status = 'Active';
-                setDoc(doc(db, 'employees', data.id), { status: 'Active' }, { merge: true }).catch(() => { });
+                if (canMigrate) {
+                  setDoc(doc(db, 'employees', data.id), { status: 'Active' }, { merge: true }).catch(() => { });
+                }
               }
 
               fetched.push(data);
@@ -1043,7 +1171,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               };
 
               deduplicated.push(officialKoushik);
-              setDoc(doc(db, 'employees', officialKoushik.id), officialKoushik, { merge: true }).catch(() => { });
+
+              // P1 FIX: this setDoc previously ran on EVERY snapshot from EVERY client
+              // whenever the record was absent — an unbounded retry loop for any client
+              // whose rules forbid writing another employee's document (i.e. everyone
+              // except HR/admin). Latched to once per session and restricted to a
+              // session that is actually permitted to write it.
+              if (canMigrate && !didSeedProjectManager && !snapshot.metadata.fromCache) {
+                didSeedProjectManager = true;
+                setDoc(doc(db, 'employees', officialKoushik.id), officialKoushik, { merge: true }).catch(() => { });
+              }
             }
 
             if (deduplicated.length > 0) {
@@ -1061,10 +1198,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               });
             }
           } else {
-            // Seed initial employees if empty
-            INITIAL_EMPLOYEES.forEach(async (emp) => {
-              await setDoc(doc(db, 'employees', emp.id), emp).catch(() => { });
-            });
+            // ── P0 FIX: DEMO DATA COULD BE SEEDED INTO PRODUCTION ──
+            // This branch previously ran on ANY empty snapshot and unconditionally
+            // wrote all INITIAL_EMPLOYEES (demo staff, with roles) to Firestore.
+            // Firestore is configured with persistentLocalCache, so the FIRST
+            // snapshot after a cold start is served from an empty local cache
+            // BEFORE the server responds — `snapshot.empty` was therefore true on a
+            // perfectly populated production database, and this handler happily
+            // injected fake employees into the live company directory. A
+            // permission-denied listener or a cleared cache produced the same result.
+            //
+            // Seeding now requires (a) a SERVER-confirmed empty collection, and
+            // (b) a one-shot latch so it can never loop. Genuine first-run
+            // bootstrapping of a fresh project still works.
+            if (snapshot.metadata.fromCache) {
+              // Cache-only empty result: the server has not spoken yet. Do nothing.
+              return;
+            }
+            if (didSeedInitialEmployees) return;
+            didSeedInitialEmployees = true;
+
+            console.warn('[Auth] employees collection is empty on the server — seeding initial directory.');
+            Promise.all(
+              INITIAL_EMPLOYEES.map(emp =>
+                setDoc(doc(db, 'employees', emp.id), emp).catch(err => {
+                  console.warn('[Auth] Initial employee seed failed for', emp.id, err);
+                })
+              )
+            ).catch(() => { });
           }
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'employees');
@@ -1291,7 +1452,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'leaveRequests');
         });
 
-        const notifsQuery = query(collection(db, 'notifications'), limit(50));
+        // P1 FIX: `limit(50)` WITHOUT `orderBy` DOES NOT MEAN "50 NEWEST".
+        // With no order clause Firestore orders by document name (__name__), and
+        // notifications are written with addDoc() → random 20-char ids. The listener
+        // therefore streamed an arbitrary, lexicographically-lowest 50 documents and
+        // capped there: once the collection exceeded 50 docs, NEW notifications were
+        // usually never delivered to the bell at all, and the client-side sort could
+        // not recover data the server never sent. Ordering server-side by createdAt
+        // makes limit(50) mean what the code always assumed it meant.
+        // (createdAt is written as an ISO-8601 string by both src/lib/notifications.ts
+        // and the Cloud Function schedulers, and ISO-8601 sorts lexicographically in
+        // chronological order — so no index or data migration is required.)
+        const notifsQuery = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
         unsubNotifs = onSnapshot(notifsQuery, (snapshot) => {
           const fetched: KssNotification[] = [];
           if (!snapshot.empty) {
@@ -1311,6 +1483,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Subscribe to company settings
         unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
+          // Read metadata before the exists() narrowing: exists() is declared as a
+          // `this is QueryDocumentSnapshot` type predicate, so the else-branch narrows
+          // the snapshot to `never` and no property access compiles there.
+          const fromCache = docSnap.metadata.fromCache;
           if (docSnap.exists()) {
             const firestoreSettings = docSnap.data() as CompanySettings;
             setSettings(prev => ({
@@ -1324,7 +1500,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return merged;
               })()
             }));
-          } else {
+          } else if (
+            // P1 FIX: this bootstrap write fired on a CACHE-ONLY miss as well as a real
+            // absence. On a cold start the local cache has no settings/global document
+            // yet, so `!exists()` was true before the server replied and every client
+            // raced to write INITIAL_COMPANY_SETTINGS over the live company policy —
+            // resetting the geo-fence, shift window and company-wide WFH dates. It also
+            // retried forever on any client whose rules forbid writing settings.
+            !fromCache &&
+            !didSeedSettings &&
+            (roleRef.current === 'SUPER_ADMIN' || roleRef.current === 'HR_ADMIN')
+          ) {
+            didSeedSettings = true;
             setDoc(doc(db, 'settings', 'global'), INITIAL_COMPANY_SETTINGS).catch(() => { });
           }
         }, (error) => {
@@ -1333,15 +1520,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Subscribe to authoritative company work zone doc
         unsubWorkZone = onSnapshot(doc(db, 'workZones', 'company'), (docSnap) => {
+          // See the note above: exists() narrows the else-branch to `never`.
+          const zoneFromCache = docSnap.metadata.fromCache;
           if (docSnap.exists()) {
             const fetchedZone = docSnap.data() as WorkZone;
-            
-            // Auto-correct stale GPS coordinates from previous Firestore states
+
+            // ── P1 FIX: THE GEO-FENCE WAS UNCONFIGURABLE ──
+            // The previous condition was
+            //   latitude === 13.014316 || longitude === 77.64052 || radiusMeters === 500
+            // and it overwrote ALL THREE fields whenever ANY ONE matched. Two bugs:
+            //
+            //  1. `radiusMeters === 500` is a legitimate admin choice. Saving a 500 m
+            //     radius in Work Location settings was silently reverted to 300 m by
+            //     every client on the very next snapshot — the setting could never be
+            //     applied, and the admin had no error to explain why.
+            //  2. Because the clauses were OR'd, choosing a 500 m radius ALSO relocated
+            //     the office coordinates, moving the geo-fence the admin never touched.
+            //
+            // The genuine intent was a one-time migration off one stale coordinate pair.
+            // That is preserved with AND semantics on the coordinates only, latched to a
+            // single attempt, and restricted to a session permitted to write workZones —
+            // instead of an unbounded write from every client on every snapshot.
             let needsUpdate = false;
-            if (fetchedZone.latitude === 13.014316 || fetchedZone.longitude === 77.64052 || fetchedZone.radiusMeters === 500) {
+            if (fetchedZone.latitude === 13.014316 && fetchedZone.longitude === 77.64052) {
               fetchedZone.latitude = 13.014333;
               fetchedZone.longitude = 77.646000;
-              fetchedZone.radiusMeters = 300; // Adjusted to 300m as requested by user
               needsUpdate = true;
             }
 
@@ -1354,8 +1557,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               allowedRadiusMeters: fetchedZone.radiusMeters || prev.allowedRadiusMeters
             }));
 
-            if (needsUpdate) {
-              setDoc(doc(db, 'workZones', 'company'), fetchedZone, { merge: true }).catch(() => {});
+            if (
+              needsUpdate &&
+              !didMigrateWorkZone &&
+              !zoneFromCache &&
+              (roleRef.current === 'SUPER_ADMIN' || roleRef.current === 'HR_ADMIN')
+            ) {
+              didMigrateWorkZone = true;
+              setDoc(doc(db, 'workZones', 'company'), {
+                latitude: fetchedZone.latitude,
+                longitude: fetchedZone.longitude
+              }, { merge: true }).catch(() => {});
             }
           } else {
             const defaultZone: WorkZone = {
@@ -1367,7 +1579,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               updatedBy: 'System Init',
               updatedAt: new Date().toISOString()
             };
-            setDoc(doc(db, 'workZones', 'company'), defaultZone).catch(() => { });
+
+            // Always reflect the default locally so check-in validation has a geo-fence,
+            // but only PERSIST it on a server-confirmed absence from an authorised
+            // session — same cache-miss overwrite hazard as settings/global above.
+            setCompanyWorkZone(defaultZone);
+            if (
+              !zoneFromCache &&
+              !didSeedWorkZone &&
+              (roleRef.current === 'SUPER_ADMIN' || roleRef.current === 'HR_ADMIN')
+            ) {
+              didSeedWorkZone = true;
+              setDoc(doc(db, 'workZones', 'company'), defaultZone).catch(() => { });
+            }
           }
         }, (error) => {
           setCompanyWorkZone({
@@ -1404,7 +1628,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let unsubLogs = () => { };
     if (isAuthenticated && authUid && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) {
-      const logsQuery = query(collection(db, 'auditLogs'), limit(100));
+      // P1 FIX: same `limit` without `orderBy` defect as the notifications query.
+      // auditLog ids are `log-<epoch-ms>-<rand>`, so ordering by __name__ ordered by
+      // the epoch prefix as a STRING — meaning the admin audit trail showed the 100
+      // OLDEST entries and permanently froze. Compliance review of any recent event
+      // was impossible. `timestamp` is an ISO-8601 string on every record written by
+      // addAuditLog(), so a plain single-field orderBy needs no composite index.
+      const logsQuery = query(collection(db, 'auditLogs'), orderBy('timestamp', 'desc'), limit(100));
       // P0 FIX: recovery-enabled subscription (transient errors retried with backoff)
       unsubLogs = subscribeWithRecovery(logsQuery, (snapshot) => {
         if (!snapshot.empty) {
@@ -1487,15 +1717,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('kss_v1_session', matched.id);
         if (matched.email) localStorage.setItem('kss_v1_session_email', matched.email.toLowerCase());
 
-        // Sync role to users/{uid} for Firestore Security Rules RBAC lookup
+        // Sync role to users/{uid} for Firestore Security Rules RBAC lookup.
+        //
+        // P0 FIX: `employeeDocId` is new and REQUIRED by firestore.rules. The rules
+        // must verify that this mapping faithfully mirrors the role recorded on the
+        // (admin-write-only) employees record before accepting a privileged role —
+        // otherwise any employee could write themselves role: 'SUPER_ADMIN' here and
+        // every isSuperAdmin()/isHrAdmin() check in the ruleset would return true.
+        //
+        // The rules can only cross-check via get() on a KNOWN path, and the two
+        // existing fields cannot produce one: `employees` documents are keyed
+        // `emp-KSS2407002` for every seeded employee, while `employeeId` holds the
+        // bare code `KSS2407002` and `uid` holds the Firebase uid. Neither resolves
+        // to the document. Without this field the cross-check could never succeed and
+        // EVERY seeded privileged account (CEO, CTO, HR, PM) was denied on create,
+        // silently, leaving getRole() null and no privileges at all.
+        //
+        // P1 FIX: the rejection is no longer swallowed. A failure here is the single
+        // point that decides whether this session has any privileges whatsoever, so
+        // it must be visible in diagnostics rather than a bare no-op catch.
         setDoc(doc(db, 'users', firebaseUser.uid), {
           uid: firebaseUser.uid,
           email: matched.email?.toLowerCase() || firebaseUser.email?.toLowerCase(),
           role: matched.role,
           employeeId: matched.employeeId,
+          employeeDocId: matched.id,
           fullName: matched.fullName,
           updatedAt: serverTimestamp()
-        }, { merge: true }).catch(() => { });
+        }, { merge: true }).catch((err) => {
+          console.error(
+            `[Auth] Failed to sync users/${firebaseUser.uid} role mapping (${matched.role}). ` +
+            'Every privileged Firestore rule will deny for this session until this succeeds.',
+            err
+          );
+          handleFirestoreError(err, OperationType.WRITE, `users/${firebaseUser.uid}`);
+        });
       }
     });
     return () => unsubscribe();
@@ -1503,7 +1759,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const addAuditLog = (action: string, target: string, details: string) => {
     const newLog: AuditLog = {
-      id: `log-${Date.now()}`,
+      // P1 FIX: the id was `log-${Date.now()}` alone. Two audit events in the same
+      // millisecond — routine, since check-in/check-out each emit an audit entry
+      // alongside a notification — produced the SAME document id. The second write
+      // then became an overwrite of an existing document, which the append-only
+      // auditLogs rule (`allow update: if false`) rejects: one of the two events was
+      // silently lost from the compliance trail. A random suffix makes ids unique.
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       actorId: activeEmployee?.id || 'sys-admin',
       actorName: activeEmployee?.fullName || 'System Admin',
       actorRole: role,
@@ -1544,6 +1806,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // "Latest ref" pattern: the auto-checkout interval effect is deliberately stable
+  // (re-registering it on every snapshot recreates the write→snapshot feedback loop
+  // that BUG 3 fixed), so it reaches the current addAuditLog through this ref and
+  // records the real signed-in actor instead of the first render's placeholder.
+  addAuditLogRef.current = addAuditLog;
+
   const loginWithEmail = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
     setIsLoading(true);
     try {
@@ -1563,9 +1831,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const empUsername = empEmail.split('@')[0];
         const inputUsername = cleanEmail.split('@')[0];
         if (empUsername === inputUsername) return true;
-        if (cleanEmail.includes('akshit') && (empEmail.includes('akshit') || e.fullName?.toLowerCase().includes('akshit'))) return true;
-        if (cleanEmail.includes('gaurav') && (empEmail.includes('gaurav') || empEmail.includes('founder') || e.fullName?.toLowerCase().includes('gaurav'))) return true;
-        if (cleanEmail.includes('koushik') && (empEmail.includes('koushik') || e.fullName?.toLowerCase().includes('koushik'))) return true;
+        // P1 SECURITY FIX: removed hardcoded personal-name substring matching
+        // (`akshit` / `gaurav` / `founder` / `koushik`). Those clauses resolved a typed
+        // address to a DIFFERENT employee's record — e.g. `gaurav@anything.com` matched any
+        // employee whose email merely contained `founder`. That mis-targeted the lockout
+        // counter and the legacy credential check onto an unrelated (often executive) account.
+        // Exact email and username-only matching above already handle legitimate
+        // corporate-domain variations.
         return false;
       }) || INITIAL_EMPLOYEES.find(e => {
         const empEmail = (e.email || '').toLowerCase();
@@ -1575,9 +1847,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const inputUsername = cleanEmail.split('@')[0];
         return empUsername === inputUsername;
       });
-      const isPrahlad = cleanEmail.includes('prahlad');
-      
-      if (!isPrahlad && targetEmp && targetEmp.lockoutUntil && targetEmp.lockoutUntil > Date.now()) {
+      // P1 SECURITY FIX: removed the hardcoded `isPrahlad` carve-out that exempted one named
+      // employee from BOTH the lockout check and the 5-failure lockout trigger, leaving that
+      // account open to unlimited online password guessing. Brute-force throttling now applies
+      // uniformly to every account.
+      if (targetEmp && targetEmp.lockoutUntil && targetEmp.lockoutUntil > Date.now()) {
         const waitMins = Math.ceil((targetEmp.lockoutUntil - Date.now()) / 60000);
         setIsLoading(false);
         return { success: false, message: `SECURITY ALERT: Account temporarily locked due to multiple failed attempts. Please wait ${waitMins} minutes.` };
@@ -1593,7 +1867,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (targetEmp) {
           const newCount = (targetEmp.failedLoginCount || 0) + 1;
           const updates: Partial<Employee> = { failedLoginCount: newCount };
-          if (!isPrahlad && newCount >= 5) {
+          if (newCount >= 5) {
             updates.lockoutUntil = Date.now() + 15 * 60000;
           }
           setDoc(doc(db, 'employees', targetEmp.id), updates, { merge: true }).catch(() => { });
@@ -1625,15 +1899,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             localStorage.setItem('kss_v1_device_category', cat);
             setDoc(doc(db, 'employees', matched.id), sessionUpdates, { merge: true }).catch(() => { });
 
-            // Sync role to users/{uid} for Firestore Security Rules RBAC lookup
+            // Sync role to users/{uid} for Firestore Security Rules RBAC lookup.
+            // employeeDocId is required by firestore.rules to cross-check the role
+            // against the admin-write-only employees record — see the onAuthStateChanged
+            // sync above for why neither `uid` nor `employeeId` can address that doc.
             setDoc(doc(db, 'users', userCred.user.uid), {
               uid: userCred.user.uid,
               email: cleanEmail,
               role: assignedRole,
               employeeId: matched.employeeId,
+              employeeDocId: matched.id,
               fullName: matched.fullName,
               updatedAt: serverTimestamp()
-            }, { merge: true }).catch(() => { });
+            }, { merge: true }).catch((err) => {
+              console.error(
+                `[Auth] Failed to sync users/${userCred.user.uid} role mapping (${assignedRole}). ` +
+                'Every privileged Firestore rule will deny for this session until this succeeds.',
+                err
+              );
+            });
 
             addAuditLog('USER_LOGIN', matched.fullName, `Firebase Auth Login (${assignedRole})`);
             clearLockout(matched.id);
@@ -1721,12 +2005,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Credential rejection (wrong password / unknown email) — legacy local fallback proceeds below.
       }
 
-      // Strict Password Verification: Require original registered password or master admin pass (Removes fake 6-digit bypass)
-      const isMasterPass = cleanPass === 'Admin@123456' || cleanPass === 'admin123';
-      const isPersonalPass = (targetEmp as any)?.password && cleanPass === (targetEmp as any).password;
-      const isInitialPass = (targetEmp as any)?.initialPassword && cleanPass === (targetEmp as any).initialPassword;
+      // ── P0 SECURITY FIX: universal master-password backdoor REMOVED ──
+      // Previously: `cleanPass === 'Admin@123456' || cleanPass === 'admin123'` authenticated
+      // ANY employee record — including SUPER_ADMIN / CEO / CTO — and both literals shipped in
+      // the public JS bundle. Any visitor could sign in as a founder with a guessable password.
+      // Also removed: comparison against a plaintext `password` field on the employee document
+      // (`/employees` is world-readable, so that field was a harvestable credential).
+      //
+      // The only surviving legacy path is the one-time `initialPassword` bootstrap, kept so
+      // employees who have not yet been provisioned in Firebase Auth are not locked out. It is
+      // now revoked the moment the employee sets a real password (see
+      // updateCurrentEmployeePassword) and requires a non-trivial secret.
+      const storedInitial = (targetEmp as any)?.initialPassword;
+      const isInitialPass =
+        typeof storedInitial === 'string' &&
+        storedInitial.length >= 6 &&
+        cleanPass === storedInitial;
 
-      if (targetEmp && (isMasterPass || isPersonalPass || isInitialPass)) {
+      if (targetEmp && isInitialPass) {
         const cat = getDeviceCategory();
         const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         const sessionUpdates = cat === 'desktop' ? { desktopSessionId: newSessionId } : { mobileSessionId: newSessionId };
@@ -1846,22 +2142,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, 150);
   };
 
-  const logout = () => {
+  const logout = async () => {
     const empId = activeEmployee?.id || activeEmployee?.employeeId;
     if (empId) {
-      unregisterFcmToken(empId).catch(() => {});
+      await unregisterFcmToken(empId).catch(() => {});
     }
-    auth.signOut();
+    // P1 FIX: await sign-out so the Firebase token is actually revoked before the UI
+    // transitions. Fire-and-forget left a live token attached to in-flight listeners.
+    await auth.signOut().catch(() => {});
     setUser(null);
+    setAuthUid(null);
     setActiveEmployee(null);
     setIsAuthenticated(false);
     setIsDemoMode(true);
+    // P0 FIX: reset the privilege level. `role` previously retained the departing user's
+    // value (e.g. SUPER_ADMIN) after logout, so any component gating on `role` without also
+    // checking `isAuthenticated` kept rendering administrative UI to the next visitor.
+    setRole('EMPLOYEE');
     clearAllFaceEngineState(); // Purges stale face descriptors from memory (Fixes C21 Contract)
-    localStorage.removeItem('kss_v1_session');
-    localStorage.removeItem('kss_v1_session_email');
-    localStorage.removeItem('kss_v1_session_id');
-    localStorage.removeItem('kss_v1_session_timestamp');
-    localStorage.removeItem('kss_v1_device_category');
+
+    // P0 FIX — cross-user data bleed on shared devices: logout previously cleared only the
+    // five session keys and left the entire cached dataset behind. On a shared or kiosk
+    // browser the next person to open the app saw the previous user's full employee
+    // directory (names, phone numbers, addresses, salary bands, face descriptors), leave
+    // history, notifications and audit trail restored straight from localStorage — before
+    // any authentication took place. All cached personal data is now purged.
+    [
+      'kss_v1_session',
+      'kss_v1_session_email',
+      'kss_v1_session_id',
+      'kss_v1_session_timestamp',
+      'kss_v1_device_category',
+      'kss_v1_employees',
+      'kss_v1_attendance',
+      'kss_v1_leave_requests',
+      'kss_v1_audit_logs',
+      'kss_v1_read_notifs',
+      'kss_v1_broadcasts',
+      'kss_v1_settings',
+      'kss_v1_work_zone',
+      'kss_v1_company_wfh_dates',
+    ].forEach(key => {
+      try { localStorage.removeItem(key); } catch {}
+    });
   };
 
   const addEmployee = async (empData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => {
@@ -2005,9 +2328,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // would reject with "Already checked in for today."
     const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
 
-    const isAsbin = (emp.email || '').toLowerCase().includes('asbin') || 
-      emp.employeeId === 'KSS2407004' || 
-      (emp.fullName || '').toLowerCase().includes('asbin');
+    // B27 FIX: gate the WFH carve-out strictly on the stable employee code. The former
+    // name/email substring tests also matched any employee with "asbin" anywhere in
+    // their identity (e.g. "Jasbinder"), wrongly denying them approved WFH. The explicit
+    // employeeId was already the canonical target of this OR, so behaviour for the
+    // intended employee is unchanged.
+    const isAsbin = emp.employeeId === 'KSS2407004';
 
     const isApprovedWfh = !isAsbin && ((companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
@@ -2154,9 +2480,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
     const recordId = existingRec?.id ?? canonicalId;
 
-    const isAsbin = (emp.email || '').toLowerCase().includes('asbin') || 
-      emp.employeeId === 'KSS2407004' || 
-      (emp.fullName || '').toLowerCase().includes('asbin');
+    // B27 FIX: gate the WFH carve-out strictly on the stable employee code. The former
+    // name/email substring tests also matched any employee with "asbin" anywhere in
+    // their identity (e.g. "Jasbinder"), wrongly denying them approved WFH. The explicit
+    // employeeId was already the canonical target of this OR, so behaviour for the
+    // intended employee is unchanged.
+    const isAsbin = emp.employeeId === 'KSS2407004';
 
     const isApprovedWfh = !isAsbin && ((companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
@@ -2314,15 +2643,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(docRef);
         let existingBreaks: any[] = [];
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.checkOutAt) {
-            throw new Error('You have already checked out for today.');
-          }
-          existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
-        } else if (existingRec?.breaks) {
-          existingBreaks = existingRec.breaks;
+        // P0 FIX: a break must NEVER create the attendance document. The former
+        // `else` branch wrote a record carrying only { breaks } — no date, no
+        // checkInAt, no status — which the listener then materialised as "Present"
+        // (`data.status || 'Present'`), counted the employee present without a
+        // check-in, hid the doc from every orderBy('date') query, and was silently
+        // wiped to `breaks: []` by the next check-in's merge. An open shift is now
+        // a precondition.
+        if (!docSnap.exists()) {
+          throw new Error('Please check in before starting a break.');
         }
+        const data = docSnap.data();
+        if (data.checkInAt == null) {
+          throw new Error('Please check in before starting a break.');
+        }
+        if (data.checkOutAt) {
+          throw new Error('You have already checked out for today.');
+        }
+        existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
 
         // Auto-close any previous unclosed break before starting the new one
         const sanitizedBreaks = existingBreaks.map((b: any) => {
@@ -2334,7 +2672,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               startAt: startIso,
               endAt: nowISO,
               endTime: nowISO,
-              durationMinutes: Math.max(1, Math.min(120, Math.round(diffMs / 60000)))
+              durationMinutes: Math.max(1, Math.min(MAX_BREAK_MINUTES, Math.round(diffMs / 60000)))
             };
           }
           return b;
@@ -2344,23 +2682,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const updatedBreaks = [...sanitizedBreaks, newBreak];
         const totalBreakMins = calculateTotalBreakMinutes(updatedBreaks);
 
-        if (docSnap.exists()) {
-          transaction.update(docRef, cleanFirestorePayload({
-            breaks: updatedBreaks,
-            totalBreakMinutes: totalBreakMins,
-            updatedAt: serverTimestamp()
-          }));
-        } else {
-          transaction.set(docRef, cleanFirestorePayload({
-            id: recordId,
-            uid: empUid,
-            employeeUid: empUid,
-            employeeId: emp?.id || employeeId,
-            breaks: updatedBreaks,
-            totalBreakMinutes: totalBreakMins,
-            updatedAt: serverTimestamp()
-          }), { merge: true });
-        }
+        // Doc is guaranteed to exist and be checked-in (guarded above) — always an
+        // update, never a create that could mint a phantom attendance record.
+        transaction.update(docRef, cleanFirestorePayload({
+          breaks: updatedBreaks,
+          totalBreakMinutes: totalBreakMins,
+          updatedAt: serverTimestamp()
+        }));
 
         return { 
           success: true, 
@@ -2418,21 +2746,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await runTransaction(db, async (transaction) => {
         const docSnap = await transaction.get(docRef);
         let existingBreaks: any[] = [];
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
-        } else if (existingRec?.breaks) {
-          existingBreaks = existingRec.breaks;
+        // P0/P1 FIX (mirror of startBreak): never create the attendance doc from a
+        // break, and never mutate a completed shift. Closing a break on a checked-out
+        // record leaves workingMinutes (already derived from the final break total)
+        // untouched, so the record then reports more break time than the shift holds.
+        if (!docSnap.exists()) {
+          throw new Error('No attendance record found for today. Please check in first.');
         }
+        const data = docSnap.data();
+        if (data.checkOutAt) {
+          throw new Error('Shift already completed — breaks can no longer be modified.');
+        }
+        existingBreaks = Array.isArray(data.breaks) ? data.breaks : [];
 
-        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime) ||
-          existingRec?.breaks?.find((b: any) => !b.endAt && !(b as any).endTime);
+        // B18 FIX: derive the open break from the authoritative in-transaction doc
+        // only. The former `|| existingRec?.breaks?.find(...)` fallback read stale
+        // React state, so when the server doc had no open break the user was shown
+        // "…completed! (N mins total)" for a break that was never written.
+        const openBreak = existingBreaks.find((b: any) => !b.endAt && !(b as any).endTime);
 
         let breakMins = 1;
         if (openBreak) {
           const startIso = formatTimestampToISO(openBreak.startAt || (openBreak as any).startTime) || nowISO;
           const diffMs = Math.max(0, nowMs - new Date(startIso).getTime());
-          breakMins = Math.max(1, Math.min(180, Math.round(diffMs / 60000)));
+          breakMins = Math.max(1, Math.min(MAX_BREAK_MINUTES, Math.round(diffMs / 60000)));
         }
 
         const updatedBreaks = existingBreaks.map((b: any) => {
@@ -2440,7 +2777,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (isOpen) {
             const startIso = formatTimestampToISO(b.startAt || (b as any).startTime) || nowISO;
             const diffMs = Math.max(0, nowMs - new Date(startIso).getTime());
-            const mins = Math.max(1, Math.min(180, Math.round(diffMs / 60000)));
+            const mins = Math.max(1, Math.min(MAX_BREAK_MINUTES, Math.round(diffMs / 60000)));
             return {
               ...b,
               startAt: startIso,
@@ -2454,23 +2791,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const totalBreakMins = calculateTotalBreakMinutes(updatedBreaks);
 
-        if (docSnap.exists()) {
-          transaction.update(docRef, cleanFirestorePayload({
-            breaks: updatedBreaks,
-            totalBreakMinutes: totalBreakMins,
-            updatedAt: serverTimestamp()
-          }));
-        } else {
-          transaction.set(docRef, cleanFirestorePayload({
-            id: recordId,
-            uid: empUid,
-            employeeUid: empUid,
-            employeeId: emp?.id || employeeId,
-            breaks: updatedBreaks,
-            totalBreakMinutes: totalBreakMins,
-            updatedAt: serverTimestamp()
-          }), { merge: true });
-        }
+        // Doc is guaranteed to exist and be open (guarded above) — always an update.
+        transaction.update(docRef, cleanFirestorePayload({
+          breaks: updatedBreaks,
+          totalBreakMinutes: totalBreakMins,
+          updatedAt: serverTimestamp()
+        }));
 
         return { 
           success: true, 
@@ -2493,7 +2819,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   startAt: s,
                   endAt: nowISO,
                   endTime: nowISO,
-                  durationMinutes: Math.max(1, Math.min(180, Math.round(dMs / 60000)))
+                  durationMinutes: Math.max(1, Math.min(MAX_BREAK_MINUTES, Math.round(dMs / 60000)))
                 };
               }
               return b;
@@ -2512,39 +2838,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return res;
     } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
-      // Even if Firestore threw an error, clean the local UI so the user is never stuck
-      setAttendance(prev => prev.map(rec => {
-        if (rec.id === recordId || (rec.employeeId === emp?.id && rec.date === todayStr)) {
-          const updated = (rec.breaks || []).map((b: any) => ({
-            ...b,
-            endAt: b.endAt || nowISO,
-            endTime: b.endTime || nowISO,
-            durationMinutes: b.durationMinutes || 1
-          }));
-          return { ...rec, breaks: updated, totalBreakMinutes: calculateTotalBreakMinutes(updated) };
-        }
-        return rec;
-      }));
-      return { success: true, message: 'Break closed locally and synced.' };
+      // P1 FIX: this previously patched local state to "closed" and returned
+      // success:true. The write had NOT persisted, so the very next onSnapshot
+      // replaced state wholesale and the break re-opened with its timer running,
+      // while the user had been told it synced. Report the failure honestly and
+      // leave the break open so a retry is possible; the listener remains the single
+      // source of truth for the record's real state.
+      return { success: false, message: err?.message || 'Break could not be saved. Please try again.' };
     }
   };
 
   const updateAttendanceRecord = (recordId: string, updates: Partial<AttendanceRecord>) => {
     // Write directly to Firestore with serverTimestamp — real-time onSnapshot updates UI seamlessly
     const cleanUpdates = cleanFirestorePayload({ ...updates, updatedAt: serverTimestamp() });
-    setDoc(doc(db, 'attendance', recordId), cleanUpdates, { merge: true }).catch(err => {
-      handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
-    });
-
-    addAuditLog('ATTENDANCE_CORRECTION', `Record ${recordId}`, `Updated fields: ${Object.keys(updates).join(', ')}`);
+    // B26 FIX: only record the audit entry once the write is actually accepted. The
+    // audit log previously fired unconditionally alongside a fire-and-forget setDoc, so a
+    // permission-denied correction still left an ATTENDANCE_CORRECTION trail claiming a
+    // change that never persisted. (Under offline persistence the promise resolves on the
+    // local-cache write, which is the correct "accepted" signal.)
+    setDoc(doc(db, 'attendance', recordId), cleanUpdates, { merge: true })
+      .then(() => {
+        addAuditLog('ATTENDANCE_CORRECTION', `Record ${recordId}`, `Updated fields: ${Object.keys(updates).join(', ')}`);
+      })
+      .catch(err => {
+        handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
+      });
   };
 
   const updateSettings = (newSettings: Partial<CompanySettings>) => {
     const updated = { ...settings, ...newSettings };
     setSettings(updated);
 
-    // Sync to Firestore
-    setDoc(doc(db, 'settings', 'global'), updated).catch(err => {
+    // B23 FIX: merge instead of full overwrite. saveCompanyWorkZone persists the GPS
+    // fields (officeLatitude/Longitude, allowedRadiusMeters, officeName) into this same
+    // settings/global doc. A plain setDoc rewrote the whole document from the local
+    // `settings` snapshot, so any field present server-side but absent from stale local
+    // state — e.g. GPS coordinates written by another admin/session before this client
+    // hydrated — was silently erased. merge writes only the supplied keys.
+    setDoc(doc(db, 'settings', 'global'), updated, { merge: true }).catch(err => {
       handleFirestoreError(err, OperationType.WRITE, 'settings/global');
     });
 

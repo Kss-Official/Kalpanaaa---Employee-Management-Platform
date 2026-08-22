@@ -22,7 +22,11 @@ for (const name of entries) {
   }
 }
 
-const testFiles = [join('tests', 'regression.test.mjs'), join('tests', 'fcm.test.mjs')];
+const testFiles = [
+  join('tests', 'regression.test.mjs'), 
+  join('tests', 'fcm.test.mjs'),
+  join('tests', 'rtdb.test.mjs')
+];
 
 const testRes = spawnSync(
   process.execPath,

@@ -12,7 +12,7 @@ import {
   drawFaceMeshOverVideo
 } from '../../lib/faceRecognitionEngine';
 
-interface FaceCaptureModalProps {
+export interface FaceCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;

@@ -6,3 +6,15 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# ── P0 SECURITY: credential material must never be committed ──
+# users.json is a Firebase Auth account export: email + scrypt passwordHash + salt
+# + localId for every employee. It was tracked in commit 6b13678 and remains in git
+# history. Untracking it stops further exposure; see the audit report for the
+# mandatory history-purge and credential-rotation steps.
+users.json
+*users-export*.json
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+.firebase/
+

@@ -301,3 +301,60 @@ test('fabrication signatures: migration literals match; genuine timestamps never
   // Real check-in with fabricated checkout → checkout-only repair path
   assert.equal(engine.isFabricatedShiftPair('2026-08-21T04:35:00.000Z', '2026-08-21T19:30:00.000+05:30'), false);
 });
+
+// ── Production bug-scan regressions (B2, B3, B14, B17, B25) ──────────────────
+
+test('B2 getEmployeeKey: subject identity wins over actor fallback uid', () => {
+  // A seeded employee has NO uid/employeeUid, only a synthetic doc id + bare code.
+  // The actor (logged-in HR admin) uid must NOT be allowed to key the subject's doc,
+  // or two such subjects checked in by one admin collapse into ONE {actorUid}_{date}.
+  const seeded = { id: 'emp-KSS2407003', employeeId: 'KSS2407003' };
+  const actorUid = 'hr-admin-uid-xyz';
+  assert.equal(engine.getEmployeeKey(seeded, actorUid), 'emp-KSS2407003');
+  // A real account with its own uid still prefers that uid.
+  assert.equal(engine.getEmployeeKey({ uid: 'realuid', id: 'realuid' }, actorUid), 'realuid');
+  // Only a bare/empty subject may fall back to the actor uid (last resort).
+  assert.equal(engine.getEmployeeKey(null, actorUid), actorUid);
+  assert.equal(engine.getEmployeeKey({}, actorUid), actorUid);
+});
+
+test('B3 isAttendanceForEmployee: name match is exact, never substring', () => {
+  // Distinct people, no shared identity tokens, substring-overlapping names.
+  const ram = { fullName: 'Ram' };
+  assert.equal(engine.isAttendanceForEmployee({ employeeName: 'Ramesh' }, ram), false,
+    '"ram" ⊄ "ramesh" — must not cross-link distinct employees');
+  assert.equal(engine.isAttendanceForEmployee({ employeeName: 'Ramkumar Reddy' }, { fullName: 'Ramkumar' }), false);
+  // Exact normalized equality still matches (punctuation/spacing tolerant).
+  assert.ok(engine.isAttendanceForEmployee({ employeeName: 'R.A.M' }, ram));
+  // Identity-token match is unaffected by the name tightening.
+  assert.ok(engine.isAttendanceForEmployee({ employeeCode: 'KSS2407003' }, { id: 'x', employeeId: 'KSS2407003' }));
+});
+
+test('B14 MAX_BREAK_MINUTES: single shared break cap', () => {
+  // Canary: all break-close paths clamp against this one constant (was 120 vs 180).
+  assert.equal(engine.MAX_BREAK_MINUTES, 180);
+});
+
+test('B17 calculateBreakBreakdown: counts legacy startTime/endTime-only breaks', () => {
+  const start = new Date(2026, 7, 20, 13, 0).toISOString();
+  const end = new Date(2026, 7, 20, 13, 30).toISOString(); // 30 minutes
+  // Legacy shape: only startTime/endTime, no startAt/endAt, no durationMinutes.
+  const legacy = [{ type: 'lunch', startTime: start, endTime: end }];
+  const bd = engine.calculateBreakBreakdown(legacy, 0);
+  assert.equal(bd.mealSecs, 1800, 'legacy meal break must contribute its 30 minutes');
+  assert.equal(bd.totalBreakMinutes, 30);
+  // The breakdown total must now agree with calculateTotalBreakMinutes on the same input.
+  assert.equal(engine.calculateTotalBreakMinutes(legacy), 30);
+});
+
+test('B25 isLateCheckIn: grace through 10:15 AM IST, late afterwards', () => {
+  // IST-anchored instants — Intl formats in Asia/Kolkata, so the assertions are
+  // independent of the machine timezone running the suite.
+  assert.equal(engine.isLateCheckIn('2026-08-20T10:00:00+05:30'), false);
+  assert.equal(engine.isLateCheckIn('2026-08-20T10:15:00+05:30'), false, '10:15 boundary is on time');
+  assert.equal(engine.isLateCheckIn('2026-08-20T10:16:00+05:30'), true);
+  assert.equal(engine.isLateCheckIn('2026-08-20T11:30:00+05:30'), true);
+  assert.equal(engine.isLateCheckIn('2026-08-20T09:45:00+05:30'), false);
+  assert.equal(engine.isLateCheckIn(null), false);
+  assert.equal(engine.isLateCheckIn(''), false);
+});

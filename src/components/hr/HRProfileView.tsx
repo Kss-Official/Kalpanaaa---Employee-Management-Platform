@@ -26,7 +26,7 @@ import {
   X
 } from 'lucide-react';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
-import { FaceCaptureModal } from '../shared/FaceCaptureModal';
+import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
 import { useHaptic } from '../../hooks/useHaptic';
 import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, resolveAttendanceRecord, safeGetTimestampMillis, isShiftComplete } from '../../lib/attendanceEngine';
 

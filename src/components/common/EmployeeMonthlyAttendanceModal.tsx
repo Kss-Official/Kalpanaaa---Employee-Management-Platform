@@ -173,9 +173,19 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     const rec = recordsByDate.get(dateFormatted);
 
     if (rec) {
-      if (rec.status === 'Present' || rec.checkInAt) presentDays++;
-      if (rec.status === 'Late') lateDays++;
-      if (rec.isWfh || rec.status === 'Work From Home') wfhDays++;
+      // B FIX: mutually exclusive day classification. These were three independent
+      // `if`s, so a single Late day incremented presentDays too (via `|| rec.checkInAt`)
+      // and a WFH day incremented both presentDays and wfhDays — the badges, shown as
+      // sibling categories, summed past the number of attended days. Each attended day
+      // now falls into exactly one bucket, matching the single-value status model
+      // (Late takes precedence over WFH, as the stored status does).
+      if (rec.status === 'Late') {
+        lateDays++;
+      } else if (rec.isWfh || rec.status === 'Work From Home') {
+        wfhDays++;
+      } else if (rec.status === 'Present' || rec.checkInAt) {
+        presentDays++;
+      }
       const breakdown = computeActivityBreakdown(rec);
       totalWorkingMinutes += breakdown.workingMins;
     } else {

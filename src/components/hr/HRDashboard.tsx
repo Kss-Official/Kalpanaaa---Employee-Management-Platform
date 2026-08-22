@@ -19,7 +19,7 @@ import {
   Banknote,
   ShieldCheck
 } from 'lucide-react';
-import { FaceCaptureModal } from '../shared/FaceCaptureModal';
+import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
 import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isShiftComplete, resolveAttendanceRecord } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 

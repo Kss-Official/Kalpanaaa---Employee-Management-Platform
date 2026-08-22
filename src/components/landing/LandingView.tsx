@@ -39,9 +39,18 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
 
   const todayStr = todayInIST();
   const todayAttendance = attendance.filter(a => a.date === todayStr);
-  const presentCount = todayAttendance.filter(a => a.status === 'PRESENT' || a.status === 'LATE').length;
-  const lateCount = todayAttendance.filter(a => a.status === 'LATE').length;
-  const leaveCount = todayAttendance.filter(a => a.status === 'ON_LEAVE').length;
+  // P1 FIX: these three comparisons used SCREAMING_SNAKE literals ('PRESENT',
+  // 'LATE', 'ON_LEAVE') that do not exist in the AttendanceStatus union
+  // (src/types/index.ts:7 — 'Present' | 'Absent' | 'Late' | 'Half Day' |
+  // 'On Leave' | 'Holiday' | 'Work From Home'). Every filter matched zero records,
+  // so the landing page's live "Present / Late / On Leave" counters read 0 for the
+  // whole company, permanently. TypeScript would normally reject an impossible
+  // comparison (TS2367); it did not here because @types/react is not installed, so
+  // useAuth() resolves to `any` and every field on it is unchecked — see the audit
+  // report's P0 on the disabled type gate.
+  const presentCount = todayAttendance.filter(a => a.status === 'Present' || a.status === 'Late' || a.status === 'Work From Home').length;
+  const lateCount = todayAttendance.filter(a => a.status === 'Late').length;
+  const leaveCount = todayAttendance.filter(a => a.status === 'On Leave').length;
   // P0 FIX: an active shift requires a real check-in and NO completed checkout
   const activeRecord = todayAttendance.find(a => a.employeeId === activeEmployee?.id && a.checkInAt && !isShiftComplete(a));
 

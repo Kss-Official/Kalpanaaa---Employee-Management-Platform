@@ -166,50 +166,19 @@ export const extractDescriptorFromImageUrl = async (
   }
 };
 
-// Biometric Profile Storage (IndexedDB / localStorage fallback)
-const STORAGE_PREFIX = 'kss_face_descriptor_v1_';
-const inMemoryDescriptorCache = new Map<string, Float32Array>();
-
-export const clearAllFaceEngineState = (): void => {
-  inMemoryDescriptorCache.clear();
-  console.log('[FaceEngine] Cleared in-memory face descriptor cache on logout.');
-};
-
-export const saveEmployeeDescriptor = (employeeId: string, descriptor: Float32Array): void => {
-  const arrayData = Array.from(descriptor);
-  inMemoryDescriptorCache.set(employeeId, descriptor);
-  localStorage.setItem(`${STORAGE_PREFIX}${employeeId}`, JSON.stringify(arrayData));
-};
-
-export const getEmployeeDescriptor = (employeeId: string, cloudDescriptor?: number[]): Float32Array | null => {
-  if (inMemoryDescriptorCache.has(employeeId)) {
-    return inMemoryDescriptorCache.get(employeeId)!;
-  }
-
-  const stored = localStorage.getItem(`${STORAGE_PREFIX}${employeeId}`);
-  if (stored) {
-    try {
-      const arrayData = JSON.parse(stored) as number[];
-      const vec = new Float32Array(arrayData);
-      inMemoryDescriptorCache.set(employeeId, vec);
-      return vec;
-    } catch {}
-  }
-  
-  if (cloudDescriptor && cloudDescriptor.length > 0) {
-    // Restore from Cloud Firestore backup!
-    const vec = new Float32Array(cloudDescriptor);
-    saveEmployeeDescriptor(employeeId, vec);
-    return vec;
-  }
-
-  return null;
-};
-
-export const clearEmployeeDescriptor = (employeeId: string): void => {
-  inMemoryDescriptorCache.delete(employeeId);
-  localStorage.removeItem(`${STORAGE_PREFIX}${employeeId}`);
-};
+// Biometric Profile Storage (in-memory cache + localStorage).
+// PERF FIX (audit): these helpers were moved to a face-api-free module
+// (faceDescriptorStore) so that AuthContext / EmployeePortal can import them
+// without dragging the multi-MB @vladmandic/face-api bundle into the initial
+// load. Re-exported here for backward compatibility; verifyFaceAgainstEnrolled
+// below uses getEmployeeDescriptor internally via the import beneath.
+export {
+  clearAllFaceEngineState,
+  saveEmployeeDescriptor,
+  getEmployeeDescriptor,
+  clearEmployeeDescriptor
+} from './faceDescriptorStore';
+import { getEmployeeDescriptor } from './faceDescriptorStore';
 
 export interface MatchVerificationResult {
   isMatch: boolean;

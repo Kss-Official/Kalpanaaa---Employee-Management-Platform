@@ -64,7 +64,7 @@ export async function apiRequest<T>(
       throw new Error(errorMessage);
     }
 
-    if (response.status === 24) return {} as T; // 204 No Content
+    if (response.status === 204) return {} as T; // 204 No Content
 
     return await response.json();
   } catch (error) {

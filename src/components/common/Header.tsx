@@ -12,7 +12,7 @@ import {
 import { UserRole } from '../../types';
 import { getEmployeeWorkDate, resolveAttendanceRecord } from '../../lib/attendanceEngine';
 import { NotificationBell } from './NotificationBell';
-import { FaceCaptureModal } from '../shared/FaceCaptureModal';
+import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
 
 interface HeaderProps {
   onOpenScanner?: () => void;

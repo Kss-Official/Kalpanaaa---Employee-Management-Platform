@@ -1,4 +1,47 @@
 rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kalpanaaa KSS HRMS — Firestore Security Rules
+//
+// P0 REMEDIATION (this revision)
+// -----------------------------------------------------------------------------
+// The previous revision hardened only attendance / leaveRequests /
+// salaryDisbursements / notifications / fcmTokens. Eleven collections were left
+// at `allow read, write: if true` — reachable with NO authentication at all:
+//
+//   /users  /employees  /employees/*/leaveLocks  /settings  /companyConfig
+//   /companyRules  /workZones  /projects  /projectTasks  /oneOnOneNotes
+//   /auditLogs
+//
+// Two consequences made the entire RBAC model self-defeating:
+//
+//  1. PRIVILEGE ESCALATION. getRole() below reads `users/{uid}.role`, and
+//     /users was world-writable. Any visitor could POST
+//     users/{their-uid} { role: 'SUPER_ADMIN' } and every isSuperAdmin() /
+//     isHrAdmin() check in this file then returned true. Total compromise in
+//     one unauthenticated write.
+//
+//  2. BULK PII DISCLOSURE. /employees was world-readable. That collection holds
+//     phone numbers, dates of birth, home addresses, emergency contacts,
+//     salary/CTC, `qrToken` (forges QR check-in) and `faceDescriptor`
+//     (biometric face templates) for every employee.
+//
+// Note also that `match /{document=**} { allow read, write: if false }` is a
+// no-op: Firestore ORs all matching allow rules, so a deny can never override
+// an allow granted elsewhere. Access is denied by DEFAULT (absence of an allow),
+// never by an explicit deny. That block has been removed to avoid implying
+// protection it cannot provide.
+//
+// RESIDUAL RISK / FOLLOW-UP
+// -----------------------------------------------------------------------------
+// Role is still sourced from a client-written document (`users/{uid}.role`) for
+// accounts that predate this change. This revision makes `role` IMMUTABLE on
+// update and self-consistent on create, which closes the escalation path, but
+// the durable fix is Firebase Auth custom claims minted by a trusted Cloud
+// Function — `request.auth.token.role` is already honoured first by getRole()
+// below, so migrating is a drop-in change requiring no rule edits.
+// ─────────────────────────────────────────────────────────────────────────────
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -7,11 +50,16 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // P0 FIX: get() THROWS when the document does not exist, which denied every
-    // rule that touched getUserDoc() for accounts lacking a users/{uid} doc.
-    // exists() never throws — role simply resolves to null (still unauthorized),
-    // so authorization outcomes are unchanged for well-formed data while the
-    // crash-deny path is removed.
+    // Anonymous sessions must never reach employee PII. `signInAnonymously` is
+    // still exported and used by the (UI-unreachable) quickDemoLogin path, so an
+    // anonymous credential is obtainable by anyone who can load the bundle.
+    function isRealUser() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // get() THROWS when the document does not exist, which denied every rule that
+    // touched getUserDoc() for accounts lacking a users/{uid} doc. exists() never
+    // throws — role simply resolves to null (still unauthorized).
     function userDocExists() {
       return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
@@ -20,8 +68,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Custom claims are checked FIRST: they are server-minted and untamperable.
+    // The users-doc fallback preserves access for accounts provisioned before
+    // claims were introduced.
+    function claimRole() {
+      return isSignedIn() && 'role' in request.auth.token
+        ? request.auth.token.role
+        : null;
+    }
+
     function getRole() {
-      return userDocExists() ? getUserDoc().role : null;
+      return claimRole() != null ? claimRole() : (userDocExists() ? getUserDoc().role : null);
     }
 
     function getEmployeeId() {
@@ -30,92 +87,364 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isSignedIn() && (
-        getRole() == 'SUPER_ADMIN' || 
-        (request.auth.token.role != null && (request.auth.token.role == 'SUPER_ADMIN' || request.auth.token.role == 'superadmin'))
+        getRole() == 'SUPER_ADMIN' ||
+        claimRole() == 'superadmin'
       );
     }
 
     function isHrAdmin() {
       return isSignedIn() && (
-        getRole() == 'HR_ADMIN' || 
-        isSuperAdmin() || 
-        (request.auth.token.role != null && (request.auth.token.role == 'HR_ADMIN' || request.auth.token.role == 'hr_admin' || request.auth.token.role == 'hr' || request.auth.token.role == 'SUPER_ADMIN' || request.auth.token.role == 'superadmin'))
+        getRole() == 'HR_ADMIN' ||
+        isSuperAdmin() ||
+        claimRole() == 'hr_admin' ||
+        claimRole() == 'hr'
       );
     }
 
     function isProjectManager() {
       return isSignedIn() && (
-        getRole() == 'PROJECT_MANAGER' || 
+        getRole() == 'PROJECT_MANAGER' ||
         isSuperAdmin() ||
-        (request.auth.token.role != null && (request.auth.token.role == 'PROJECT_MANAGER' || request.auth.token.role == 'project_manager' || request.auth.token.role == 'pm'))
+        claimRole() == 'project_manager' ||
+        claimRole() == 'pm'
       );
     }
 
-    // Default Deny All
-    match /{document=**} {
-      allow read, write: if false;
+    // Admin tier permitted to mutate company-wide configuration.
+    function isConfigAdmin() {
+      return isHrAdmin() || isSuperAdmin();
     }
 
-    // Test collection used for the connectivity probe
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // True when field `f` is not being changed by this write. affectedKeys() returns
+    // a Set, so hasAny() — not the `in` operator — is the correct membership test.
+    function unchanged(f) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([f]);
+    }
+
+    // ── Employee-record ownership ────────────────────────────────────────────
+    // P0 FIX: the previous revision authorised employee self-writes with
+    // isSelf(employeeId) alone. That is WRONG for this data model, because the
+    // /employees collection is keyed two different ways:
+    //
+    //   • Accounts provisioned through addEmployee() / first-login bootstrap use
+    //     the Firebase uid as the document id  → employees/{uid}
+    //   • Every seeded/legacy record uses a synthetic code id
+    //     → employees/emp-KSS2407003, whose `uid` field is the PLACEHOLDER
+    //       'uid-KSS2407003' from demoData.ts, not a real Firebase uid.
+    //
+    // For the second (and in this deployment, majority) group request.auth.uid can
+    // never equal the document id, so isSelf() was permanently false and EVERY
+    // employee self-write was rejected: profile edits, biometric face enrolment,
+    // and the desktop/mobile session-id writes that drive single-session
+    // enforcement all failed with permission-denied for real staff.
+    //
+    // Ownership is therefore established by any one of three signals, cheapest
+    // first. `email` comes from the Firebase ID token, which is server-minted and
+    // untamperable. `.get(k, default)` is used throughout because reading an absent
+    // map key raises an error that denies the whole rule.
+    function ownsEmployeeRecord(employeeId) {
+      return isRealUser() && (
+        request.auth.uid == employeeId ||
+        (resource != null && (
+          resource.data.get('uid', '~none~') == request.auth.uid ||
+          resource.data.get('email', '~none~') == request.auth.token.get('email', '~absent~') ||
+          resource.data.get('employeeId', '~none~') == getEmployeeId()
+        ))
+      );
+    }
+
+    function employeeRecord(docId) {
+      return get(/databases/$(database)/documents/employees/$(docId)).data;
+    }
+
+    // ── users/{uid} role-mirror validation ──────────────────────────────────
+    // P0 FIX: the previous revision accepted a self-written elevated role only if
+    // employees/{request.auth.uid} carried that role. But /employees is keyed TWO
+    // ways (see ownsEmployeeRecord): every seeded employee — which is all 15 real
+    // accounts, including both executives, HR and the PM — lives at
+    // employees/emp-KSS24070NN. exists(employees/{auth.uid}) was therefore false for
+    // all of them, isConfigAdmin() resolves through this very document and so is
+    // false while it is missing, and the role was not 'EMPLOYEE'. All three
+    // disjuncts failed: the mapping doc could never be created, getRole() stayed
+    // null, and every privileged rule in this file denied for the entire company.
+    //
+    // The mapping now names the employees document it mirrors (`employeeDocId`,
+    // written by AuthContext.tsx) so the rule can actually reach it. Two conditions
+    // make that safe to trust: the referenced record must carry the role being
+    // claimed, and its email must equal the caller's Firebase-verified token email —
+    // so a client cannot point at a colleague's record to harvest their role.
+    // `role` on /employees is admin-write-only (section 2), which is what makes it
+    // a trusted source rather than a second self-service field.
+    function mirrorsEmployeeRole() {
+      return isRealUser() &&
+        request.resource.data.get('employeeDocId', '') != '' &&
+        exists(/databases/$(database)/documents/employees/$(request.resource.data.employeeDocId)) &&
+        employeeRecord(request.resource.data.employeeDocId).get('role', '~none~')
+          == request.resource.data.get('role', '~other~') &&
+        employeeRecord(request.resource.data.employeeDocId).get('email', '~none~')
+          == request.auth.token.get('email', '~absent~');
+    }
+
+    // ── 0. Connectivity probe ──
+    // testConnection() in src/lib/firebase.ts reads a non-existent doc here
+    // BEFORE sign-in to drive the online/offline indicator. The collection holds
+    // no data, so an open read discloses nothing; keeping it open preserves the
+    // pre-auth connectivity check.
     match /test/{docId} {
       allow read: if true;
+      allow write: if false;
     }
 
-    // ── 1. Users Collection ──
+    // ── 1. Users Collection (role mapping consumed by getRole() above) ──
     match /users/{userId} {
-      allow read, write, create, update: if true;
+      allow read: if isSelf(userId) || isHrAdmin();
+
+      // A user may bootstrap their OWN mapping doc. An elevated role is accepted
+      // only when the matching employees/{uid} record already carries that role
+      // (and that record is admin-write-only, below) — otherwise the role is
+      // pinned to EMPLOYEE. This is what closes the escalation path.
+      //
+      // P0 FIX: isConfigAdmin() was nested INSIDE the third conjunct, so it was
+      // ANDed after isSelf(userId). Admin provisioning writes users/{NEW-uid} from
+      // the ADMIN's session — addEmployee() (AuthContext.tsx) and
+      // setEmployeeInitialPassword() both do — where isSelf() is false by
+      // definition. Both writes therefore failed 100% of the time with
+      // permission-denied, leaving every newly created account with no role
+      // mapping and thus no privileges at all. isConfigAdmin() is now a
+      // top-level alternative.
+      allow create: if isConfigAdmin() || (
+        isRealUser() && isSelf(userId) && (
+          request.resource.data.role == 'EMPLOYEE' ||
+          mirrorsEmployeeRole() ||
+          (
+            exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+            get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.role
+              == request.resource.data.role
+          )
+        )
+      );
+
+      // Self-service updates may never change `role`. Only SUPER_ADMIN grants roles.
+      // isConfigAdmin() is required here too: both provisioning call sites use
+      // setDoc() WITHOUT merge, which Firestore evaluates as an update whenever the
+      // document already exists (e.g. re-issuing an initial password).
+      //
+      // P1 FIX: unchanged('role') alone permanently froze the mapping at whatever
+      // role was first written. AuthContext re-syncs this document on every login, so
+      // after a legitimate promotion recorded in /employees the sync was denied on
+      // every subsequent login and the rules kept enforcing the STALE role forever.
+      // mirrorsEmployeeRole() lets the change through precisely when it reflects the
+      // admin-written directory.
+      allow update: if isSuperAdmin() || isConfigAdmin() ||
+        (isRealUser() && isSelf(userId) && (unchanged('role') || mirrorsEmployeeRole()));
+
       allow delete: if isSuperAdmin();
     }
 
-    // ── 2. Employees Directory ──
+    // ── 2. Employees Directory (PII + biometrics + payroll) ──
     match /employees/{employeeId} {
-      allow read, create, update: if true;
+      // Every portal (HR, PM, Admin, CEO/CTO dashboards) needs the directory, so
+      // read stays collection-wide — but is now closed to unauthenticated and
+      // anonymous callers.
+      allow read: if isRealUser();
+
+      // HR/Admin provision staff. A freshly authenticated Firebase user with no
+      // employee record may also self-create the minimal stub written by
+      // loginWithEmail, pinned to EMPLOYEE so it cannot be used to escalate — or
+      // to whatever role an admin has ALREADY recorded in users/{uid}, which is
+      // admin-write-only above and therefore a trusted source. (Neither collection
+      // can bootstrap the other from nothing: rule get()/exists() see only
+      // committed state, so within a batch the sibling document does not yet
+      // exist.)
+      allow create: if isConfigAdmin() || (
+        isRealUser() &&
+        isSelf(employeeId) &&
+        (
+          request.resource.data.role == 'EMPLOYEE' ||
+          (userDocExists() && getUserDoc().role == request.resource.data.role)
+        )
+      );
+
+      // Employees may maintain their own profile, but NEVER the fields that
+      // determine privilege, identity, org placement or pay.
+      //
+      // P1 FIX: the whitelist previously omitted `designation`, so an employee
+      // could self-assign designation: 'CEO'. assignCompanyWideWfh() in
+      // AuthContext.tsx authorises office-wide WFH (which disables the GPS
+      // geo-fence company-wide) on
+      //     activeEmployee.designation.toUpperCase().includes('CEO' | 'CTO' |
+      //     'FOUNDER' | 'CIO')
+      // — a display string. Writing one word to your own profile therefore granted
+      // executive authority. `department`, `status`, `shift`, `pmUid`,
+      // `reportingManagerUid` and `qrToken` are added for the same reason: they
+      // drive approval routing, active-headcount reporting, late-mark calculation
+      // and QR check-in forgery respectively.
+      //
+      // `faceDescriptor` / `isFaceEnrolled` are deliberately LEFT writable —
+      // employees enrol their own biometric template from the portal and header
+      // (EmployeePortal.tsx, Header.tsx). No self-service surface writes any field
+      // in the list below; verified against handleSaveProfile (EmployeePortal.tsx)
+      // and every onEnrollSuccess callback.
+      allow update: if isConfigAdmin() || (
+        ownsEmployeeRecord(employeeId) &&
+        unchanged('role') &&
+        unchanged('executiveRole') &&
+        unchanged('employeeId') &&
+        unchanged('email') &&
+        unchanged('salary') &&
+        unchanged('ctc') &&
+        unchanged('approvedWfhDates') &&
+        unchanged('designation') &&
+        unchanged('department') &&
+        unchanged('status') &&
+        unchanged('shift') &&
+        unchanged('pmUid') &&
+        unchanged('reportingManagerUid') &&
+        unchanged('qrToken')
+      );
+
       allow delete: if isSuperAdmin();
 
-      // Date lock subcollection for overlapping leave prevention
+      // Date lock subcollection for overlapping-leave prevention.
+      //
+      // P2 FIX: previously any signed-in user could create or delete ANY
+      // employee's leave locks — i.e. silently reserve a colleague's calendar or
+      // strip the locks protecting an approved leave, defeating the
+      // overlapping-request transaction in LeaveService.submitLeaveRequest.
+      //
+      // The {employeeId} wildcard here is the employee CODE ('KSS2407003'), not a
+      // uid — locks are written to employees/{code}/leaveLocks/{date}, a path whose
+      // parent document does not exist. So ownership is getEmployeeId(), which
+      // reads users/{uid}.employeeId and holds exactly that code.
+      //
+      // isProjectManager() is REQUIRED, not defensive: LeaveService.releaseDateLocks
+      // is invoked from all four rejection stages, and a PM rejecting a report's
+      // request deletes locks belonging to that report. CEO/CTO both carry
+      // role 'SUPER_ADMIN' (demoData.ts), so isConfigAdmin() covers those stages.
+      //
+      // Ordering matters: releaseDateLocks() batch-deletes every date in the range
+      // whether or not a lock document exists there, and for a missing document
+      // `resource` is null. The null-safe disjuncts are therefore evaluated first
+      // and the resource.data read is explicitly guarded.
       match /leaveLocks/{lockDate} {
-        allow read, write, delete: if true;
+        allow read: if isRealUser();
+        allow create, update: if isRealUser() && (
+          isProjectManager() ||
+          isConfigAdmin() ||
+          employeeId == getEmployeeId() ||
+          request.resource.data.get('employeeUid', '~none~') == request.auth.uid
+        );
+        allow delete: if isRealUser() && (
+          isProjectManager() ||
+          isConfigAdmin() ||
+          employeeId == getEmployeeId() ||
+          (resource != null && resource.data.get('employeeUid', '~none~') == request.auth.uid)
+        );
       }
     }
 
     // ── 3. Attendance Records (Live Workforce & Single Source of Truth) ──
     match /attendance/{recordId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && (
-        isHrAdmin() || 
-        isSuperAdmin() || 
-        request.resource.data.uid == request.auth.uid || 
-        request.resource.data.employeeUid == request.auth.uid ||
-        request.resource.data.employeeId == getEmployeeId()
+      allow read: if isRealUser();
+
+      // P1 FIX: the last disjunct was `employeeId == getEmployeeId()`, which could
+      // never be true. recordCheckIn writes `employeeId: emp.id` — the employees
+      // DOCUMENT ID (`emp-KSS2407003`) — while getEmployeeId() returns
+      // users/{uid}.employeeId, the bare employee CODE (`KSS2407003`).
+      // `employeeCode: emp.employeeId` is the field that actually holds the code, so
+      // the intended fallback for employees whose record predates the uid fields was
+      // dead. Since `allow update` correctly evaluates against resource.data, that
+      // left owners unable to update their own legacy attendance documents at all:
+      // recordCheckOut's transaction.update failed permission-denied, and endBreak's
+      // catch reported it to the user as success.
+      allow create: if isRealUser() && (
+        isHrAdmin() ||
+        isSuperAdmin() ||
+        request.resource.data.get('uid', '~none~') == request.auth.uid ||
+        request.resource.data.get('employeeUid', '~none~') == request.auth.uid ||
+        request.resource.data.get('employeeCode', '~none~') == getEmployeeId() ||
+        // Canonical ids are `{uid}_{YYYY-MM-DD}`; a doc so named is the caller's.
+        recordId.split('_')[0] == request.auth.uid
       );
+
+      // P1 FIX: update previously authorised against request.resource.data — the
+      // POST-write document — so a caller could rewrite someone else's record by
+      // also overwriting its `uid` field to their own and pass the check. Ownership
+      // is now evaluated against the STORED document (resource.data).
+      allow update: if isRealUser() && (
+        isHrAdmin() ||
+        isSuperAdmin() ||
+        resource.data.get('uid', '~none~') == request.auth.uid ||
+        resource.data.get('employeeUid', '~none~') == request.auth.uid ||
+        resource.data.get('employeeCode', '~none~') == getEmployeeId() ||
+        recordId.split('_')[0] == request.auth.uid
+      );
+
       allow delete: if isSuperAdmin();
     }
 
     // ── 4. Leave & WFH Requests Collection ──
     match /leaveRequests/{requestId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && (
-        isHrAdmin() || 
-        isSuperAdmin() || 
-        isProjectManager() || 
-        resource.data.employeeUid == request.auth.uid ||
-        resource.data.employeeId == getEmployeeId()
-      );
-      allow delete: if isSuperAdmin();
-    }
+      allow read: if isRealUser();
 
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128;
+      // P1 FIX: create was unconditional for any signed-in user, so a request could
+      // be born already approved — POST leaveRequests/{id} with status 'Approved'
+      // and all four stage statuses 'Approved' bypassed the entire PM → HR → CEO →
+      // CTO chain. LeaveService.submitLeaveRequest hardcodes status: 'Pending'
+      // (the field is stripped from its input type), so pinning it breaks nothing.
+      //
+      // The stage statuses are deliberately NOT pinned: PM/HR/executive submissions
+      // legitimately pass pmStatus: 'N/A' to skip their own stage.
+      allow create: if isRealUser() &&
+        request.resource.data.get('status', '') == 'Pending';
+
+      // P1 FIX: the owner disjuncts previously granted an unrestricted update, so
+      // an employee could approve their OWN leave by writing
+      // { status: 'Approved', ctoStatus: 'Approved' } to their request.
+      //
+      // Owners keep exactly the two transitions the UI performs:
+      //   • 'Pending'   — LeaveService.submitLeaveRequest reuses the deterministic
+      //                   id LR_{code}_{start}_{type}, so re-applying for the same
+      //                   date and type after a rejection is an UPDATE, not a
+      //                   create, and legitimately resets all four stage statuses.
+      //   • 'Cancelled' — LeaveService.cancelRequest writes { status, updatedAt }.
+      // Anything else must leave the approval chain untouched.
+      allow update: if isRealUser() && (
+        isHrAdmin() ||
+        isSuperAdmin() ||
+        isProjectManager() ||
+        (
+          (
+            resource.data.get('employeeUid', '~none~') == request.auth.uid ||
+            resource.data.get('employeeId', '~none~') == getEmployeeId()
+          ) && (
+            request.resource.data.get('status', '') == 'Pending' ||
+            request.resource.data.get('status', '') == 'Cancelled' ||
+            (
+              unchanged('status') &&
+              unchanged('pmStatus') &&
+              unchanged('hrStatus') &&
+              unchanged('ceoStatus') &&
+              unchanged('ctoStatus')
+            )
+          )
+        )
+      );
+
+      allow delete: if isSuperAdmin();
     }
 
     // ── 5. Salary Disbursements (Enterprise Payroll Runs & Payslips) ──
     match /salaryDisbursements/{recordId} {
       // HR/Admin can read all; Employees can read ONLY their own payslip
-      allow read: if isSignedIn() && (
-        isHrAdmin() || 
-        isSuperAdmin() || 
-        resource.data.employeeUid == request.auth.uid || 
+      allow read: if isRealUser() && (
+        isHrAdmin() ||
+        isSuperAdmin() ||
+        resource.data.employeeUid == request.auth.uid ||
         resource.data.employeeId == getEmployeeId()
       );
       allow create, update: if isHrAdmin() || isSuperAdmin();
@@ -124,61 +453,127 @@ service cloud.firestore {
 
     // ── 6. Notifications Collection ──
     match /notifications/{notifId} {
-      allow read, write: if isSignedIn();
+      allow read: if isRealUser();
+
+      // P2 FIX: any signed-in employee could publish a notification with
+      // audience: ['ALL'] — a company-wide push impersonating management, including
+      // the "OFFICIAL ANNOUNCEMENT: OFFICE-WIDE WORK FROM HOME" format that
+      // assignCompanyWideWfh() broadcasts. Everything else stays open, because
+      // ordinary events (check-in, leave submitted, break start) are written
+      // client-side by the acting employee via sendKssNotification().
+      //
+      // PROJECT_MANAGER is included because it must be: NotificationBell.tsx:19
+      // gates the broadcast composer on
+      //     role === 'SUPER_ADMIN' || 'HR_ADMIN' || 'PROJECT_MANAGER'
+      // so a PM broadcast is a live, reachable UI path. Cloud Functions use the
+      // Admin SDK and bypass rules entirely.
+      allow create: if isRealUser() && (
+        !('ALL' in request.resource.data.get('audience', [])) ||
+        isProjectManager() ||
+        isConfigAdmin()
+      );
+
+      allow update: if isRealUser();
       allow delete: if isHrAdmin() || isSuperAdmin();
     }
 
     // ── 7. FCM Tokens Collection ──
+    // Tokens are device push addresses. Read is restricted to admins (the Cloud
+    // Function uses the Admin SDK and bypasses rules entirely), so one employee
+    // can no longer enumerate every colleague's device token.
     match /fcmTokens/{tokenId} {
-      allow read, write: if isSignedIn();
+      allow read: if isConfigAdmin();
+      allow create, update: if isRealUser();
+      allow delete: if isRealUser();
     }
 
     // ── 8. Settings & Configuration ──
+    // Company-wide policy: GPS geo-fence, shift windows, office-wide WFH dates.
+    // Previously world-writable, so any visitor could relocate the office
+    // geo-fence or declare a company-wide WFH day.
     match /settings/{settingId} {
-      allow read, write: if true;
+      allow read: if isRealUser();
+      allow write: if isConfigAdmin();
       allow delete: if isSuperAdmin();
     }
 
     match /companyConfig/{configId} {
-      allow read, write: if true;
+      allow read: if isRealUser();
+      allow write: if isConfigAdmin();
     }
 
     // ── 9. Workplace Rules ──
     match /companyRules/{ruleId} {
-      allow read, write: if true;
+      allow read: if isRealUser();
+      allow write: if isConfigAdmin();
     }
 
     // ── 10. Work Zones (geo-fence definitions) ──
     match /workZones/{zoneId} {
-      allow read, write: if true;
+      allow read: if isRealUser();
+      allow write: if isConfigAdmin();
       allow delete: if isSuperAdmin();
     }
 
     // ── 11. PM Projects & Kanban Tasks ──
     match /projects/{projectId} {
-      allow read, write: if true;
+      allow read: if isRealUser();
+      allow create, delete: if isProjectManager() || isConfigAdmin();
+      // P2 FIX: update was open to every authenticated employee, so anyone could
+      // rewrite a project's budget, deadline, client or status. The ONLY writer in
+      // the codebase is PMDashboard.tsx (a PM-only surface); employees move Kanban
+      // cards in /projectTasks, which stays open below.
+      allow update: if isProjectManager() || isConfigAdmin();
     }
 
     match /projectTasks/{taskId} {
-      allow read, write: if true;
+      // Assignees move their own cards on the Kanban board, so writes stay open
+      // to any authenticated employee.
+      allow read, create, update: if isRealUser();
+      allow delete: if isProjectManager() || isConfigAdmin();
     }
 
+    // 1:1 notes are manager-private performance records. Authored exclusively by
+    // src/components/pm/PMTeamPerformance.tsx (a PM-only surface); the subject
+    // employee retains read access to their own notes.
     match /oneOnOneNotes/{noteId} {
-      allow read, write: if true;
+      allow read: if isProjectManager() || isConfigAdmin() ||
+        (isRealUser() && resource.data.employeeId == getEmployeeId());
+      allow create, update: if isProjectManager() || isConfigAdmin();
+      allow delete: if isConfigAdmin();
     }
 
     // ── 12. Audit Logs (Immutable Append-Only) ──
+    // The trail names employees and their actions; reading it is an admin
+    // function. Any real (non-anonymous) client may append — signInAnonymously()
+    // is still exported, so isSignedIn() alone let an anonymous credential forge
+    // compliance entries.
     match /auditLogs/{logId} {
-      allow read, create: if true;
+      allow read: if isConfigAdmin();
+      allow create: if isRealUser();
       allow update, delete: if false; // Append-only audit trail
     }
 
     // ── 13. Error Diagnostics (Phase 22 observability) ──
     // CREATE stays open: failures can occur before authentication and must
-    // still be recorded. READ requires sign-in. Records are immutable.
+    // still be recorded. READ requires admin. Records are immutable.
+    //
+    // P2 FIX: an unauthenticated `allow create: if true` on an unbounded document
+    // shape is a billing and storage amplification vector — anyone could write
+    // 1 MB documents to this collection in a loop at the project owner's expense.
+    // The shape is now pinned to exactly what logErrorToFirestore()
+    // (src/lib/diagnostics.ts) emits, and `message` to its own 500-char cap.
     match /error_logs/{logId} {
-      allow read: if isSignedIn();
-      allow create: if true;
+      allow read: if isConfigAdmin();
+      allow create: if
+        request.resource.data.keys().hasOnly([
+          'timestamp', 'timestampMs', 'category', 'message', 'stack',
+          'uid', 'employeeId', 'role', 'deviceCategory', 'browser', 'os',
+          'network', 'route', 'appVersion', 'buildVersion', 'userAgent',
+          'operationType', 'path'
+        ]) &&
+        request.resource.data.get('message', '') is string &&
+        request.resource.data.get('message', '').size() <= 500;
       allow update, delete: if false;
     }
   }

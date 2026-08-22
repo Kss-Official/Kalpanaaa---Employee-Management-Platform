@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
-import { getEmployeeWorkDate, safeGetTimestampMillis } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, safeGetTimestampMillis, computeShiftWorkingMinutes } from '../../lib/attendanceEngine';
 import { toISTTimeString, toISTDateString } from '../../lib/absoluteTime';
 
 interface AttendanceManagementProps {
@@ -133,6 +133,11 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
     
     updateAttendanceRecord(editingRecord.id, {
       checkOutAt: null,
+      // B7 FIX: undoing a checkout returns the record to an open shift, so the
+      // completed-day workingMinutes must be cleared too. Leaving them stale showed the
+      // employee as "checked in" while still reporting a full day's minutes, double-
+      // counting the shift once they checked out again.
+      workingMinutes: 0,
       notes: editNotes ? `HR Undo Checkout: ${editNotes}` : (editingRecord.notes ? `${editingRecord.notes} | HR Undo Checkout` : 'HR Undo Checkout')
     });
     setEditingRecord(null);
@@ -140,25 +145,29 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
 
   const handleForceCheckout = () => {
     if (!editingRecord) return;
-    
-    // Set to standard 7:30 PM checkout time for that date in IST
-    const autoCheckOutDate = new Date(`${editingRecord.date}T19:30:00+05:30`);
-    const forceCheckOutTime = autoCheckOutDate.toISOString();
-    
-    let totalMins = 0;
-    const checkInMs = safeGetTimestampMillis(editingRecord.checkInAt);
-    if (checkInMs) {
-      totalMins = Math.floor((autoCheckOutDate.getTime() - checkInMs) / 60000);
-      if (editingRecord.totalBreakMinutes) {
-        totalMins = Math.max(0, totalMins - editingRecord.totalBreakMinutes);
-      }
-    }
-    totalMins = Math.max(0, totalMins);
+
+    // B6 FIX: the standard shift end is 07:00 PM IST, not 07:30 — the old 19:30 literal
+    // over-counted by 30 min and matched the fabricated-checkout signature the shift-
+    // completion guard rejects. Clamp to "now" so a same-day force-checkout never writes
+    // a FUTURE checkOutAt (which isShiftComplete would refuse to treat as complete).
+    const shiftEndDate = new Date(`${editingRecord.date}T19:00:00+05:30`);
+    const nowMs = Date.now();
+    const effectiveCheckOutMs = Math.min(shiftEndDate.getTime(), nowMs);
+    const forceCheckOutTime = new Date(effectiveCheckOutMs).toISOString();
+
+    // Canonical shift-window computation (caps elapsed at 07:00 PM of the record date,
+    // subtracts breaks, floors at zero) — identical to the engine used everywhere else.
+    const totalMins = computeShiftWorkingMinutes(
+      editingRecord.date,
+      editingRecord.checkInAt,
+      forceCheckOutTime,
+      editingRecord.totalBreakMinutes || 0
+    );
 
     updateAttendanceRecord(editingRecord.id, {
       checkOutAt: forceCheckOutTime,
       workingMinutes: totalMins,
-      notes: editNotes ? `HR Force Checkout: ${editNotes}` : (editingRecord.notes ? `${editingRecord.notes} | HR Force Checkout at 19:30` : 'HR Force Checkout at 19:30')
+      notes: editNotes ? `HR Force Checkout: ${editNotes}` : (editingRecord.notes ? `${editingRecord.notes} | HR Force Checkout` : 'HR Force Checkout at end of shift')
     });
     setEditingRecord(null);
   };

@@ -67,7 +67,8 @@ import {
   isShiftComplete,
   safeGetTimestampMillis,
   calculateBreakBreakdown,
-  calculateTotalBreakMinutes 
+  calculateTotalBreakMinutes,
+  isLateCheckIn
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
@@ -75,8 +76,8 @@ import { EmployeeLeaveTab } from './EmployeeLeaveTab';
 import { EmployeeTeamDirectory } from './EmployeeTeamDirectory';
 import { EmployeePayslips } from './EmployeePayslips';
 import { ConsentModal } from '../shared/ConsentModal';
-import { FaceCaptureModal } from '../shared/FaceCaptureModal';
-import { getEmployeeDescriptor } from '../../lib/faceRecognitionEngine';
+import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
+import { getEmployeeDescriptor } from '../../lib/faceDescriptorStore';
 import { BreakEntry, BreakType, normalizeBreakType } from '../../types';
 
 interface EmployeePortalProps {
@@ -595,7 +596,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     
     const res = await recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
     if (res.success && res.record && isWfh) {
-      updateAttendanceRecord(res.record.id, { isWfh: true, status: 'Work From Home', notes: 'Self check-in — Work From Home' });
+      // B25 FIX: never downgrade an evaluated 'Late' to 'Work From Home'. WFH is a
+      // location attribute (kept on isWfh), not a substitute for punctuality — a late
+      // WFH check-in must still read 'Late'. Only on-time check-ins take the WFH label.
+      const wfhStatus = isLateCheckIn(res.record.checkInAt) ? 'Late' : 'Work From Home';
+      updateAttendanceRecord(res.record.id, { isWfh: true, status: wfhStatus, notes: 'Self check-in — Work From Home' });
     }
     
     if (res.success) {
@@ -718,9 +723,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     const newVal = !isWfh;
     setIsWfh(newVal);
     if (todayRecord) {
+      // B25 FIX: derive punctuality from the actual check-in time rather than
+      // hardcoding 'Present'/'Work From Home'. Toggling WFH off previously reset a
+      // late arrival to 'Present', and toggling it on erased 'Late' → 'Work From Home'.
+      // isLateCheckIn is authoritative even if status was already clobbered by a prior toggle.
+      const wasLate = isLateCheckIn(todayRecord.checkInAt);
+      const nextStatus = newVal
+        ? (wasLate ? 'Late' : 'Work From Home')
+        : (wasLate ? 'Late' : 'Present');
       updateAttendanceRecord(todayRecord.id, {
         isWfh: newVal,
-        status: newVal ? 'Work From Home' : 'Present',
+        status: nextStatus,
         notes: newVal ? 'Employee marked as Work From Home' : 'Switched to office attendance'
       });
     }
@@ -752,9 +765,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // Genuine Real Webcam Camera Photo Capture (Fixes E33 Contract)
   const handleRealCameraPhotoCapture = async () => {
     setIsCapturingCamera(true);
+    // B FIX (camera leak): hold the stream in an outer binding so `finally` can always
+    // release it. Previously getTracks().stop() ran only on the success path — if
+    // video.play() or the canvas draw threw, control jumped to catch and the camera
+    // (and its recording indicator) stayed live until the page was closed.
+    let stream: MediaStream | null = null;
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
         const video = document.createElement('video');
         video.srcObject = stream;
         await video.play();
@@ -772,7 +790,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
           setProfilePhoto(realPhotoUrl);
           setActionFeedback({ success: true, message: '✓ Genuine webcam camera photo snapshot captured!' });
         }
-        stream.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
       } else {
         // Fallback to biometric enrollment modal if mediaDevices is restricted
         setIsEnrollFaceModalOpen(true);
@@ -781,6 +799,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       console.warn('[EmployeePortal] Direct webcam stream error, opening biometric face modal', err);
       setIsEnrollFaceModalOpen(true);
     } finally {
+      if (stream) stream.getTracks().forEach(track => track.stop());
       setIsCapturingCamera(false);
     }
   };

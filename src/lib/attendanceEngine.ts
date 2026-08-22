@@ -6,6 +6,15 @@ import { CompanySettings, Employee, AttendanceRecord } from '../types';
 export const COMPANY_TIMEZONE = 'Asia/Kolkata';
 
 /**
+ * B14 FIX: single anti-fraud cap for one break's stored duration.
+ * The break-close paths previously clamped at 120 (startBreak auto-close) and 180
+ * (endBreak), so the SAME forgotten-open break was stored as a different length
+ * depending on whether the user ended it or started another one. All break-close
+ * paths now share this constant so a break's recorded duration is path-independent.
+ */
+export const MAX_BREAK_MINUTES = 180;
+
+/**
  * Canonical helper resolving work-day date string (YYYY-MM-DD) strictly in the employee's timezone.
  * Handles Firestore Timestamp, ISO datetime string, Date object, or epoch number.
  */
@@ -210,7 +219,11 @@ export function calculateBreakBreakdown(
       }
     } else if (typeof b.durationMinutes === 'number' && b.durationMinutes > 0) {
       durSec = b.durationMinutes * 60;
-    } else if (b.startAt && b.endAt) {
+    } else if ((b.startAt || b.startTime) && (b.endAt || b.endTime)) {
+      // B17 FIX: accept legacy breaks that only carry startTime/endTime (no startAt/
+      // endAt). The former `b.startAt && b.endAt` guard skipped them entirely, so the
+      // breakdown under-reported break time for old records while calculateTotalBreakMinutes
+      // (which reads startAt||startTime) counted them — the two totals disagreed.
       const startMs = safeGetTimestampMillis(b.startAt || b.startTime);
       const endMs = safeGetTimestampMillis(b.endAt || b.endTime);
       if (startMs && endMs && endMs > startMs) {
@@ -259,7 +272,15 @@ export function getAttendanceDocId(uid: string, dateStr: string): string {
 export function getEmployeeKey(empOrUid: any, fallbackUserUid?: string): string {
   if (!empOrUid && fallbackUserUid) return fallbackUserUid.trim();
   if (typeof empOrUid === 'string') return empOrUid.trim();
-  const key = empOrUid?.uid || empOrUid?.employeeUid || fallbackUserUid || empOrUid?.id || empOrUid?.employeeId || empOrUid?.employeeCode || '';
+  // P0 FIX: fallbackUserUid is the LOGGED-IN ACTOR's uid (callers pass user?.uid).
+  // It was ranked above the target employee's own id/employeeId, so when an actor
+  // acted on a DIFFERENT employee that has no uid/employeeUid field — 10 of 15
+  // seeded staff — the record was keyed under the ACTOR. An HR admin checking two
+  // such employees in on one day produced ONE doc `{hrUid}_{date}` that the second
+  // check-in silently overwrote (merge:true). The subject's own identity must
+  // always win; the actor uid is a last resort for a bare/empty subject only.
+  const key = empOrUid?.uid || empOrUid?.employeeUid || empOrUid?.id ||
+    empOrUid?.employeeId || empOrUid?.employeeCode || fallbackUserUid || '';
   return String(key).trim();
 }
 
@@ -432,7 +453,13 @@ export function isAttendanceForEmployee(
   if (targetName && recName) {
     const cleanTarget = targetName.replace(/[^a-z0-9]/g, '');
     const cleanRec = recName.replace(/[^a-z0-9]/g, '');
-    if (cleanTarget && cleanRec && (cleanTarget === cleanRec || cleanTarget.includes(cleanRec) || cleanRec.includes(cleanTarget))) {
+    // P0 FIX: substring matching cross-linked distinct employees — "ram" ⊂ "ramesh",
+    // "ramkumar" ⊂ "ramkumarreddy". This branch is the last resort reached only when
+    // no identity token matched, i.e. exactly for the no-uid seeded records, so a
+    // false positive here let one employee see and check out of another's shift.
+    // Exact normalized equality only; genuine same-person records still match modulo
+    // spacing/punctuation, and true identity is disambiguated by steps 1–2 above.
+    if (cleanTarget && cleanRec && cleanTarget === cleanRec) {
       return true;
     }
   }
@@ -608,6 +635,21 @@ export interface CheckInEvaluation {
   locationVerified: boolean;
   distanceMeters?: number;
   message: string;
+}
+
+/**
+ * Punctuality of a check-in, derived purely from its timestamp in IST.
+ * Mirrors the exact grace rule inside evaluateAttendanceScan: on-time through
+ * 10:15 AM IST, Late afterwards. Extracted so WFH toggles can restore the correct
+ * punctuality label without re-clobbering it, and so it is unit-testable.
+ */
+export function isLateCheckIn(checkInAt: any): boolean {
+  const iso = formatTimestampToISO(checkInAt);
+  if (!iso) return false;
+  const d = new Date(iso);
+  const hh = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: COMPANY_TIMEZONE }).format(d), 10);
+  const mm = parseInt(new Intl.DateTimeFormat('en-US', { minute: 'numeric', timeZone: COMPANY_TIMEZONE }).format(d), 10);
+  return hh > 10 || (hh === 10 && mm > 15);
 }
 
 /**

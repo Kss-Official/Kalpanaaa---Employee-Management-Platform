@@ -1,0 +1,45 @@
+{
+  "//": [
+    "Kalpanaaa KSS HRMS — Realtime Database rules (presence / live status).",
+    "",
+    "P0 FIX — DIRECTORY READ WAS PERMANENTLY DENIED. The previous revision granted",
+    "'.read' at /presence/$employeeId only. RTDB read permission does NOT cascade",
+    "upward: subscribeToPresenceDirectory() in src/lib/presenceEngine.ts reads the",
+    "whole /presence tree, which required '.read' AT /presence. Every live-presence",
+    "dashboard therefore failed with PERMISSION_DENIED on every load — silently,",
+    "because that listener was registered without an error callback.",
+    "",
+    "P1 FIX — WRITES WERE UNSCOPED. '.write': 'auth != null' let any authenticated",
+    "employee write (or wipe) any OTHER employee's presence node, forging colleagues",
+    "as online/offline. Writes are now bound to the writer's own uid, which the",
+    "session payload must carry.",
+    "",
+    "P2 FIX — removed /liveStats and /liveAnnouncements. Both were writable by any",
+    "authenticated employee and are referenced nowhere in the codebase; they were",
+    "pure attack surface.",
+    "",
+    "NOTE: presence nodes written before this revision have no 'uid' field, so the",
+    "owner-delete clause cannot match them. Purge the /presence subtree once when",
+    "deploying these rules."
+  ],
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "presence": {
+      ".read": "auth != null",
+      "$employeeId": {
+        "$sessionId": {
+          ".write": "auth != null && ((newData.exists() && newData.child('uid').val() === auth.uid) || (!newData.exists() && data.child('uid').val() === auth.uid))",
+          ".validate": "newData.hasChildren(['status', 'workState', 'lastSeen', 'uid'])",
+          "status": { ".validate": "newData.isString() && (newData.val() === 'online' || newData.val() === 'offline')" },
+          "workState": { ".validate": "newData.isString() && newData.val().length <= 24" },
+          "lastSeen": { ".validate": "newData.isNumber()" },
+          "uid": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+          "role": { ".validate": "newData.isString() && newData.val().length <= 32" },
+          "userAgent": { ".validate": "newData.isString() && newData.val().length <= 120" },
+          "$other": { ".validate": false }
+        }
+      }
+    }
+  }
+}
