@@ -14,7 +14,8 @@ import {
   FolderLock,
   LogOut,
   X,
-  Banknote
+  Banknote,
+  MessageSquare
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -41,6 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const executiveNavItems = [
     { id: 'dashboard',       label: 'Executive Overview',          icon: LayoutDashboard },
     { id: 'employees',       label: 'Team Directory',               icon: Users },
+    { id: 'feedback_hub',    label: 'Feedback & Appraisals',        icon: MessageSquare },
     { id: 'my_id_card',      label: 'My ID Card (QR/Barcode)',      icon: CreditCard },
     { id: 'attendance',      label: 'Attendance Ledger',            icon: CalendarCheck2 },
     { id: 'reports',         label: 'Reports & Intelligence',       icon: FileSpreadsheet },
@@ -57,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const hrNavItems = [
     { id: 'dashboard', label: 'HR Control Room', icon: LayoutDashboard },
     { id: 'employees', label: 'Team Directory', icon: Users },
+    { id: 'feedback_hub', label: 'Feedback & Reviews', icon: MessageSquare },
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
     { id: 'leave_approvals', label: 'Leave & WFH Inbox', icon: FileText },
     { id: 'hr_payroll', label: 'Salary Disbursement', icon: Banknote },
@@ -69,10 +72,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pmNavItems = [
     { id: 'pm_dashboard', label: 'PM Control Center', icon: LayoutDashboard },
     { id: 'employees', label: 'Team Directory', icon: Users },
+    { id: 'feedback_hub', label: 'Team Feedback & Growth', icon: MessageSquare },
     { id: 'leave_approvals', label: 'Team Leave Approvals', icon: FileText },
     { id: 'company_rules', label: 'Company & Employee Rules', icon: FileText },
     { id: 'pm_projects', label: 'Projects & Kanban', icon: FolderLock },
-    { id: 'pm_team', label: 'Team Performance & 1:1s', icon: Users },
     { id: 'notifications', label: 'Notification History', icon: ShieldCheck },
     { id: 'pm_profile', label: 'My Profile', icon: UserCheck },
   ];
@@ -80,6 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const employeeNavItems = [
     { id: 'emp_dashboard', label: 'My Workspace', icon: LayoutDashboard },
     { id: 'emp_attendance', label: 'My Attendance', icon: UserCheck },
+    { id: 'emp_feedback', label: 'My Feedback & Reviews', icon: MessageSquare },
     { id: 'emp_leave', label: 'My Leave & WFH', icon: CalendarCheck2 },
     { id: 'company_rules', label: 'Company & Employee Rules', icon: FileText },
     { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },

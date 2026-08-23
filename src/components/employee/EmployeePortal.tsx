@@ -88,6 +88,7 @@ import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
 import { EmployeeTeamDirectory } from './EmployeeTeamDirectory';
 import { EmployeePayslips } from './EmployeePayslips';
+import { EmployeeFeedbackView } from './EmployeeFeedbackView';
 import { ConsentModal } from '../shared/ConsentModal';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
 import { getEmployeeDescriptor } from '../../lib/faceDescriptorStore';
@@ -2267,6 +2268,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       {/* 4. MY LEAVE & WFH TAB */}
       {activeTab === 'emp_leave' && (
         <EmployeeLeaveTab />
+      )}
+
+      {/* 4.5 MY FEEDBACK & REVIEWS TAB */}
+      {activeTab === 'emp_feedback' && (
+        <EmployeeFeedbackView />
       )}
 
       {/* 5. TEAM DIRECTORY TAB */}

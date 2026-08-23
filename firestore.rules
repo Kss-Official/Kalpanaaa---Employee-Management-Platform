@@ -641,5 +641,71 @@ service cloud.firestore {
         request.resource.data.get('message', '').size() <= 500;
       allow update, delete: if false;
     }
+
+    // ── 14. Performance feedback / appraisals ───────────────────────────────
+    match /performanceFeedbacks/{feedbackId} {
+
+      // The signed-in account is the SUBJECT of this review. Mirrors the dual
+      // keying of /employees: real accounts are keyed by uid, the seeded ones by
+      // their 'emp-KSS…' document id, and the bare code is carried separately.
+      function isSubject() {
+        return isRealUser() && (
+          resource.data.targetEmployeeId == request.auth.uid ||
+          resource.data.targetEmployeeId == getEmployeeDocId() ||
+          resource.data.targetEmployeeCode == getEmployeeId()
+        );
+      }
+
+      // The subject may sign off on a review and nothing else: only the three
+      // acknowledgement fields may move, and only in the ON direction.
+      function isAcknowledgementOnly() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['isAcknowledged', 'acknowledgedAt', 'updatedAt']) &&
+               request.resource.data.isAcknowledged == true;
+      }
+
+      // The author is identified by whichever key their account is stored under.
+      function isAuthor() {
+        return isRealUser() && (
+          resource.data.reviewerId == request.auth.uid ||
+          resource.data.reviewerId == getEmployeeDocId()
+        );
+      }
+
+      allow read: if isConfigAdmin() || isProjectManager() || isSubject();
+
+      // A review must be filed under the author's OWN identity and never about
+      // themselves. Without the reviewerId pin, any PM could publish an
+      // appraisal attributed to the CEO; without the self-review ban, a PM could
+      // award themselves a 5.
+      allow create: if (isConfigAdmin() || isProjectManager()) &&
+        request.resource.data.reviewerId is string &&
+        (
+          request.resource.data.reviewerId == request.auth.uid ||
+          request.resource.data.reviewerId == getEmployeeDocId()
+        ) &&
+        request.resource.data.targetEmployeeId is string &&
+        request.resource.data.targetEmployeeId.size() > 0 &&
+        request.resource.data.targetEmployeeId != request.resource.data.reviewerId &&
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        request.resource.data.isAcknowledged == false;
+
+      // P0 FIX: the previous revision granted the SUBJECT a blanket `update`.
+      // rating, sentiment, strengths, privateLeadershipNotes AND reviewerId all
+      // live on this one document, so an employee could rewrite their own
+      // appraisal, reassign reviewerId to themselves, and then satisfy the
+      // delete rule below to destroy the original review outright.
+      allow update: if
+        (isConfigAdmin() && unchanged('reviewerId') && unchanged('targetEmployeeId')) ||
+        (isProjectManager() && isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId')) ||
+        (isSubject() && isAcknowledgementOnly());
+
+      // Acknowledged reviews are part of the appraisal record: only an admin may
+      // retract one. An author can still withdraw their own unsigned draft.
+      allow delete: if isConfigAdmin() ||
+        (isAuthor() && resource.data.get('isAcknowledged', false) == false);
+    }
   }
 }

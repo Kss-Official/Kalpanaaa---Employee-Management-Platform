@@ -5,6 +5,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useHaptic } from '../../hooks/useHaptic';
 import { LeaveRequest } from '../../types';
 import { todayInIST } from '../../lib/absoluteTime';
+import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+
+/**
+ * Whole-word title test against an UPPERCASED designation.
+ *
+ * `desig.includes('CTO')` was true for "CONTRACTOR" (C-T-O appears inside it),
+ * so anyone whose free-text designation contained "Contractor" was granted
+ * CTO final-sanction authority over leave requests. Same class of collision:
+ * "COORDINATOR" contains "COO". Anchoring on word boundaries closes that
+ * escalation path without changing the intended approval chain.
+ */
+const hasTitle = (desig: string, word: string) =>
+  new RegExp('\\b' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(desig);
 
 export const LeaveApprovalsView: React.FC = () => {
   const { leaveRequests, updateLeaveRequestStatus, activeEmployee, employees, settings, assignCompanyWideWfh, removeCompanyWideWfh, companyWideWfhDates, role } = useAuth();
@@ -17,11 +30,11 @@ export const LeaveApprovalsView: React.FC = () => {
   const [wfhDateInput, setWfhDateInput] = useState(todayStr);
   const [wfhFeedback, setWfhFeedback] = useState<{ success: boolean; message: string } | null>(null);
 
-  const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
-    (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
-    (activeEmployee?.designation || '').toUpperCase().includes('CTO') ||
-    (activeEmployee?.designation || '').toUpperCase().includes('FOUNDER') ||
-    (activeEmployee?.designation || '').toUpperCase().includes('CIO') ||
+  // Gates the company-wide WFH assignment panel below ("Executive Clearance").
+  // Was four `designation.toUpperCase().includes(...)` tests, so an uppercased
+  // "CONTRACTOR" satisfied the 'CTO' branch and got clearance to assign WFH for
+  // the whole company. Delegated to the shared whole-word matcher instead.
+  const isCeoOrCto = isExecutiveOrLeadership(activeEmployee) ||
     activeEmployee?.employeeId === 'CEO001' ||
     activeEmployee?.employeeId === 'CTO001';
 
@@ -81,10 +94,10 @@ export const LeaveApprovalsView: React.FC = () => {
       (req.employeeName || '').toLowerCase().includes('koushik') ||
       (req.employeeName || '').toLowerCase().includes('abhinaya');
 
-    const isCto = name.includes('gaurav') || desig.includes('CTO') || desig.includes('CIO') || empId === 'CTO001' || empId === 'KSS2407001';
-    const isCeo = name.includes('akshit') || desig.includes('CEO') || empId === 'CEO001' || empId === 'KSS2407002';
-    const isPmUser = userRole === 'PROJECT_MANAGER' || desig.includes('PROJECT MANAGER') || name.includes('koushik');
-    const isHrUser = userRole === 'HR_ADMIN' || desig.includes('HR') || name.includes('abhinaya');
+    const isCto = name.includes('gaurav') || hasTitle(desig, 'CTO') || hasTitle(desig, 'CIO') || empId === 'CTO001' || empId === 'KSS2407001';
+    const isCeo = name.includes('akshit') || hasTitle(desig, 'CEO') || empId === 'CEO001' || empId === 'KSS2407002';
+    const isPmUser = userRole === 'PROJECT_MANAGER' || hasTitle(desig, 'PROJECT MANAGER') || name.includes('koushik');
+    const isHrUser = userRole === 'HR_ADMIN' || hasTitle(desig, 'HR') || name.includes('abhinaya');
 
     // 1. PM Stage:
     if (isPmUser && !isCeo && !isCto && !isHrUser) {
@@ -135,9 +148,9 @@ export const LeaveApprovalsView: React.FC = () => {
     const empId = activeEmployee?.employeeId || activeEmployee?.id || '';
 
     let forcedStage = target;
-    if (name.includes('gaurav') || desig.includes('CTO') || empId === 'KSS2407001') {
+    if (name.includes('gaurav') || hasTitle(desig, 'CTO') || empId === 'KSS2407001') {
       forcedStage = 'CTO';
-    } else if (name.includes('akshit') || desig.includes('CEO') || empId === 'KSS2407002') {
+    } else if (name.includes('akshit') || hasTitle(desig, 'CEO') || empId === 'KSS2407002') {
       forcedStage = 'CEO';
     }
 
@@ -153,9 +166,9 @@ export const LeaveApprovalsView: React.FC = () => {
     const empId = activeEmployee?.employeeId || activeEmployee?.id || '';
 
     let forcedStage = target;
-    if (name.includes('gaurav') || desig.includes('CTO') || empId === 'KSS2407001') {
+    if (name.includes('gaurav') || hasTitle(desig, 'CTO') || empId === 'KSS2407001') {
       forcedStage = 'CTO';
-    } else if (name.includes('akshit') || desig.includes('CEO') || empId === 'KSS2407002') {
+    } else if (name.includes('akshit') || hasTitle(desig, 'CEO') || empId === 'KSS2407002') {
       forcedStage = 'CEO';
     }
 
@@ -268,7 +281,7 @@ export const LeaveApprovalsView: React.FC = () => {
                 </div>
               );
             }
-            if (name.includes('gaurav') || desig.includes('CTO') || desig.includes('CIO') || empId === 'CTO001' || empId === 'KSS2407001') {
+            if (name.includes('gaurav') || hasTitle(desig, 'CTO') || hasTitle(desig, 'CIO') || empId === 'CTO001' || empId === 'KSS2407001') {
               return (
                 <div className="inline-flex items-center gap-1.5 mt-1 px-3 py-1 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[11px] sm:text-xs font-extrabold leading-snug break-words max-w-full">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> 
@@ -276,7 +289,7 @@ export const LeaveApprovalsView: React.FC = () => {
                 </div>
               );
             }
-            if (name.includes('akshit') || desig.includes('CEO') || empId === 'CEO001' || empId === 'KSS2407002') {
+            if (name.includes('akshit') || hasTitle(desig, 'CEO') || empId === 'CEO001' || empId === 'KSS2407002') {
               return (
                 <div className="inline-flex items-center gap-1.5 mt-1 px-3 py-1 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[11px] sm:text-xs font-extrabold leading-snug break-words max-w-full">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> 
@@ -284,7 +297,7 @@ export const LeaveApprovalsView: React.FC = () => {
                 </div>
               );
             }
-            if (r === 'PROJECT_MANAGER' || desig.includes('PROJECT MANAGER') || name.includes('koushik')) {
+            if (r === 'PROJECT_MANAGER' || hasTitle(desig, 'PROJECT MANAGER') || name.includes('koushik')) {
               return (
                 <div className="inline-flex items-center gap-1.5 mt-1 px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] sm:text-xs font-extrabold leading-snug break-words max-w-full">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> 

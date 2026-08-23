@@ -2,13 +2,23 @@ import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Mail, Phone, Building2, Search, Users, ChevronDown, Star, Crown, Shield } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+
+/**
+ * Whole-word title test. `includes()` cannot be used against `designation`:
+ * it is a free-text field, and "Contractor" contains "cto" while
+ * "Coordinator" contains "coo" -- both were landing in the CTO/MD tab and
+ * wearing an executive badge.
+ */
+const hasTitle = (desig: string, ...words: string[]) =>
+  new RegExp('\\b(' + words.join('|') + ')\\b').test(desig);
 
 const ROLE_FILTERS = [
   { label: 'ALL', key: 'ALL', match: () => true },
-  { label: 'CEO', key: 'CEO', match: (e: any) => (e.designation || '').toLowerCase().includes('ceo') || (e.designation || '').toLowerCase().includes('chief executive') },
-  { label: 'CTO/MD', key: 'CTO', match: (e: any) => (e.designation || '').toLowerCase().includes('cto') || (e.designation || '').toLowerCase().includes('founder') || (e.designation || '').toLowerCase().includes('cio') },
-  { label: 'HR',  key: 'HR',  match: (e: any) => e.role === 'HR_ADMIN' || (e.department || '').toLowerCase().includes('hr') || (e.designation || '').toLowerCase().includes('hr') },
-  { label: 'PM',  key: 'PM',  match: (e: any) => e.role === 'PROJECT_MANAGER' || (e.designation || '').toLowerCase().includes('project manager') || (e.designation || '').toLowerCase().includes('program manager') },
+  { label: 'CEO', key: 'CEO', match: (e: any) => hasTitle((e.designation || '').toLowerCase(), 'ceo', 'chief executive') },
+  { label: 'CTO/MD', key: 'CTO', match: (e: any) => hasTitle((e.designation || '').toLowerCase(), 'cto', 'cio', 'founder', 'co-?founder', 'chief technology', 'chief information') },
+  { label: 'HR',  key: 'HR',  match: (e: any) => e.role === 'HR_ADMIN' || (e.department || '').toLowerCase().includes('hr') || hasTitle((e.designation || '').toLowerCase(), 'hr', 'human resources') },
+  { label: 'PM',  key: 'PM',  match: (e: any) => e.role === 'PROJECT_MANAGER' || hasTitle((e.designation || '').toLowerCase(), 'project manager', 'program manager') },
 ];
 
 export const EmployeeTeamDirectory: React.FC = () => {
@@ -20,21 +30,9 @@ export const EmployeeTeamDirectory: React.FC = () => {
   // Extract unique departments
   const rawDepts = Array.from(new Set(employees.map(e => e.department).filter(Boolean)));
 
-  // Executive check function
-  const isExecutiveLeadership = (emp: any) => {
-    const desig = (emp.designation || '').toLowerCase();
-    const role = (emp.role || '').toUpperCase();
-    return (
-      role === 'SUPER_ADMIN' ||
-      desig.includes('ceo') ||
-      desig.includes('chief executive') ||
-      desig.includes('cto') ||
-      desig.includes('founder') ||
-      desig.includes('managing director') ||
-      desig.includes('chief technology') ||
-      desig.includes('cio')
-    );
-  };
+  // Shared with payroll, the admin directory and every dashboard so all five
+  // surfaces agree on who is leadership.
+  const isExecutiveLeadership = (emp: any) => isExecutiveOrLeadership(emp);
 
   // Filter logic: role tab takes priority over dept tab
   const allFilteredMembers = useMemo(() => {
@@ -86,13 +84,13 @@ export const EmployeeTeamDirectory: React.FC = () => {
     const desig = (emp.designation || '').toLowerCase();
     const dept = (emp.department || '').toLowerCase();
 
-    if (desig.includes('ceo') || desig.includes('chief executive'))
+    if (hasTitle(desig, 'ceo', 'chief executive'))
       return { label: 'CEO', color: 'bg-amber-500/15 text-amber-300 border-amber-500/30 font-black' };
-    if (desig.includes('cto') || desig.includes('founder') || desig.includes('cio'))
+    if (hasTitle(desig, 'cto', 'cio', 'founder', 'co-?founder', 'chief technology', 'chief information'))
       return { label: 'CTO / MD / Founder', color: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30 font-black' };
-    if (emp.role === 'HR_ADMIN' || dept.includes('hr') || desig.includes('hr'))
+    if (emp.role === 'HR_ADMIN' || dept.includes('hr') || hasTitle(desig, 'hr', 'human resources'))
       return { label: 'HR Lead', color: 'bg-purple-500/10 text-purple-300 border-purple-500/30' };
-    if (emp.role === 'PROJECT_MANAGER' || desig.includes('project manager'))
+    if (emp.role === 'PROJECT_MANAGER' || hasTitle(desig, 'project manager'))
       return { label: 'PM', color: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' };
     return null;
   };

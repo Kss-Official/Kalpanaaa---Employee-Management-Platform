@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Kanban, 
   Clock, 
@@ -16,9 +16,21 @@ import {
   FileText,
   UserCheck,
   Coffee,
-  Loader2
+  Loader2,
+  PieChart as PieChartIcon,
+  Sparkles,
+  X,
+  Search,
+  Eye,
+  Timer,
+  UtensilsCrossed,
+  Briefcase,
+  GraduationCap,
+  Zap,
+  MapPin,
+  Edit3
 } from 'lucide-react';
-import { Project, LeaveRequest } from '../../types';
+import { Project, LeaveRequest, Employee, AttendanceRecord } from '../../types';
 import { db, subscribeWithRecovery } from '../../lib/firebase';
 import { collection, setDoc, doc } from 'firebase/firestore';
 import {
@@ -33,10 +45,15 @@ import {
   formatShortDate,
   SHIFT_LABEL,
   SHIFT_TOTAL_MINUTES,
-  WORK_WEEK_DAYS
+  WORK_WEEK_DAYS,
+  isExecutiveOrLeadership,
+  getWorkDate
 } from '../../lib/attendanceEngine';
 import type { DayWorkSummary, WorkWeekDay } from '../../lib/attendanceEngine';
-import { toISTTimeString } from '../../lib/absoluteTime';
+import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
+import { useHaptic } from '../../hooks/useHaptic';
 
 interface PMDashboardProps {
   onNavigateTab: (tab: string) => void;
@@ -89,19 +106,115 @@ const DEFAULT_PROJECTS: Project[] = [
 
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings } = useAuth();
+  const { triggerHaptic } = useHaptic();
 
-  const todayStr = getEmployeeWorkDate(new Date());
+  const todayStr = getWorkDate(new Date());
 
-  // One clock drives every live duration on this screen. Holding the timestamp
-  // itself (rather than an opaque counter) means the memos below can depend on
-  // it explicitly, so a cell can never render a duration from a stale `now`.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const interval = setInterval(() => setNowMs(Date.now()), 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // PM's own live attendance record (canonical resolver — same doc the backend writes to)
+  // Filter operational workforce (excluding CEO, CTO, COO Rahul Pathak, Founders)
+  const operationalEmployees = useMemo(() => {
+    return employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
+  }, [employees]);
+
+  const totalWorkforceCount = operationalEmployees.length;
+
+  const todayRecords = attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
+
+  // Build daily roster for PM view with live status
+  const dailyRoster = useMemo(() => {
+    return operationalEmployees.map(emp => {
+      const rec = todayRecords.find(r => 
+        r.employeeId === emp.id || 
+        r.employeeCode === emp.employeeId || 
+        (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())
+      );
+
+      const leaveReq = leaveRequests.find(l => 
+        (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeName === emp.fullName) &&
+        l.status === 'Approved' &&
+        todayStr >= l.startDate && 
+        todayStr <= l.endDate
+      );
+
+      const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
+      const isComplete = isShiftComplete(rec);
+      const isCheckedIn = !!rec?.checkInAt && !isComplete;
+
+      let computedStatus: 'Present' | 'Late' | 'Work From Home' | 'On Leave' | 'LOP' | 'On Break' | 'Absent' = 'Absent';
+
+      if (activeBreak && isCheckedIn) {
+        computedStatus = 'On Break';
+      } else if (rec) {
+        if (rec.status === 'Late') computedStatus = 'Late';
+        else if (rec.isWfh || rec.status === 'Work From Home') computedStatus = 'Work From Home';
+        else if (rec.status === 'Present' || rec.checkInAt) computedStatus = 'Present';
+        else if (rec.status === 'On Leave' || rec.status === 'Half Day') computedStatus = 'On Leave';
+        else if (rec.status === 'Absent') computedStatus = 'Absent';
+      } else if (leaveReq) {
+        if (leaveReq.type === 'WFH') computedStatus = 'Work From Home';
+        else computedStatus = 'On Leave';
+      } else if (emp.status === 'On Leave') {
+        computedStatus = 'On Leave';
+      }
+
+      if (emp.status === 'Suspended' || (rec && (rec.notes || '').toLowerCase().includes('lop'))) {
+        computedStatus = 'LOP';
+      }
+
+      return {
+        employee: emp,
+        record: rec,
+        status: computedStatus,
+        isCheckedIn,
+        activeBreak,
+        isShiftComplete: isComplete,
+        leaveReq
+      };
+    });
+  }, [operationalEmployees, todayRecords, leaveRequests, todayStr]);
+
+  // Turnout KPI Counts
+  const presentCount = dailyRoster.filter(r => r.status === 'Present').length;
+  const onBreakCount = dailyRoster.filter(r => r.status === 'On Break').length;
+  const lateCount = dailyRoster.filter(r => r.status === 'Late').length;
+  const wfhCount = dailyRoster.filter(r => r.status === 'Work From Home').length;
+  const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
+  const lopCount = dailyRoster.filter(r => r.status === 'LOP').length;
+  const absentCount = dailyRoster.filter(r => r.status === 'Absent').length;
+
+  const totalActiveWorkingToday = presentCount + onBreakCount + lateCount + wfhCount;
+
+  // Donut Pie Data
+  const statusDistributionData = useMemo(() => {
+    return [
+      { name: 'Present', value: presentCount, color: '#10b981' },
+      { name: 'On Break', value: onBreakCount, color: '#f59e0b' },
+      { name: 'Late', value: lateCount, color: '#eab308' },
+      { name: 'Work From Home', value: wfhCount, color: '#0ea5e9' },
+      { name: 'On Leave', value: onLeaveCount, color: '#a855f7' },
+      { name: 'LOP', value: lopCount, color: '#ec4899' },
+      { name: 'Absent', value: absentCount, color: '#f43f5e' },
+    ].filter(d => d.value > 0);
+  }, [presentCount, onBreakCount, lateCount, wfhCount, onLeaveCount, lopCount, absentCount]);
+
+  // Modals
+  const [isRosterModalOpen, setIsRosterModalOpen] = useState(false);
+  const [rosterFilter, setRosterFilter] = useState<string>('ALL');
+  const [rosterSearch, setRosterSearch] = useState('');
+
+  const [selectedEmployeeActivity, setSelectedEmployeeActivity] = useState<{
+    employee: Employee;
+    record?: AttendanceRecord | null;
+  } | null>(null);
+
+  const [monthlyAttendanceEmp, setMonthlyAttendanceEmp] = useState<Employee | null>(null);
+
+  // PM's own live attendance record
   const pmTodayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
   const isPmCheckedIn = !!pmTodayRecord?.checkInAt && !isShiftComplete(pmTodayRecord);
   const activePmBreak = pmTodayRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
@@ -127,7 +240,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     }
   };
 
-  // Real-time Firestore Sync for PM Projects (Fixes P14 Contract)
+  // Projects
   const [projects, setProjects] = useState<Project[]>(() => {
     const saved = localStorage.getItem('kss_pm_projects');
     if (saved) {
@@ -140,8 +253,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   });
 
   useEffect(() => {
-    // P0 FIX: never attach while unauthenticated — a permission-denied kills a
-    // listener permanently, and this effect previously ran once with [] deps.
     if (!isAuthenticated) return;
     const unsub = subscribeWithRecovery(collection(db, 'projects'), (snapshot) => {
       if (!snapshot.empty) {
@@ -179,16 +290,11 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     );
   };
 
-  // Item #15: the roster is a SIX day week (Mon–Sat). The previous loop ran
-  // `i < 5` and hardcoded ['Mon'..'Fri'], so Saturday — a full working day here —
-  // was structurally invisible in the capacity table: an employee could work
-  // every Saturday of the month and the heatmap would never show one hour of it.
+  // Capacity week
   const [weekOffset, setWeekOffset] = useState(0);
   const weekAnchor = React.useMemo(
     () => new Date(nowMs + weekOffset * 7 * 86400000),
-    // Re-anchoring on every tick would be wasteful and would fight the arrows;
-    // the anchor only needs the CURRENT week, which changes at most daily.
-    [todayStr, weekOffset] // eslint-disable-line react-hooks/exhaustive-deps
+    [todayStr, weekOffset]
   );
   const holidayDates = React.useMemo<string[]>(
     () => (((settings as any)?.holidayDates) || []) as string[],
@@ -196,7 +302,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   );
   const weekDays = React.useMemo(
     () => buildWorkWeek(weekAnchor, { nowMs, holidayDates }),
-    [weekAnchor, holidayDates, todayStr] // eslint-disable-line react-hooks/exhaustive-deps
+    [weekAnchor, holidayDates, todayStr]
   );
   const weekLabel = weekDays.length
     ? `${formatShortDate(weekDays[0].dateStr)} → ${formatShortDate(weekDays[weekDays.length - 1].dateStr)}`
@@ -219,501 +325,804 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
     const isHrOrPmEmployee = (r.department || '').toLowerCase().includes('hr') ||
       r.employeeRole === 'HR_ADMIN' ||
-      r.employeeRole === 'PROJECT_MANAGER' ||
       r.employeeRole === 'SUPER_ADMIN';
 
     return !isHrOrPmEmployee;
   });
 
+  // Filtered Roster for Modal Table
+  const filteredRosterModal = useMemo(() => {
+    return dailyRoster.filter(r => {
+      if (rosterFilter !== 'ALL' && r.status !== rosterFilter) return false;
+      if (rosterSearch.trim() !== '') {
+        const q = rosterSearch.toLowerCase();
+        const matchesName = (r.employee.fullName || '').toLowerCase().includes(q);
+        const matchesId = (r.employee.employeeId || '').toLowerCase().includes(q);
+        const matchesDept = (r.employee.department || '').toLowerCase().includes(q);
+        return matchesName || matchesId || matchesDept;
+      }
+      return true;
+    });
+  }, [dailyRoster, rosterFilter, rosterSearch]);
+
   return (
     <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
       
-      {/* Top Header Command Center */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5 backdrop-blur-md">
+      {/* Top Banner Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 p-5 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-md">
         <div>
-          <div className="flex items-center gap-2 text-[11px] sm:text-xs font-extrabold text-blue-400 uppercase tracking-wider mb-1">
-            <Kanban className="w-4 h-4 text-blue-400" />
-            <span>Project Manager Command Center</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+              Project Delivery &amp; Workforce Portal
+            </span>
+            <span className="text-xs text-slate-500 font-mono">Live Sync Active</span>
           </div>
-          <h1 className="text-lg sm:text-2xl font-black text-white tracking-tight leading-tight">
-            Engineering Sprint &amp; Workload Control
-          </h1>
-          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-            Monitor project health, balance team capacity, and send HR leave recommendations.
+          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight mt-1">Project Manager Dashboard</h1>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Monitor real-time team turnout ({totalActiveWorkingToday}/{totalWorkforceCount} active today), review sprints, and edit 30-day attendance.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto shrink-0">
-          {/* PM Break & Duty Status Widget */}
+        <div className="flex items-center gap-3">
+          {/* PM Break Toggle */}
           <button
             onClick={handlePmBreakToggle}
-            disabled={isBreakActionLoading || !isPmCheckedIn}
-            className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md ${
+            disabled={isBreakActionLoading}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md ${
               activePmBreak 
-                ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 animate-pulse font-extrabold'
-                : isPmCheckedIn
-                  ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30'
-                  : 'bg-slate-800/60 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-70'
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30' 
+                : isPmCheckedIn 
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700' 
+                  : 'bg-slate-800/50 text-slate-500 border border-slate-800 cursor-not-allowed opacity-60'
             }`}
-            title={!isPmCheckedIn ? 'Check in first to take a break' : activePmBreak ? 'End your active break' : 'Take a break'}
           >
-            {isBreakActionLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Coffee className="w-4 h-4 text-amber-400" />
-            )}
-            <span>{activePmBreak ? 'End Break (Active)' : 'Take Break'}</span>
-          </button>
-
-          <button
-            onClick={() => onNavigateTab('leave_approvals')}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-purple-900/30 transition-all cursor-pointer flex-1 sm:flex-initial"
-          >
-            <FileText className="w-4 h-4" />
-            <span>Leave Approvals ({pendingTeamRequests.length})</span>
-          </button>
-          <button
-            onClick={() => onNavigateTab('pm_projects')}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-blue-900/30 transition-all cursor-pointer flex-1 sm:flex-initial"
-          >
-            <Kanban className="w-4 h-4" />
-            <span>Open Task Kanban Board</span>
+            {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Coffee className="w-3.5 h-3.5" />}
+            <span>{activePmBreak ? 'End My Break' : 'Take Break'}</span>
           </button>
         </div>
       </div>
 
-      {/* Zone 1: Pending Team Requests for PM Approval */}
-      <div className="bg-slate-900/90 border border-purple-500/30 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-          <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
-            <FileText className="w-4 h-4 text-purple-400 shrink-0" /> 
-            <span>Team Leave &amp; WFH Pending Approvals (PM Stage)</span>
-          </h3>
-          <span className="text-[11px] font-mono font-bold text-purple-400 bg-purple-500/10 px-2.5 py-0.5 rounded-full border border-purple-500/20 shrink-0">
-            {pendingTeamRequests.length} Pending
-          </span>
+      {/* ── 1. WORKFORCE TURNOUT KPI CARDS (Clickable for Roster Modal) ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        {/* Total Active (9/15 Box) */}
+        <div
+          onClick={() => { triggerHaptic(); setRosterFilter('ALL'); setIsRosterModalOpen(true); }}
+          className="bg-gradient-to-br from-blue-900/40 via-slate-900 to-slate-900 rounded-2xl p-4 border-2 border-blue-500/40 shadow-xl hover:border-blue-400 hover:scale-[1.02] transition-all cursor-pointer group col-span-2 sm:col-span-2 lg:col-span-1"
+        >
+          <span className="text-[10px] font-black text-blue-400 uppercase tracking-wider block">Total Workforce</span>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-2xl font-black text-white font-mono">{totalActiveWorkingToday}</span>
+            <span className="text-xs font-bold text-slate-400 font-mono">/ {totalWorkforceCount}</span>
+          </div>
+          <span className="text-[10px] text-blue-300 font-bold mt-1 block group-hover:underline">Click for Live Table →</span>
         </div>
 
-        <div className="space-y-3 pt-1">
+        {/* Present */}
+        <div
+          onClick={() => { triggerHaptic(); setRosterFilter('Present'); setIsRosterModalOpen(true); }}
+          className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 shadow-md hover:border-emerald-500/50 transition-all cursor-pointer"
+        >
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present</span>
+          <span className="text-2xl font-black text-emerald-400 font-mono mt-1 block">{presentCount}</span>
+          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">On Duty</span>
+        </div>
+
+        {/* On Break (Glowing Live Beacon) */}
+        <div
+          onClick={() => { triggerHaptic(); setRosterFilter('On Break'); setIsRosterModalOpen(true); }}
+          className="bg-slate-900/90 rounded-2xl p-4 border-2 border-amber-500/40 shadow-lg shadow-amber-950/20 hover:border-amber-400 transition-all cursor-pointer relative overflow-hidden"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">On Break</span>
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            </span>
+          </div>
+          <span className="text-2xl font-black text-amber-400 font-mono mt-1 block">{onBreakCount}</span>
+          <span className="text-[9px] text-amber-300/80 font-semibold block mt-0.5">Live Active</span>
+        </div>
+
+        {/* Late */}
+        <div
+          onClick={() => { triggerHaptic(); setRosterFilter('Late'); setIsRosterModalOpen(true); }}
+          className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 shadow-md hover:border-amber-500/50 transition-all cursor-pointer"
+        >
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Late</span>
+          <span className="text-2xl font-black text-amber-400 font-mono mt-1 block">{lateCount}</span>
+          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">Shift Delayed</span>
+        </div>
+
+        {/* Work From Home */}
+        <div
+          onClick={() => { triggerHaptic(); setRosterFilter('Work From Home'); setIsRosterModalOpen(true); }}
+          className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 shadow-md hover:border-sky-500/50 transition-all cursor-pointer"
+        >
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">WFH</span>
+          <span className="text-2xl font-black text-sky-400 font-mono mt-1 block">{wfhCount}</span>
+          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">Remote Staff</span>
+        </div>
+
+        {/* On Leave */}
+        <div
+          onClick={() => { triggerHaptic(); setRosterFilter('On Leave'); setIsRosterModalOpen(true); }}
+          className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 shadow-md hover:border-purple-500/50 transition-all cursor-pointer"
+        >
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">On Leave</span>
+          <span className="text-2xl font-black text-purple-400 font-mono mt-1 block">{onLeaveCount}</span>
+          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">Approved</span>
+        </div>
+
+        {/* Absent */}
+        <div
+          onClick={() => { triggerHaptic(); setRosterFilter('Absent'); setIsRosterModalOpen(true); }}
+          className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 shadow-md hover:border-rose-500/50 transition-all cursor-pointer"
+        >
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Absent</span>
+          <span className="text-2xl font-black text-rose-400 font-mono mt-1 block">{absentCount}</span>
+          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">No Check-in</span>
+        </div>
+      </div>
+
+      {/* ── 2. WORKFORCE STATUS PIE CHART & PENDING SPRINT LEAVES ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Today's Workforce Status Donut Pie Chart */}
+        <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-5 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <PieChartIcon className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-xs font-black text-white uppercase tracking-wider">Today's Workforce Status</h3>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400 font-bold">{todayStr}</span>
+          </div>
+
+          <div className="relative w-full h-44 flex items-center justify-center">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={statusDistributionData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={75}
+                  paddingAngle={3}
+                  dataKey="value"
+                >
+                  {statusDistributionData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(val: any, name: any) => [`${val} Employees`, name]}
+                  contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+              <span className="text-xl font-black text-white font-mono leading-none">
+                {totalActiveWorkingToday}/{totalWorkforceCount}
+              </span>
+              <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-wider mt-0.5">Active Workforce</span>
+            </div>
+          </div>
+
+          {/* Legend Grid */}
+          <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+            {statusDistributionData.map((item, idx) => (
+              <div key={idx} className="flex items-center justify-between p-2 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                  <span className="text-slate-300 font-semibold truncate text-[10px]">{item.name}</span>
+                </div>
+                <span className="font-mono font-bold text-white text-[11px]">{item.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Pending Team Sprint Leave Approvals */}
+        <div className="lg:col-span-2 bg-slate-900/90 rounded-3xl border border-slate-800 p-5 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-400" />
+              <h3 className="text-xs font-black text-white uppercase tracking-wider">
+                Pending Sprint Recommendations ({pendingTeamRequests.length})
+              </h3>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400">Step 1: PM Recommendation</span>
+          </div>
+
           {pendingTeamRequests.length === 0 ? (
-            <div className="text-center py-6 text-slate-500 text-xs">
-              <CheckCircle2 className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
-              <p className="font-semibold text-slate-400">All caught up!</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">No pending employee leave or WFH requests requiring PM review.</p>
+            <div className="py-12 text-center text-slate-500 text-xs">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500/40 mx-auto mb-2" />
+              <span>All team leave and WFH requests are up to date!</span>
             </div>
           ) : (
-            pendingTeamRequests.map(req => (
-              <div 
-                key={req.id}
-                className="bg-slate-950/70 border border-slate-800 hover:border-purple-500/40 rounded-2xl p-3.5 sm:p-4 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold text-white">{req.employeeName}</span>
-                    <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                      {req.department}
-                    </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                      req.type === 'WFH' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                    }`}>
-                      {req.type}
-                    </span>
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+              {pendingTeamRequests.map(req => (
+                <div key={req.id} className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-white text-xs">{req.employeeName}</span>
+                      <span className="text-[9px] font-mono bg-slate-900 text-slate-400 px-2 py-0.5 rounded-md border border-slate-800">{req.employeeId}</span>
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">{req.type}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                      Dates: <strong className="text-slate-200">{req.startDate}</strong> to <strong className="text-slate-200">{req.endDate}</strong>
+                    </p>
+                    <p className="text-[10px] text-slate-500 italic mt-0.5">"{req.reason}"</p>
                   </div>
-                  <p className="text-xs text-slate-300">
-                    <span className="font-semibold text-purple-300">{req.startDate}</span> to <span className="font-semibold text-purple-300">{req.endDate}</span> ({req.durationDays || 1} day{(req.durationDays || 1) > 1 ? 's' : ''})
-                  </p>
-                  <p className="text-[11px] text-slate-400 italic bg-slate-900/60 p-2 rounded-lg border border-slate-800/60 mt-1">
-                    "{req.reason}"
-                  </p>
-                </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => handleRecommend(req.id, 'Approved')}
-                    className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-950/40 cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Recommend</span>
-                  </button>
-                  <button
-                    onClick={() => setRejectModalReq(req)}
-                    className="flex-1 sm:flex-initial px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    <span>Flag Conflict</span>
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleRecommend(req.id, 'Approved')}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
+                    >
+                      ✓ Recommend
+                    </button>
+                    <button
+                      onClick={() => setRejectModalReq(req)}
+                      className="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/30 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                    >
+                      ✕ Flag Conflict
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
+        </div>
+
+      </div>
+
+      {/* ── 3. TEAM WEEKLY CAPACITY & HEATMAP MATRIX ── */}
+      <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-5 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-400" />
+              Team Weekly Shift Capacity &amp; Heatmap
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">Mon–Sat working schedule with individual day hours</p>
+          </div>
+
+          {/* Week Switcher */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setWeekOffset(o => o - 1)}
+              className="p-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-xs font-mono font-bold text-white bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+              {weekLabel} {isCurrentWeek && '(Current)'}
+            </span>
+            <button
+              onClick={() => setWeekOffset(o => o + 1)}
+              className="p-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 cursor-pointer"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Heatmap Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[700px]">
+            <thead>
+              <tr className="bg-slate-950 text-[10px] font-black text-slate-500 uppercase tracking-wider border-b border-slate-800">
+                <th className="py-3 px-4">Team Member</th>
+                {weekDays.map(d => (
+                  <th key={d.dateStr} className="py-3 px-3 text-center">
+                    <div>{d.dayName}</div>
+                    <div className="text-[9px] text-slate-600">{d.shortDate}</div>
+                  </th>
+                ))}
+                <th className="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 text-xs">
+              {operationalEmployees.map(emp => {
+                const weekRow = buildWeekWorkRow(weekDays, emp, attendance, {
+                  leaveRequests,
+                  holidayDates,
+                  nowMs
+                });
+
+                return (
+                  <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2.5">
+                        <img
+                          src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=0f172a&color=fff`}
+                          alt={emp.fullName}
+                          className="w-8 h-8 rounded-xl object-cover border border-slate-700/60"
+                        />
+                        <div>
+                          <div className="font-bold text-white text-xs">{emp.fullName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">{emp.employeeId}</div>
+                        </div>
+                      </div>
+                    </td>
+
+                    {weekDays.map((d, dIdx) => {
+                      const daySummary = weekRow.days[dIdx] || weekRow.days.find(s => s.dateStr === d.dateStr);
+                      const rec = resolveAttendanceRecord(attendance, emp, d.dateStr);
+                      
+                      const isApprovedLeave = hasApprovedLeaveOn(
+                        leaveRequests, emp, d.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]
+                      );
+
+                      let status = daySummary?.status || rec?.status || 'Absent';
+                      if (d.isFuture) status = 'Upcoming';
+                      else if (d.isNonWorking) status = 'Holiday';
+                      else if (isApprovedLeave) status = 'On Leave';
+
+                      const isCheckedIn = !!(daySummary?.checkInMs || rec?.checkInAt);
+                      const workedMins = daySummary?.workedMinutes || (rec?.workingMinutes ? Number(rec.workingMinutes) : 0);
+
+                      let cellColor = 'bg-slate-950 text-slate-600 border-slate-800';
+
+                      if (daySummary?.isOnBreak) {
+                        cellColor = 'bg-amber-500/15 text-amber-300 border-amber-500/40 font-bold animate-pulse';
+                      } else if (isCheckedIn || status === 'Present') {
+                        cellColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-bold';
+                      } else if (status === 'Late') {
+                        cellColor = 'bg-amber-500/10 text-amber-400 border-amber-500/30 font-bold';
+                      } else if (status === 'Work From Home' || rec?.isWfh) {
+                        cellColor = 'bg-sky-500/10 text-sky-400 border-sky-500/30 font-bold';
+                      } else if (status === 'On Leave') {
+                        cellColor = 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+                      } else if (status === 'Holiday') {
+                        cellColor = 'bg-slate-900 text-slate-500 border-slate-800/60';
+                      } else if (d.isFuture) {
+                        cellColor = 'bg-slate-950/40 text-slate-700 border-slate-900';
+                      }
+
+                      return (
+                        <td key={d.dateStr} className="py-2.5 px-2 text-center">
+                          <div className={`p-1.5 rounded-xl border text-[10px] font-mono ${cellColor}`}>
+                            {d.isFuture ? (
+                              '—'
+                            ) : isCheckedIn && workedMins > 0 ? (
+                              `${Math.floor(workedMins / 60)}h ${workedMins % 60}m`
+                            ) : isCheckedIn ? (
+                              'Active'
+                            ) : (
+                              status
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        onClick={() => setMonthlyAttendanceEmp(emp)}
+                        className="px-3 py-1.5 bg-blue-600/15 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold rounded-xl flex items-center gap-1 ml-auto cursor-pointer"
+                        title="View 30-Day Calendar & Edit Attendance"
+                      >
+                        <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Monthly Calendar &amp; Override</span>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* Zone 2: Project Health Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {projects.map(proj => (
-          <div 
-            key={proj.id}
-            className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-3xl p-5 shadow-lg flex flex-col justify-between space-y-4 group transition-all"
-          >
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                  {proj.client}
-                </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                  proj.status === 'In Progress' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                  proj.status === 'At Risk' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                  'bg-slate-800 text-slate-400'
-                }`}>
-                  {proj.status}
-                </span>
+      {/* ── 4. FULL LIVE WORKFORCE ROSTER TABLE MODAL ── */}
+      {isRosterModalOpen && (
+        <div className="fixed inset-0 z-[150] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[92vh]">
+            
+            {/* Modal Header */}
+            <div className="bg-slate-950 p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
+                    Live Shift Roster
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">{todayStr}</span>
+                </div>
+                <h3 className="text-lg font-black text-white tracking-tight mt-1">Today's Workforce Roster &amp; Shift Table</h3>
+                <p className="text-xs text-slate-400">
+                  Real-time status, check-in timestamps, working durations, and breakdown pie charts.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors leading-snug">{proj.name}</h3>
-              <p className="text-xs text-slate-400 line-clamp-2 mt-1 leading-relaxed">{proj.description}</p>
+
+              <button
+                onClick={() => setIsRosterModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer self-end sm:self-auto"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="space-y-1.5 pt-1">
-              <div className="flex justify-between text-[11px] font-semibold text-slate-400">
-                <span>Sprint Progress</span>
-                <span className="font-mono text-white">{proj.progressPercent}%</span>
+            {/* Filter Tabs & Search */}
+            <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+                {['ALL', 'Present', 'On Break', 'Late', 'Work From Home', 'On Leave', 'LOP', 'Absent'].map(st => (
+                  <button
+                    key={st}
+                    onClick={() => setRosterFilter(st)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                      rosterFilter === st
+                        ? 'bg-blue-600 text-white border-blue-500 shadow-md'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {st === 'Work From Home' ? 'WFH' : st}
+                  </button>
+                ))}
               </div>
-              <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-                <div 
-                  className={`h-full rounded-full ${
-                    proj.progressPercent > 80 ? 'bg-emerald-500' : proj.progressPercent > 50 ? 'bg-blue-500' : 'bg-amber-500'
-                  }`} 
-                  style={{ width: `${proj.progressPercent}%` }}
+
+              <div className="relative w-full md:w-72">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search employee, ID, department..."
+                  value={rosterSearch}
+                  onChange={e => setRosterSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 text-xs bg-slate-900 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
                 />
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-      {/* Zone 3: Team Capacity — Mon–Sat real hours, live and closed */}
-      {(() => {
-        // Pure role-based filter: Super Admins & HR Admins excluded; EMPLOYEE and PROJECT_MANAGER included
-        const teamMembersOnly = employees.filter(emp => {
-          return emp.role !== 'SUPER_ADMIN' && emp.role !== 'HR_ADMIN';
-        });
 
-        // One roll-up per person, computed once per tick. Every cell, the week
-        // total and the duty badge all read from this same object, so a row can
-        // no longer disagree with its own total.
-        const rows = teamMembersOnly.map(emp => ({
-          emp,
-          week: buildWeekWorkRow(weekDays, emp, attendance, { nowMs, leaveRequests })
-        }));
-
-        const teamWorkedMinutes = rows.reduce((acc, r) => acc + r.week.totalWorkedMinutes, 0);
-        const liveNow = rows.filter(r => r.week.isLive).length;
-        const cellBase = 'inline-block min-w-[46px] px-1.5 h-8 rounded-lg font-mono font-bold text-[11px] leading-8 border';
-
-        const renderDayCell = (s: DayWorkSummary, meta: WorkWeekDay, emp: any) => {
-          // Not yet happened: an empty cell is the honest answer. It is NOT an
-          // absence and must not be coloured like one.
-          if (meta.isFuture) {
-            return (
-              <span title={meta.dayNameLong + ' ' + meta.shortDate + ' — upcoming'}
-                className={cellBase + ' bg-slate-950/40 text-slate-700 border-slate-900/60'}>·</span>
-            );
-          }
-          if (meta.isNonWorking) {
-            return (
-              <span title={meta.dayNameLong + ' ' + meta.shortDate + ' — weekly off / holiday'}
-                className={cellBase + ' bg-slate-800/40 text-slate-500 border-slate-700/40'}>Off</span>
-            );
-          }
-          if (!s.checkInMs) {
-            // Sanctioned leave is not truancy, so it gets its own colour rather
-            // than being lumped in with an unexplained no-show.
-            if (hasApprovedLeaveOn(leaveRequests, emp, meta.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[])) {
-              return (
-                <span title={meta.dayNameLong + ' ' + meta.shortDate + ' — approved leave'}
-                  className={cellBase + ' bg-violet-500/15 text-violet-300 border-violet-500/25'}>Leave</span>
-              );
-            }
-            return (
-              <span title={'No check-in on ' + meta.dayNameLong + ' ' + meta.shortDate}
-                className={cellBase + ' bg-rose-500/10 text-rose-400/80 border-rose-500/20'}>A</span>
-            );
-          }
-
-          const hrs = s.workedHours;
-          const tone =
-            s.state === 'missing-checkout' ? 'bg-orange-500/15 text-orange-300 border-orange-500/30' :
-            hrs >= 8 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-            hrs >= 6 ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
-            'bg-amber-500/20 text-amber-300 border-amber-500/30';
-
-          const tip =
-            meta.dayNameLong + ' ' + meta.shortDate + ' • ' + formatDuration(s.workedSecs) + ' worked'
-            + (s.breakSecs > 0 ? ' • ' + formatDuration(s.breakSecs) + ' break' : '')
-            + (s.checkInMs ? ' • In ' + toISTTimeString(new Date(s.checkInMs).toISOString()) : '')
-            + (s.checkOutMs ? ' • Out ' + toISTTimeString(new Date(s.checkOutMs).toISOString()) : '')
-            + (s.state === 'missing-checkout' ? ' • no check-out (capped at shift end)' : '')
-            + (s.isOnBreak ? ' • on break: ' + s.activeBreakType : s.isLive ? ' • live' : '');
-
-          return (
-            <span title={tip} className={cellBase + ' ' + tone + ' relative'} data-testid={'pm-cell-' + meta.dateStr}>
-              {hrs}h
-              {s.isLive && (
-                <span className={'absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ' +
-                  (s.isOnBreak ? 'bg-amber-400' : 'bg-emerald-400') + ' animate-pulse'} />
-              )}
-              {s.state === 'missing-checkout' && (
-                <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-orange-400" />
-              )}
-            </span>
-          );
-        };
-
-        return (
-          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-md space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Team Work Duration — {WORK_WEEK_DAYS}-Day Week (Mon–Sat)</span>
-                </h3>
-                <p className="text-[10px] text-slate-500 mt-1 font-medium">
-                  Shift {SHIFT_LABEL} · durations come from real check-in/out timestamps only
-                </p>
-              </div>
-
-              {/* Week navigator */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setWeekOffset(o => o - 1)}
-                  title="Previous week"
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors cursor-pointer"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <span data-testid="pm-week-label" className="text-[11px] font-mono font-bold text-white bg-slate-950/70 border border-slate-800 px-2.5 py-1.5 rounded-lg min-w-[140px] text-center">
-                  {weekLabel}
-                </span>
-                <button
-                  onClick={() => setWeekOffset(o => Math.min(0, o + 1))}
-                  disabled={isCurrentWeek}
-                  title={isCurrentWeek ? 'Already on the current week' : 'Next week'}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-                {!isCurrentWeek && (
-                  <button
-                    onClick={() => setWeekOffset(0)}
-                    className="text-[10px] font-bold text-blue-400 hover:text-blue-300 px-2 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 transition-colors cursor-pointer"
-                  >
-                    This Week
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Team roll-up strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Members</p>
-                <p className="text-lg font-black text-white font-mono">{teamMembersOnly.length}</p>
-              </div>
-              <div className="bg-slate-950/60 border border-emerald-500/20 rounded-2xl p-3">
-                <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wide">Working Now</p>
-                <p className="text-lg font-black text-emerald-300 font-mono flex items-center gap-1.5">
-                  {liveNow}
-                  {liveNow > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
-                </p>
-              </div>
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Team Hours</p>
-                <p className="text-lg font-black text-white font-mono">{Math.round((teamWorkedMinutes / 60) * 10) / 10}h</p>
-              </div>
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Rostered / Person</p>
-                <p className="text-lg font-black text-slate-300 font-mono">{Math.round((SHIFT_TOTAL_MINUTES * WORK_WEEK_DAYS) / 60)}h</p>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto rounded-2xl border border-slate-800/80 custom-scrollbar">
-              <table className="w-full text-left text-xs min-w-[860px]">
-                <thead>
-                  <tr className="text-slate-500 font-bold uppercase text-[10px] bg-slate-950/50">
-                    <th className="py-2.5 px-3">Team Member</th>
-                    <th className="py-2.5 px-3">Department &amp; Role</th>
-                    {weekDays.map(d => (
-                      <th
-                        key={d.dateStr}
-                        className={'py-2 px-2 text-center ' + (d.isToday ? 'text-blue-400' : d.isNonWorking ? 'text-slate-700' : '')}
-                      >
-                        {/* Item #15: day NAME above the 17-8-26 date, so a column
-                            is readable without counting across from Monday. */}
-                        <span className="block text-[10px] font-extrabold tracking-wide">{d.dayName}</span>
-                        <span className="block text-[9px] font-mono font-semibold text-slate-600 normal-case">{d.shortDate}</span>
-                      </th>
-                    ))}
-                    <th className="py-2.5 px-3 text-center text-slate-400">Week Total</th>
-                    <th className="py-2.5 px-3 text-right">Duty Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50 font-semibold">
-                  {rows.length === 0 && (
-                    <tr>
-                      <td colSpan={weekDays.length + 4} className="py-8 text-center text-slate-500 text-xs">
-                        No team members assigned yet.
-                      </td>
+            {/* Roster Table */}
+            <div className="p-4 overflow-y-auto flex-1">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[800px]">
+                  <thead>
+                    <tr className="bg-slate-950 border-b border-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      <th className="py-3.5 px-4">Employee</th>
+                      <th className="py-3.5 px-4">Status</th>
+                      <th className="py-3.5 px-4">Check-In</th>
+                      <th className="py-3.5 px-4">Check-Out</th>
+                      <th className="py-3.5 px-4">Working Time</th>
+                      <th className="py-3.5 px-4">Shift Timings</th>
+                      <th className="py-3.5 px-4 text-right">Actions</th>
                     </tr>
-                  )}
-                  {rows.map(({ emp, week }) => {
-                    const today = week.days.find((_, i) => weekDays[i].isToday);
-                    return (
-                      <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 px-3 font-bold text-white">
-                          <div className="flex items-center gap-2">
-                            <img
-                              src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=1e293b&color=fff`}
-                              alt={emp.fullName}
-                              className="w-7 h-7 rounded-full object-cover border border-slate-700 shrink-0"
-                            />
-                            <div>
-                              <span className="block text-xs font-bold text-white">{emp.fullName}</span>
-                              <span className="text-[10px] font-mono text-slate-500">{emp.employeeId}</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 text-slate-400 text-xs">
-                          <span className="block font-bold text-slate-300">{emp.department}</span>
-                          <span className="text-[10px] text-slate-500">{emp.designation}</span>
-                        </td>
-
-                        {week.days.map((s, i) => (
-                          <td key={weekDays[i].dateStr} className={'py-3 px-2 text-center ' + (weekDays[i].isToday ? 'bg-blue-500/5' : '')}>
-                            {renderDayCell(s, weekDays[i], emp)}
-                          </td>
-                        ))}
-
-                        {/* Six-day total. Recomputed from timestamps on every tick,
-                            so it moves the moment someone checks out. */}
-                        <td className="py-3 px-3 text-center">
-                          <span
-                            data-testid={'pm-week-total-' + emp.id}
-                            title={formatDuration(week.totalWorkedSecs) + ' worked over ' + week.daysPresent + ' day(s)'
-                              + (week.expectedMinutes > 0 ? ' • ' + week.utilizationPercent + '% of ' + Math.round(week.expectedMinutes / 60) + 'h rostered so far' : '')}
-                            className={'block font-mono font-black text-sm ' +
-                              (week.utilizationPercent >= 95 ? 'text-emerald-300' :
-                               week.utilizationPercent >= 80 ? 'text-blue-300' :
-                               week.expectedMinutes === 0 ? 'text-slate-500' : 'text-amber-300')}
-                          >
-                            {week.totalWorkedHours}h
-                          </span>
-                          <span className="block text-[9px] font-mono text-slate-500">
-                            {week.expectedMinutes > 0 ? week.utilizationPercent + '%' : '—'}
-                            {week.daysAbsent > 0 && <span className="text-rose-400/80"> · {week.daysAbsent}A</span>}
-                          </span>
-                        </td>
-
-                        {/* Item #15: this badge used to be driven by `!!checkInAt`
-                            alone, so it read "On Duty (Office)" from check-in until
-                            midnight — a PM could not tell who was still working from
-                            who had gone home hours ago. It now follows the resolved
-                            state of today's record. */}
-                        <td className="py-3 px-3 text-right">
-                          {!today || !today.checkInMs ? (
-                            <span className="text-[10px] font-bold text-slate-500 bg-slate-800/50 px-2.5 py-1 rounded-lg border border-slate-700/50">
-                              Off Duty
-                            </span>
-                          ) : today.state === 'complete' ? (
-                            <span
-                              title={'Checked out at ' + toISTTimeString(new Date(today.checkOutMs as number).toISOString())}
-                              className="text-[10px] font-bold text-slate-300 bg-slate-700/40 px-2.5 py-1 rounded-lg border border-slate-600/40"
-                            >
-                              Checked Out • {today.workedHours}h
-                            </span>
-                          ) : today.state === 'missing-checkout' ? (
-                            <span className="text-[10px] font-bold text-orange-300 bg-orange-500/10 px-2.5 py-1 rounded-lg border border-orange-500/25">
-                              No Check-out
-                            </span>
-                          ) : today.isOnBreak ? (
-                            <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/25 animate-pulse">
-                              On Break • {today.activeBreakType}
-                            </span>
-                          ) : today.isWfh ? (
-                            <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20">
-                              WFH Active • {toISTTimeString(new Date(today.checkInMs).toISOString())}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-                              On Duty • {toISTTimeString(new Date(today.checkInMs).toISOString())}
-                            </span>
-                          )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80 text-xs">
+                    {filteredRosterModal.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center text-slate-500 font-medium">
+                          No employees match the selected filter.
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ) : (
+                      filteredRosterModal.map(r => {
+                        const isBreak = r.status === 'On Break';
+
+                        return (
+                          <tr key={r.employee.id} className="hover:bg-slate-800/40 transition-colors group">
+                            {/* Employee */}
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={r.employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.employee.fullName)}&background=0f172a&color=fff`}
+                                  alt={r.employee.fullName}
+                                  className="w-9 h-9 rounded-xl object-cover border border-slate-700/60"
+                                />
+                                <div>
+                                  <div className="font-bold text-white">{r.employee.fullName}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono">{r.employee.employeeId} • {r.employee.department}</div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-3.5 px-4">
+                              {isBreak ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30 animate-pulse">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                                  <span>On Break</span>
+                                </span>
+                              ) : r.status === 'Present' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                  <span>Present</span>
+                                </span>
+                              ) : r.status === 'Late' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                                  <span>Late</span>
+                                </span>
+                              ) : r.status === 'Work From Home' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
+                                  <span>WFH</span>
+                                </span>
+                              ) : r.status === 'On Leave' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                                  <span>On Leave</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                                  <span>{r.status}</span>
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Check-In */}
+                            <td className="py-3.5 px-4 font-mono font-bold text-slate-300">
+                              {r.record?.checkInAt ? toISTTimeString(r.record.checkInAt) : '—'}
+                            </td>
+
+                            {/* Check-Out */}
+                            <td className="py-3.5 px-4 font-mono font-bold text-slate-300">
+                              {r.record?.checkOutAt ? toISTTimeString(r.record.checkOutAt) : r.isCheckedIn ? <span className="text-emerald-400">In Progress</span> : '—'}
+                            </td>
+
+                            {/* Working Time */}
+                            <td className="py-3.5 px-4 font-mono text-slate-200">
+                              {r.record?.workingMinutes ? `${Math.floor(r.record.workingMinutes / 60)}h ${r.record.workingMinutes % 60}m` : '0m'}
+                            </td>
+
+                            {/* Shift */}
+                            <td className="py-3.5 px-4 text-slate-400 text-xs">
+                              {r.employee.shift || 'General Shift (09:00 - 18:00)'}
+                            </td>
+
+                            {/* Actions */}
+                            <td className="py-3.5 px-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => setSelectedEmployeeActivity({ employee: r.employee, record: r.record })}
+                                  className="px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer"
+                                  title="Inspect Today's Live Pie Chart"
+                                >
+                                  <PieChartIcon className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Live Day Pie</span>
+                                </button>
+
+                                <button
+                                  onClick={() => setMonthlyAttendanceEmp(r.employee)}
+                                  className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                                  title="Open Monthly Attendance & Edit Calendar"
+                                >
+                                  <Calendar className="w-4 h-4 text-blue-400" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            {/* Legend */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-semibold text-slate-500 pt-1">
-              {[
-                { c: 'bg-emerald-500/60', l: 'Full shift (8h+)' },
-                { c: 'bg-blue-500/60', l: '6–8h' },
-                { c: 'bg-amber-500/60', l: 'Under 6h' },
-                { c: 'bg-orange-500/60', l: 'No check-out' },
-                { c: 'bg-violet-500/60', l: 'Approved leave' },
-                { c: 'bg-rose-500/50', l: 'Absent' },
-                { c: 'bg-slate-700', l: 'Off / upcoming' }
-              ].map(x => (
-                <span key={x.l} className="flex items-center gap-1.5">
-                  <span className={'w-2 h-2 rounded-sm ' + x.c} />{x.l}
-                </span>
-              ))}
-            </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
-      {/* Modal for Custom Rejection Reason */}
+      {/* ── 5. SINGLE EMPLOYEE LIVE DAY ACTIVITY & DONUT PIE CHART MODAL ── */}
+      {selectedEmployeeActivity && (
+        <div className="fixed inset-0 z-[160] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden p-6 space-y-6">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3.5">
+                <img
+                  src={selectedEmployeeActivity.employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedEmployeeActivity.employee.fullName)}&background=0f172a&color=fff`}
+                  alt={selectedEmployeeActivity.employee.fullName}
+                  className="w-12 h-12 rounded-2xl object-cover border-2 border-emerald-500/50 shadow-md"
+                />
+                <div>
+                  <h3 className="text-base font-black text-white">{selectedEmployeeActivity.employee.fullName}</h3>
+                  <p className="text-xs text-slate-400 font-mono">
+                    {selectedEmployeeActivity.employee.employeeId} • {selectedEmployeeActivity.employee.department}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedEmployeeActivity(null)}
+                className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Donut Pie Chart & Stats Breakdown */}
+            {(() => {
+              const rec = selectedEmployeeActivity.record;
+              const breaks = rec?.breaks || [];
+              
+              let workingMins = Number(rec?.workingMinutes) || 0;
+              let teaMins = 0;
+              let mealMins = 0;
+              let huddleMins = 0;
+              let meetingMins = 0;
+              let trainingMins = 0;
+              let activityMins = 0;
+              let otherMins = 0;
+
+              breaks.forEach(b => {
+                let duration = Number(b.durationMinutes) || 0;
+                if (duration <= 0 && b.startAt) {
+                  const end = b.endAt ? new Date(b.endAt).getTime() : Date.now();
+                  duration = Math.max(1, Math.floor((end - new Date(b.startAt).getTime()) / 60000));
+                }
+                const t = b.type || 'Break';
+                if (t === 'Tea Break') teaMins += duration;
+                else if (t === 'Meal Break' || t.includes('Lunch')) mealMins += duration;
+                else if (t === 'Team Huddle') huddleMins += duration;
+                else if (t === 'Team Meeting') meetingMins += duration;
+                else if (t.includes('Training')) trainingMins += duration;
+                else if (t === 'Activity') activityMins += duration;
+                else otherMins += duration;
+              });
+
+              const totalBreakMins = teaMins + mealMins + huddleMins + meetingMins + trainingMins + activityMins + otherMins;
+              if (workingMins <= 0 && rec?.checkInAt) {
+                const shiftEnd = rec.checkOutAt ? new Date(rec.checkOutAt).getTime() : Date.now();
+                const totalMins = Math.max(0, Math.floor((shiftEnd - new Date(rec.checkInAt).getTime()) / 60000));
+                workingMins = Math.max(0, totalMins - totalBreakMins);
+              }
+
+              const categories = [
+                { name: 'Working Time', value: workingMins, color: '#10b981' },
+                { name: 'Tea Break', value: teaMins, color: '#f59e0b' },
+                { name: 'Meal Break', value: mealMins, color: '#f43f5e' },
+                { name: 'Team Huddle', value: huddleMins, color: '#3b82f6' },
+                { name: 'Team Meeting', value: meetingMins, color: '#a855f7' },
+                { name: 'Training', value: trainingMins, color: '#06b6d4' },
+                { name: 'Activity', value: activityMins, color: '#eab308' },
+                { name: 'Other Breaks', value: otherMins, color: '#64748b' },
+              ].filter(c => c.value > 0);
+
+              const grandTotal = workingMins + totalBreakMins;
+
+              return (
+                <div className="space-y-6">
+                  {categories.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500 text-xs">
+                      No shift activities or check-in recorded for today yet.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+                      <div className="relative w-48 h-48 shrink-0 flex items-center justify-center">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={categories}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={55}
+                              outerRadius={80}
+                              paddingAngle={3}
+                              dataKey="value"
+                            >
+                              {categories.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(val: any) => [`${Math.floor(Number(val) / 60)}h ${Number(val) % 60}m`, 'Duration']}
+                              contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                          <span className="text-base font-black text-white font-mono leading-none">
+                            {Math.floor(grandTotal / 60)}h {grandTotal % 60}m
+                          </span>
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mt-1">Total Shift</span>
+                        </div>
+                      </div>
+
+                      <div className="flex-1 grid grid-cols-2 gap-2.5 text-xs w-full">
+                        {categories.map((cat, idx) => (
+                          <div key={idx} className="p-2.5 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                              <span className="text-slate-300 font-semibold truncate text-[11px]">{cat.name}</span>
+                            </div>
+                            <span className="font-mono text-xs font-black text-white">
+                              {cat.value >= 60 ? `${Math.floor(cat.value / 60)}h ${cat.value % 60}m` : `${cat.value}m`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                    <button
+                      onClick={() => {
+                        const emp = selectedEmployeeActivity.employee;
+                        setSelectedEmployeeActivity(null);
+                        setMonthlyAttendanceEmp(emp);
+                      }}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-900/40 cursor-pointer"
+                    >
+                      <Calendar className="w-4 h-4" />
+                      <span>Open Monthly Calendar &amp; Override</span>
+                    </button>
+
+                    <button
+                      onClick={() => setSelectedEmployeeActivity(null)}
+                      className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+          </div>
+        </div>
+      )}
+
+      {/* ── 6. MONTHLY ATTENDANCE MODAL (With PM/Admin Day Editor) ── */}
+      {monthlyAttendanceEmp && (
+        <EmployeeMonthlyAttendanceModal
+          employee={monthlyAttendanceEmp}
+          onClose={() => setMonthlyAttendanceEmp(null)}
+        />
+      )}
+
+      {/* ── 7. PM SPRINT CONFLICT / REJECT REASON MODAL ── */}
       {rejectModalReq && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-400" />
-              <span>Flag Sprint / Workload Conflict</span>
-            </h3>
+        <div className="fixed inset-0 z-[160] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+                Flag Sprint Delivery Conflict
+              </h3>
+              <button onClick={() => setRejectModalReq(null)} className="p-1.5 text-slate-400 hover:text-white rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
             <p className="text-xs text-slate-400">
-              Provide a sprint conflict note for <strong className="text-white">{rejectModalReq.employeeName}</strong>. This will be transmitted directly to HR.
+              Provide feedback to the employee ({rejectModalReq.employeeName}) and Executive Management regarding sprint deliverable conflicts.
             </p>
 
             <textarea
               rows={3}
               value={customRejectReason}
-              onChange={(e) => setCustomRejectReason(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-rose-500/50"
-              placeholder="e.g. Critical release milestone during requested dates..."
+              onChange={e => setCustomRejectReason(e.target.value)}
+              className="w-full p-3 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-hidden focus:border-amber-500"
             />
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
+                type="button"
                 onClick={() => setRejectModalReq(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={() => {
                   handleRecommend(rejectModalReq.id, 'Flagged', customRejectReason);
                   setRejectModalReq(null);
                 }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-rose-950/50 cursor-pointer"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-md"
               >
-                Submit Conflict to HR
+                Confirm Conflict Flag
               </button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };

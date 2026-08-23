@@ -324,3 +324,43 @@ export interface SalaryDisbursement {
   status: 'Draft' | 'Approved' | 'Paid';
   processedAt?: string;
 }
+
+export type FeedbackCategory = 
+  | 'Performance & Sprint Delivery'
+  | 'Technical & Code Quality'
+  | 'Behavioral & Teamwork'
+  | 'Appreciation & Recognition';
+
+export type FeedbackSentiment = 'EXCELLENT' | 'GOOD' | 'NEEDS_IMPROVEMENT' | 'CRITICAL';
+
+export interface PerformanceFeedback {
+  id: string;
+  targetEmployeeId: string;
+  targetEmployeeCode: string;
+  targetEmployeeName: string;
+  targetEmployeeRole: UserRole | string;
+  targetEmployeeDesignation?: string;
+  targetEmployeeDepartment?: string;
+  targetEmployeePhotoUrl?: string;
+
+  reviewerId: string;
+  reviewerName: string;
+  reviewerRole: UserRole | string;
+  reviewerDesignation?: string;
+  reviewerPhotoUrl?: string;
+
+  category: FeedbackCategory;
+  rating: number; // 1 to 5
+  sentiment: FeedbackSentiment;
+  strengths: string;
+  areasForImprovement: string;
+  actionItems: string[];
+  privateLeadershipNotes?: string;
+
+  isAcknowledged: boolean;
+  acknowledgedAt?: string;
+
+  createdAt: string;
+  updatedAt: string;
+}
+

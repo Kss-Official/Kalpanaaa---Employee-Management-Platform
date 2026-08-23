@@ -4,6 +4,7 @@ import { AllEmployeeBarcodesView } from './AllEmployeeBarcodesView';
 import { Employee, EmployeeStatus } from '../../types';
 import { motion } from 'framer-motion';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
+import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
 import { 
   Search, 
   Plus, 
@@ -43,20 +44,12 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
 
   const departments = useMemo(() => Array.from(new Set(employees.map(e => e.department).filter(Boolean))), [employees]);
 
-  const isExecutiveLeadership = (emp: any) => {
-    const desig = (emp.designation || '').toLowerCase();
-    const r = (emp.role || '').toUpperCase();
-    return (
-      r === 'SUPER_ADMIN' ||
-      desig.includes('ceo') ||
-      desig.includes('chief executive') ||
-      desig.includes('cto') ||
-      desig.includes('founder') ||
-      desig.includes('managing director') ||
-      desig.includes('chief technology') ||
-      desig.includes('cio')
-    );
-  };
+  // Single source of truth, shared with payroll and every dashboard. The local
+  // copy this replaced matched `desig.includes('cto')`, which is also true for
+  // "Contractor", and `desig.includes('ceo')`; designation is a free-text input,
+  // so ordinary staff were being promoted into the Executive Leadership section
+  // and removed from the operational roster below it.
+  const isExecutiveLeadership = (emp: any) => isExecutiveOrLeadership(emp);
 
   const formatEmployeeStatus = (status?: string): EmployeeStatus => {
     if (!status || status.toLowerCase() === 'check' || status.toLowerCase() === 'checked in' || status.toLowerCase() === 'active') {

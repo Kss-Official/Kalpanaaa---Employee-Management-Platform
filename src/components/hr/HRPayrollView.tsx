@@ -66,11 +66,11 @@ export const HRPayrollView: React.FC = () => {
   const [bulkExportProgress, setBulkExportProgress] = useState(0);
   
   // Executive Board (CEO & CTO) have Read-Only view access — HR Admin manages salary assignments
-  const isExecutiveUser = activeEmployee?.role === 'SUPER_ADMIN' ||
-                          activeEmployee?.designation?.includes('CEO') ||
-                          activeEmployee?.designation?.includes('CTO') ||
-                          activeEmployee?.email?.includes('akshit') ||
-                          activeEmployee?.email?.includes('founder');
+  // Routed through the shared matcher: the previous version keyed on
+  // `email.includes('akshit')` and `email.includes('founder')`, so any future
+  // hire with those fragments in their address silently lost the ability to
+  // edit salaries, while `designation.includes('CTO')` also matched "CONTRACTOR".
+  const isExecutiveUser = isExecutiveOrLeadership(activeEmployee);
 
   const canEditSalary = (activeEmployee?.role === 'HR_ADMIN' || role === 'HR_ADMIN') && !isExecutiveUser;
 

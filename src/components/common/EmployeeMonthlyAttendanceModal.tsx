@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Employee, AttendanceRecord } from '../../types';
+import { Employee, AttendanceRecord, AttendanceStatus } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Calendar, 
@@ -18,11 +18,16 @@ import {
   Briefcase,
   GraduationCap,
   Zap,
-  Timer
+  Timer,
+  Edit3,
+  Check,
+  Save,
+  AlertCircle
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { useHaptic } from '../../hooks/useHaptic';
 
 interface EmployeeMonthlyAttendanceModalProps {
   employee: Employee;
@@ -35,7 +40,13 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   initialSelectedRecord, 
   onClose 
 }) => {
-  const { attendance, leaveRequests, settings } = useAuth();
+  const { attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection } = useAuth();
+  const { triggerHaptic } = useHaptic();
+
+  const isSuperAdmin = role === 'SUPER_ADMIN' || activeEmployee?.role === 'SUPER_ADMIN';
+  const isHr = role === 'HR_ADMIN' || activeEmployee?.role === 'HR_ADMIN';
+  const isPm = role === 'PROJECT_MANAGER' || activeEmployee?.role === 'PROJECT_MANAGER';
+  const canEditAttendance = isSuperAdmin || isHr || isPm;
 
   // Current selected Year-Month (default to initialSelectedRecord month or current month)
   const [selectedYearMonth, setSelectedYearMonth] = useState<string>(() => {
@@ -49,7 +60,16 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   // Active View Scope: 'month' (Full month time distribution) | 'week' | 'day'
   const [activeScope, setActiveScope] = useState<'month' | 'week' | 'day'>(initialSelectedRecord ? 'day' : 'month');
   const [selectedWeekNum, setSelectedWeekNum] = useState<number>(1);
-  const [selectedDayRecord, setSelectedDayRecord] = useState<AttendanceRecord | null>(initialSelectedRecord || null);
+  const [selectedDateStr, setSelectedDateStr] = useState<string | null>(initialSelectedRecord?.date || null);
+
+  // Attendance Editing Modal State for PM / Admin
+  const [isEditingAttendance, setIsEditingAttendance] = useState(false);
+  const [editStatus, setEditStatus] = useState<AttendanceStatus>('Present');
+  const [editCheckInTime, setEditCheckInTime] = useState('09:30');
+  const [editCheckOutTime, setEditCheckOutTime] = useState('18:30');
+  const [editNotes, setEditNotes] = useState('');
+  const [isSavingCorrection, setIsSavingCorrection] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
 
   const [yearStr, monthStr] = selectedYearMonth.split('-');
   const year = parseInt(yearStr, 10);
@@ -95,6 +115,12 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     });
     return map;
   }, [empRecords]);
+
+  // Selected Day Record
+  const selectedDayRecord = useMemo(() => {
+    if (!selectedDateStr) return null;
+    return recordsByDate.get(selectedDateStr) || null;
+  }, [recordsByDate, selectedDateStr]);
 
   // Helper to compute activity breakdown for a single record
   const computeSingleRecordBreakdown = (record: AttendanceRecord) => {
@@ -171,7 +197,6 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     if (activeScope === 'day' && selectedDayRecord) {
       targetRecords = [selectedDayRecord];
     } else if (activeScope === 'week') {
-      // Week 1: 1-7, Week 2: 8-14, Week 3: 15-21, Week 4: 22-28, Week 5: 29-31
       const startDay = (selectedWeekNum - 1) * 7 + 1;
       const endDay = Math.min(daysInMonth, selectedWeekNum * 7);
       targetRecords = empRecords.filter(r => {
@@ -259,7 +284,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
       newYear -= 1;
     }
     setSelectedYearMonth(`${newYear}-${String(newMonth).padStart(2, '0')}`);
-    setSelectedDayRecord(null);
+    setSelectedDateStr(null);
   };
 
   const handleNextMonth = () => {
@@ -270,7 +295,97 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
       newYear += 1;
     }
     setSelectedYearMonth(`${newYear}-${String(newMonth).padStart(2, '0')}`);
-    setSelectedDayRecord(null);
+    setSelectedDateStr(null);
+  };
+
+  // Open Edit Form for a specific day
+  const handleOpenEditForDate = (dateStr: string, rec?: AttendanceRecord | null) => {
+    triggerHaptic();
+    setSelectedDateStr(dateStr);
+    setActiveScope('day');
+    setIsEditingAttendance(true);
+
+    if (rec) {
+      setEditStatus(rec.status || 'Present');
+      if (rec.checkInAt) {
+        const d = new Date(rec.checkInAt);
+        setEditCheckInTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+      } else {
+        setEditCheckInTime('09:30');
+      }
+
+      if (rec.checkOutAt) {
+        const d = new Date(rec.checkOutAt);
+        setEditCheckOutTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+      } else {
+        setEditCheckOutTime('18:30');
+      }
+      setEditNotes(rec.notes || '');
+    } else {
+      setEditStatus('Present');
+      setEditCheckInTime('09:30');
+      setEditCheckOutTime('18:30');
+      setEditNotes('Project Manager attendance override');
+    }
+  };
+
+  // Commit Attendance Correction to Firestore
+  const handleSaveAttendanceCorrection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDateStr) return;
+
+    setIsSavingCorrection(true);
+    setSaveFeedback(null);
+
+    try {
+      const checkInDateTime = new Date(`${selectedDateStr}T${editCheckInTime}:00`).toISOString();
+      const checkOutDateTime = editStatus === 'Present' || editStatus === 'Late' || editStatus === 'Work From Home'
+        ? new Date(`${selectedDateStr}T${editCheckOutTime}:00`).toISOString()
+        : null;
+
+      const diffMs = checkOutDateTime 
+        ? new Date(checkOutDateTime).getTime() - new Date(checkInDateTime).getTime()
+        : (8.5 * 3600000);
+      const workingMinutes = Math.max(0, Math.floor(diffMs / 60000));
+
+      const existingRecord = recordsByDate.get(selectedDateStr);
+
+      const targetRecord: any = existingRecord || {
+        id: `synthetic_${employee.id}_${selectedDateStr}`,
+        employeeId: employee.id,
+        employeeCode: employee.employeeId,
+        employeeName: employee.fullName,
+        department: employee.department,
+        date: selectedDateStr,
+        isSynthetic: true
+      };
+
+      const updates: Partial<AttendanceRecord> = {
+        status: editStatus,
+        checkInAt: editStatus === 'Absent' || editStatus === 'On Leave' ? null : checkInDateTime,
+        checkOutAt: checkOutDateTime,
+        workingMinutes: editStatus === 'Absent' || editStatus === 'On Leave' ? 0 : workingMinutes,
+        isWfh: editStatus === 'Work From Home',
+        notes: editNotes || `Corrected by ${activeEmployee?.fullName || 'Project Manager'}`
+      };
+
+      const res = await applyAttendanceCorrection(targetRecord, updates);
+
+      if (res.success) {
+        setSaveFeedback('✓ Attendance record updated & live synced to database!');
+        setTimeout(() => {
+          setIsEditingAttendance(false);
+          setSaveFeedback(null);
+        }, 1500);
+      } else {
+        setSaveFeedback(`Error: ${res.message}`);
+      }
+    } catch (err: any) {
+      console.error('Save correction error:', err);
+      setSaveFeedback(`Failed: ${err.message || 'Error updating attendance'}`);
+    } finally {
+      setIsSavingCorrection(false);
+    }
   };
 
   return (
@@ -296,6 +411,11 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   <span className="text-[10px] font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
                     {employee.employeeId}
                   </span>
+                  {canEditAttendance && (
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                      PM / Admin Editable
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-400 font-medium truncate">
                   {employee.designation} • <span className="text-slate-300">{employee.department}</span>
@@ -339,7 +459,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                 <button
                   onClick={() => {
                     setActiveScope('month');
-                    setSelectedDayRecord(null);
+                    setSelectedDateStr(null);
                   }}
                   className="text-left px-3 py-1.5 rounded-xl hover:bg-blue-600/10 border border-transparent hover:border-blue-500/30 transition-all cursor-pointer group"
                   title="Click to view complete month time distribution pie chart"
@@ -392,7 +512,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   <h4 className="text-xs font-bold text-white uppercase tracking-wider">
                     {activeScope === 'month' ? `Complete Month Activity Time Distribution — ${monthNames[month - 1]} ${year}` :
                      activeScope === 'week' ? `Week ${selectedWeekNum} Activity Time Distribution — ${monthNames[month - 1]} ${year}` :
-                     `Day Shift Time Distribution — ${selectedDayRecord?.date}`}
+                     `Day Shift Time Distribution — ${selectedDateStr}`}
                   </h4>
                 </div>
 
@@ -401,7 +521,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   <button
                     onClick={() => {
                       setActiveScope('month');
-                      setSelectedDayRecord(null);
+                      setSelectedDateStr(null);
                     }}
                     className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer shrink-0 ${
                       activeScope === 'month' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
@@ -416,7 +536,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       onClick={() => {
                         setActiveScope('week');
                         setSelectedWeekNum(w);
-                        setSelectedDayRecord(null);
+                        setSelectedDateStr(null);
                       }}
                       className={`px-2.5 py-1.5 rounded-lg transition-all cursor-pointer shrink-0 ${
                         activeScope === 'week' && selectedWeekNum === w ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
@@ -489,14 +609,14 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
               )}
             </div>
 
-            {/* Monthly Calendar Grid */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between pb-1">
+            {/* Monthly Calendar Grid & Day Inspector */}
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
                 <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                   <Calendar className="w-4 h-4 text-blue-400" />
-                  <span>Click any date below to inspect individual day breakdown</span>
+                  <span>Click any date below to inspect &amp; edit attendance</span>
                 </h4>
-                <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                <div className="flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> Present</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Late</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> WFH</span>
@@ -545,16 +665,14 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                     statusDot = 'bg-purple-400';
                   }
 
-                  const isSelected = selectedDayRecord?.date === dateFormatted;
+                  const isSelected = selectedDateStr === dateFormatted;
 
                   return (
                     <div
                       key={dayNum}
                       onClick={() => {
-                        if (rec) {
-                          setSelectedDayRecord(rec);
-                          setActiveScope('day');
-                        }
+                        setSelectedDateStr(dateFormatted);
+                        setActiveScope('day');
                       }}
                       className={`p-2 min-h-[60px] rounded-2xl border flex flex-col justify-between transition-all cursor-pointer ${statusBg} ${
                         isSelected ? 'ring-2 ring-blue-500 border-blue-400 scale-[1.02] shadow-lg' : 'hover:scale-[1.02]'
@@ -577,11 +695,157 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   );
                 })}
               </div>
+
+              {/* Selected Day Details & PM/Admin Attendance Editor Trigger */}
+              {selectedDateStr && (
+                <div className="bg-slate-950 p-4 rounded-2xl border border-blue-500/30 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-black text-white">Selected Date: {selectedDateStr}</h5>
+                      <p className="text-[11px] text-slate-400">
+                        Status: <strong className="text-slate-200">{selectedDayRecord?.status || 'No record / Absent'}</strong>
+                        {selectedDayRecord?.checkInAt && (
+                          <> • In: <span className="text-emerald-400 font-mono">{toISTTimeString(selectedDayRecord.checkInAt)}</span></>
+                        )}
+                        {selectedDayRecord?.checkOutAt && (
+                          <> • Out: <span className="text-blue-400 font-mono">{toISTTimeString(selectedDayRecord.checkOutAt)}</span></>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {canEditAttendance && (
+                    <button
+                      onClick={() => handleOpenEditForDate(selectedDateStr, selectedDayRecord)}
+                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer shrink-0"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit / Override Day Attendance</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
           </div>
         </motion.div>
       </div>
+
+      {/* Attendance Day Correction Modal (For PM & Admin) */}
+      {isEditingAttendance && selectedDateStr && (
+        <div className="fixed inset-0 z-[180] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-amber-500/40 rounded-3xl p-6 shadow-2xl max-w-md w-full space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                  Project Manager / Admin Override
+                </span>
+                <h3 className="text-sm font-black text-white mt-1">Edit Attendance Record</h3>
+                <p className="text-xs text-slate-400">{employee.fullName} ({employee.employeeId}) • {selectedDateStr}</p>
+              </div>
+              <button
+                onClick={() => setIsEditingAttendance(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAttendanceCorrection} className="space-y-4 text-xs">
+              {/* Status Selector */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1.5">Attendance Status:</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['Present', 'Late', 'Work From Home', 'On Leave', 'Half Day', 'Absent'] as AttendanceStatus[]).map(st => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setEditStatus(st)}
+                      className={`p-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        editStatus === st
+                          ? 'bg-blue-600 text-white border-blue-500 shadow-md'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {st === 'Work From Home' ? 'WFH' : st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Timings */}
+              {editStatus !== 'Absent' && editStatus !== 'On Leave' && (
+                <div className="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Check-In Time:</label>
+                    <input
+                      type="time"
+                      value={editCheckInTime}
+                      onChange={e => setEditCheckInTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Check-Out Time:</label>
+                    <input
+                      type="time"
+                      value={editCheckOutTime}
+                      onChange={e => setEditCheckOutTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Notes / Reason */}
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Override Reason / PM Remark:</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Approved by Project Manager (Client Deployment)"
+                  value={editNotes}
+                  onChange={e => setEditNotes(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white font-medium focus:outline-hidden focus:border-blue-500"
+                />
+              </div>
+
+              {saveFeedback && (
+                <div className={`p-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 ${
+                  saveFeedback.startsWith('✓') 
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                    : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                }`}>
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{saveFeedback}</span>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingAttendance(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCorrection}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-md shadow-blue-900/40"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isSavingCorrection ? 'Saving...' : 'Save & Live Sync'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </AnimatePresence>
   );
 };

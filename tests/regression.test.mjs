@@ -1181,3 +1181,197 @@ test('#17 the seeded historical-attendance generator is gone', () => {
   // invented history straight into payroll.
   assert.equal(typeof engine.generateHistoricalAttendance, 'undefined');
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Executive exclusion — isExecutiveOrLeadership
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+test('exec exclusion: leadership is excluded via structured field, role or title', () => {
+  const isExec = engine.isExecutiveOrLeadership;
+
+  // The structured field is authoritative and needs no designation at all.
+  assert.equal(isExec({ executiveRole: 'CEO' }), true);
+  assert.equal(isExec({ executiveRole: 'CTO' }), true);
+
+  // Assigned auth role.
+  assert.equal(isExec({ role: 'SUPER_ADMIN' }), true);
+
+  // Free-text designations, as actually seeded in demoData.
+  assert.equal(isExec({ designation: 'CEO' }), true);
+  assert.equal(isExec({ designation: 'Chief Technology Officer (CTO)' }), true);
+  assert.equal(isExec({ designation: 'CTO And Founder And MD' }), true);
+  assert.equal(isExec({ designation: 'Chief Operating Officer' }), true);
+  assert.equal(isExec({ designation: 'Managing Director' }), true);
+  assert.equal(isExec({ designation: 'Co-Founder' }), true);
+});
+
+test('exec exclusion: ordinary job titles are NOT swept into leadership', () => {
+  const isExec = engine.isExecutiveOrLeadership;
+
+  // REGRESSION: substring matching on 'coo' hit "Coordinator" and 'cto' hit
+  // "Contractor". Designation is a free-text input, so an excluded employee got
+  // no payroll row at all -- and did not even appear in the unassigned-salary
+  // banner, because the filter runs before that count.
+  assert.equal(isExec({ designation: 'Project Coordinator' }), false, "'coo' inside Coordinator");
+  assert.equal(isExec({ designation: 'Coordinator' }), false);
+  assert.equal(isExec({ designation: 'Contractor' }), false, "'cto' inside Contractor");
+  assert.equal(isExec({ designation: 'Subcontractor' }), false);
+
+  // Real designations from the seeded directory must all stay operational.
+  for (const d of ['Backend Developer', 'Frontend Developer', 'Software Engineer',
+                   'UI/UX Designer', 'Project Manager', 'HR Operations Manager']) {
+    assert.equal(isExec({ designation: d }), false, d);
+  }
+});
+
+test('exec exclusion: never keyed on a person’s name or email', () => {
+  const isExec = engine.isExecutiveOrLeadership;
+
+  // REGRESSION: the matcher tested name.includes('rahul pathak'/'akshit') and
+  // email.includes('rahul'/'akshit'/'founder'). No such employee exists in the
+  // directory -- the only "Rahul" in the repo is a signature line in a document
+  // template -- so this was pure speculation that would silently drop any future
+  // hire whose address happened to contain the fragment.
+  assert.equal(isExec({ fullName: 'Rahul Kumar', designation: 'Backend Developer' }), false);
+  assert.equal(isExec({ email: 'rahul.verma@kalpanaaa.in', designation: 'Software Engineer' }), false);
+  assert.equal(isExec({ email: 'founder.relations@kalpanaaa.in', designation: 'Frontend Developer' }), false);
+  assert.equal(isExec({ fullName: 'Akshita Rao', designation: 'UI/UX Designer' }), false);
+
+  // The actual executives are still caught, by title and structured field.
+  assert.equal(isExec({ fullName: 'Akshit Ujjain', designation: 'CEO', executiveRole: 'CEO' }), true);
+  assert.equal(isExec({
+    fullName: 'Gaurav Kumar Tripathi',
+    designation: 'Chief Technology Officer (CTO)',
+    executiveRole: 'CTO'
+  }), true);
+});
+
+test('exec exclusion: tolerates missing and malformed records', () => {
+  const isExec = engine.isExecutiveOrLeadership;
+  assert.equal(isExec(null), false);
+  assert.equal(isExec(undefined), false);
+  assert.equal(isExec({}), false);
+  assert.equal(isExec({ designation: '' }), false);
+  assert.equal(isExec({ designation: null }), false);
+  assert.equal(isExec({ role: 'super_admin' }), true, 'role check is case-insensitive');
+});
+
+
+test('exec exclusion: CIO and Chief Information Officer count as leadership', () => {
+  const isExec = engine.isExecutiveOrLeadership;
+  assert.equal(isExec({ designation: 'CIO' }), true);
+  assert.equal(isExec({ designation: 'Chief Information Officer' }), true);
+  assert.equal(isExec({ designation: 'CFO' }), true);
+  // ...but not as a substring of an ordinary word.
+  assert.equal(isExec({ designation: 'Socio-Economic Analyst' }), false);
+  assert.equal(isExec({ designation: 'Associate Director' }), false, 'not a Managing Director');
+});
+
+test('exec exclusion: no component keeps a private designation-substring copy', async () => {
+  // The matcher was duplicated by hand into five components. Each copy used
+  // `designation.includes('cto' | 'coo' | 'ceo' | 'cio')`, which collides with
+  // "Contractor" and "Coordinator", and two copies also keyed on
+  // `email.includes('akshit' | 'founder')`. In LeaveApprovalsView the collision
+  // was a privilege escalation: an uppercased "CONTRACTOR" satisfied
+  // `desig.includes('CTO')` and gained CTO final-sanction authority over leave
+  // requests. All five now delegate to the engine or use a whole-word test.
+  const { readFile } = await import('node:fs/promises');
+  const files = [
+    'src/components/admin/EmployeeDirectory.tsx',
+    'src/components/admin/LeaveApprovalsView.tsx',
+    'src/components/employee/EmployeeTeamDirectory.tsx',
+    'src/components/hr/HRPayrollView.tsx',
+    'src/components/pm/PMTeamPerformance.tsx',
+  ];
+  const banned = [
+    /designation[^\n]{0,40}\.includes\(\s*['"](?:cto|coo|ceo|cio|md)['"]/i,
+    /\bdesig\.includes\(/,
+    /email\??\.includes\(\s*['"](?:akshit|founder|rahul)['"]/i,
+    /\bname\.includes\(\s*['"]rahul pathak['"]/i,
+  ];
+  for (const f of files) {
+    const raw = await readFile(new URL('../' + f, import.meta.url), 'utf8');
+    // Strip comments -- the replacements document the old expression in prose,
+    // and a comment cannot escalate anyone's privileges.
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    for (const re of banned) {
+      assert.equal(re.test(src), false, `${f} still matches ${re}`);
+    }
+  }
+});
+
+
+// ── Performance feedback / appraisals (added with the feedback hub) ──────────
+// These are source-level locks. The feedback module imports the Firebase SDK, so
+// it is not part of the compiled test bundle -- but the three regressions below
+// were all introduced by hand-editing and are exactly what a lock should catch.
+
+const readRepoFile = async (rel) => {
+  const { readFile } = await import('node:fs/promises');
+  return readFile(new URL('../' + rel, import.meta.url), 'utf8');
+};
+
+test('rules: the error_logs block still exists', async () => {
+  // REGRESSION: an edit adding /performanceFeedbacks reused the closing brace of
+  // the error-diagnostics block and deleted the whole `match /error_logs` rule,
+  // leaving only its comment header. With no matching rule Firestore
+  // default-denies, so every logErrorToFirestore() call in production would have
+  // failed permission-denied and all client telemetry would have gone dark.
+  const rules = await readRepoFile('firestore.rules');
+  assert.match(rules, /match \/error_logs\/\{logId\}\s*\{/, 'error_logs match block missing');
+  assert.match(rules, /allow read: if isConfigAdmin\(\)/);
+  assert.match(rules, /allow update, delete: if false/);
+  // The create-shape cap that made the open create rule safe must survive too.
+  assert.match(rules, /'message', ''\)\.size\(\) <= 500/);
+});
+
+test('rules: a review subject can only acknowledge, never rewrite or delete', async () => {
+  const rules = await readRepoFile('firestore.rules');
+  const block = rules.slice(rules.indexOf('match /performanceFeedbacks'));
+  const body = block.slice(0, block.indexOf('\n    }') + 6);
+
+  // REGRESSION: `allow update: if isConfigAdmin() || isProjectManager() ||
+  // (isRealUser() && targetEmployeeId == request.auth.uid ...)` gave the subject
+  // a blanket update on a document that carries rating, strengths,
+  // privateLeadershipNotes AND reviewerId. An employee could rewrite their own
+  // appraisal, reassign reviewerId to themselves, and then satisfy the
+  // reviewer-scoped delete rule to destroy the original review.
+  assert.match(body, /function isAcknowledgementOnly\(\)/);
+  assert.match(body, /hasOnly\(\['isAcknowledged', 'acknowledgedAt', 'updatedAt'\]\)/);
+  assert.match(body, /isSubject\(\) && isAcknowledgementOnly\(\)/);
+
+  // reviewerId and targetEmployeeId must be immutable for every writer.
+  assert.match(body, /unchanged\('reviewerId'\)/);
+  assert.match(body, /unchanged\('targetEmployeeId'\)/);
+
+  // Authorship is pinned on create, and self-review is refused.
+  assert.match(body, /targetEmployeeId != request\.resource\.data\.reviewerId/);
+  assert.match(body, /rating >= 1/);
+  assert.match(body, /rating <= 5/);
+});
+
+test('feedback service ships no fabricated appraisals and never fakes success', async () => {
+  const src = await readRepoFile('src/lib/feedbackService.ts');
+
+  // REGRESSION: three complete reviews of real named employees were seeded, and
+  // getStoredFeedbacks() returned them whenever localStorage was empty -- so a
+  // fresh install showed every employee an invented appraisal signed by the CEO.
+  assert.equal(/INITIAL_FEEDBACKS/.test(src), false, 'seeded appraisals are back');
+  assert.equal(/return INITIAL_FEEDBACKS/.test(src), false);
+
+  // REGRESSION: the save catch block returned { success: true } for EVERY error,
+  // so a permission-denied write reported "successfully recorded" to the
+  // reviewer while the server had refused it.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const catchBody = code.slice(code.indexOf('} catch (error: any) {'));
+  assert.equal(/success: true/.test(catchBody), false, 'catch block still claims success');
+  assert.match(catchBody, /permission-denied/);
+
+  // The employee-facing listener must be a scoped query, not a collection-wide
+  // listen -- rules deny the latter for anyone below PM.
+  assert.match(src, /export function feedbackQueryFor/);
+  assert.match(src, /where\('targetEmployeeCode', '==', code\)/);
+
+  // Privacy filter matches on identity only, never on a shared display name.
+  assert.equal(/targetEmployeeName.*toLowerCase\(\) === activeEmployee\.fullName/.test(src), false);
+});

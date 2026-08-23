@@ -1827,7 +1827,7 @@ export function buildWeekWorkRow(
   week: WorkWeekDay[],
   employee: any,
   attendance: AttendanceRecord[],
-  opts: { nowMs?: number; leaveRequests?: any[] } = {}
+  opts: { nowMs?: number; leaveRequests?: any[]; holidayDates?: string[] } = {}
 ): WeekWorkRow {
   const nowMs = opts.nowMs ?? Date.now();
   const days = week.map(d =>
@@ -1848,7 +1848,14 @@ export function buildWeekWorkRow(
     if (s.isLive) isLive = true;
     if (s.checkInMs) daysPresent++;
 
-    if (meta.isFuture || meta.isNonWorking) return;
+    // `buildWorkWeek` already marks declared holidays as non-working, so
+    // `meta.isNonWorking` normally covers them. `opts.holidayDates` is honoured
+    // as well, so a caller that built the week without the holiday list still
+    // gets the right denominator instead of billing a company holiday as a
+    // missed shift.
+    const isNonWorking = meta.isNonWorking ||
+      (Array.isArray(opts.holidayDates) && opts.holidayDates.includes(meta.dateStr));
+    if (meta.isFuture || isNonWorking) return;
     // Filtered: an unfiltered call also matches an approved WFH request, which
     // would drop a remote working day out of `expectedMinutes` and hide the
     // absence of someone who was approved to work from home but never did.
@@ -1989,28 +1996,44 @@ export function listPayrollMonths(
  * (CEO, CTO, COO / Rahul Pathak, Founders, Managing Directors, Super Admins)
  * so they are excluded from operational graphs, analytics, and workforce calculations.
  */
+/**
+ * Executive acronyms, matched as WHOLE WORDS.
+ *
+ * Substring matching is unsafe here: `'coo'` is inside "Project Coordinator" and
+ * `'cto'` is inside "Contractor", and designation is a free-text input in
+ * EmployeeFormModal. A plain `.includes()` therefore silently excluded ordinary
+ * staff from payroll and analytics the moment HR typed a normal job title.
+ */
+const EXEC_ACRONYMS = /\b(ceo|cto|coo|cfo|cio|md)\b/;
+
+/** Leadership titles spelled out. Whole-word anchored for the same reason. */
+const EXEC_TITLES = /\b(chief\s+(executive|technology|technical|operating|financial|information)|founder|co-?founder|managing\s+director)\b/;
+
+/**
+ * True when an employee is Executive Leadership / a Founder, and so is excluded
+ * from operational headcount, attendance rosters, turnout analytics and payroll
+ * disbursement.
+ *
+ * Precedence is deliberate: the structured `executiveRole` field ('CEO' | 'CTO',
+ * already on the Employee type and seeded in demoData) is authoritative, then the
+ * assigned auth role, and only then the free-text designation. Personal names and
+ * email fragments are NOT consulted -- keying a shared library function on
+ * `name.includes('<person>')` or `email.includes('<person>')` means any future
+ * hire matching that fragment vanishes from payroll with no salary row and no
+ * warning, and the named person still breaks the moment their title changes.
+ */
 export function isExecutiveOrLeadership(emp: any): boolean {
   if (!emp) return false;
-  const name = (emp.fullName || emp.employeeName || '').toLowerCase();
-  const desig = (emp.designation || '').toLowerCase();
-  const role = (emp.role || '').toUpperCase();
-  const email = (emp.email || '').toLowerCase();
 
-  return (
-    role === 'SUPER_ADMIN' ||
-    desig.includes('ceo') ||
-    desig.includes('chief executive') ||
-    desig.includes('cto') ||
-    desig.includes('chief technology') ||
-    desig.includes('coo') ||
-    desig.includes('chief operating') ||
-    desig.includes('founder') ||
-    desig.includes('managing director') ||
-    name.includes('rahul pathak') ||
-    name.includes('akshit') ||
-    email.includes('rahul') ||
-    email.includes('founder') ||
-    email.includes('akshit')
-  );
+  // 1. Structured field — authoritative when present.
+  if (emp.executiveRole === 'CEO' || emp.executiveRole === 'CTO') return true;
+
+  // 2. Assigned auth role.
+  if (String(emp.role || '').toUpperCase() === 'SUPER_ADMIN') return true;
+
+  // 3. Free-text designation, whole-word matched.
+  const desig = String(emp.designation || '').toLowerCase();
+  if (!desig) return false;
+  return EXEC_ACRONYMS.test(desig) || EXEC_TITLES.test(desig);
 }
 
