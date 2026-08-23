@@ -611,6 +611,29 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       isFaceModalOpen ||
       isEnrollFaceModalOpen
     ) return;
+
+    // Strict GPS Geofence Pre-Check on normal office days
+    const isGpsEnforced = settings.gpsRequired !== false;
+    if (!isWfh && isGpsEnforced) {
+      if (!gpsLocation) {
+        triggerHaptic('error');
+        setActionFeedback({
+          success: false,
+          message: 'GPS Location Required: Location access is denied or unavailable. Please enable browser location permissions and be at the company office to check in.'
+        });
+        return;
+      }
+
+      if (liveDistanceMeters !== null && !isVerifiedLocation) {
+        triggerHaptic('error');
+        setActionFeedback({
+          success: false,
+          message: `Check-In Blocked: You are ${liveDistanceMeters}m away from the office (Allowed limit: ${companyWorkZone.radiusMeters}m). You must check in at the company office location.`
+        });
+        return;
+      }
+    }
+
     selfCheckInInProgressRef.current = true;
     triggerHaptic('medium');
     const hasConsent = localStorage.getItem('kss_biometric_consent') === 'true';

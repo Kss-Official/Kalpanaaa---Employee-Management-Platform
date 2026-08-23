@@ -166,8 +166,16 @@ export const HRProfileView: React.FC = () => {
     if (!targetEmployee) return;
     setLoading(true);
 
+    // Pass a live fix when one is available so the engine can verify the office
+    // location properly. Unlike check-in this does NOT hard-refuse without a fix:
+    // evaluateAttendanceScan deliberately falls back to the verified location
+    // already stored on today's record, so losing GPS cannot trap someone who is
+    // already checked in and needs to end their shift.
+    const isSelf = !!activeEmployee && targetEmployee.id === activeEmployee.id;
+    const fix = (isSelf && settings.gpsRequired !== false) ? await getFixOrNull() : null;
+
     try {
-      const res = await checkOut(targetEmployee.id);
+      const res = await checkOut(targetEmployee.id, fix?.lat, fix?.lon);
       if (res.success) {
         toast.success(res.message || 'Check-Out recorded successfully!');
       } else {
