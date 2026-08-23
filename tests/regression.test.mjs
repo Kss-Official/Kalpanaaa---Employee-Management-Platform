@@ -1368,9 +1368,11 @@ test('feedback service ships no fabricated appraisals and never fakes success', 
   assert.match(catchBody, /permission-denied/);
 
   // The employee-facing listener must be a scoped query, not a collection-wide
-  // listen -- rules deny the latter for anyone below PM.
-  assert.match(src, /export function feedbackQueryFor/);
+  // listen -- rules deny the latter for anyone below PM. Tier scoping itself is
+  // covered in tests/hierarchy.test.mjs.
+  assert.match(src, /export function feedbackQueriesFor/);
   assert.match(src, /where\('targetEmployeeCode', '==', code\)/);
+  assert.equal(/feedbackQueryFor\b/.test(src), false, 'the superseded single-query helper is back');
 
   // Privacy filter matches on identity only, never on a shared display name.
   assert.equal(/targetEmployeeName.*toLowerCase\(\) === activeEmployee\.fullName/.test(src), false);

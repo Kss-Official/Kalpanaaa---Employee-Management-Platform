@@ -15,14 +15,12 @@ import {
   Lock
 } from 'lucide-react';
 import { PerformanceFeedback } from '../../types';
-import { 
-  getStoredFeedbacks, 
-  filterFeedbacksByRole, 
+import {
+  getStoredFeedbacks,
+  filterFeedbacksByRole,
   acknowledgePerformanceFeedback,
-  feedbackQueryFor
+  subscribeToFeedbacks
 } from '../../lib/feedbackService';
-import { db, subscribeWithRecovery } from '../../lib/firebase';
-import { collection } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 
 export const EmployeeFeedbackView: React.FC = () => {
@@ -32,29 +30,17 @@ export const EmployeeFeedbackView: React.FC = () => {
   const [allFeedbacks, setAllFeedbacks] = useState<PerformanceFeedback[]>(() => getStoredFeedbacks());
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
 
-  // Firestore sync, scoped to what this viewer is allowed to read (see
-  // feedbackQueryFor -- a collection-wide listen is denied for employees).
+  // Firestore sync, narrowed to the reviews about THIS employee. A tier-1 account
+  // has no readable subset beyond its own reviews, so a collection-wide listen is
+  // rejected outright by the rules rather than merely returning less.
   useEffect(() => {
     if (!isAuthenticated) return;
-    const q = feedbackQueryFor(activeEmployee, role);
-    if (!q) return;
-    const unsub = subscribeWithRecovery(
-      q,
-      (snapshot) => {
-        // No `if (!snapshot.empty)` guard: an empty result is a real answer.
-        // Skipping it left deleted or never-existent reviews on screen forever,
-        // because state stayed at whatever the previous snapshot or the local
-        // cache had put there.
-        const fetched: PerformanceFeedback[] = [];
-        snapshot.forEach(d => fetched.push(d.data() as PerformanceFeedback));
-        fetched.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setAllFeedbacks(fetched);
-        localStorage.setItem('kss_performance_feedbacks', JSON.stringify(fetched));
-      },
+    return subscribeToFeedbacks(
+      activeEmployee,
+      role,
+      setAllFeedbacks,
       (err) => console.warn('[EmployeeFeedbackView] Firestore listener error:', err)
     );
-
-    return () => unsub();
   }, [isAuthenticated, activeEmployee, role]);
 
   // Strictly filter feedbacks meant ONLY for this employee

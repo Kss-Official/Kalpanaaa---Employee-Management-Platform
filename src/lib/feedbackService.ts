@@ -1,6 +1,7 @@
 import { PerformanceFeedback, UserRole, Employee } from '../types';
 import { db, cleanFirestorePayload, subscribeWithRecovery } from './firebase';
-import { collection, setDoc, doc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, setDoc, doc, getDoc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
+import { tierOf, canViewTier, isSamePerson, TIER_EMPLOYEE, TIER_PM } from './hierarchy';
 
 /**
  * There is deliberately no seeded feedback list.
@@ -17,10 +18,17 @@ import { collection, setDoc, doc, deleteDoc, updateDoc, query, where } from 'fir
 const LOCAL_STORAGE_KEY = 'kss_performance_feedbacks';
 
 /**
- * Filter feedbacks according to organizational hierarchy & RBAC confidentiality:
- *  - Super Admin (CEO / CTO) & HR Admin: can view ALL feedbacks across company.
- *  - Project Manager: can view feedbacks given by PM, feedbacks given to PM, and feedbacks for team members.
- *  - Employee: can ONLY view feedbacks specifically addressed to them.
+ * Narrow a feedback list to what this viewer is entitled to see.
+ *
+ * This is the DISPLAY filter. The enforceable boundary is `firestore.rules`
+ * plus the scoped queries in `subscribeToFeedbacks` -- this function exists so
+ * the UI never renders a row the server would have refused, and so a widened
+ * query can't quietly widen visibility.
+ *
+ * Tier policy (src/lib/hierarchy.ts):
+ *   CTO ⇄ CEO (5) and HR (3) hold the whole appraisal record.
+ *   PM (2) sees tier-1 employees, reviews it authored, and reviews about itself.
+ *   Employee (1) sees only reviews about itself.
  */
 export function filterFeedbacksByRole(
   feedbacks: PerformanceFeedback[],
@@ -29,35 +37,80 @@ export function filterFeedbacksByRole(
 ): PerformanceFeedback[] {
   if (!activeEmployee) return [];
 
-  const effectiveRole = activeEmployee.role || role;
-  const isSuperAdmin = effectiveRole === 'SUPER_ADMIN';
-  const isHrAdmin = effectiveRole === 'HR_ADMIN';
-  const isPm = effectiveRole === 'PROJECT_MANAGER';
-
-  // 1. Executive Leadership & HR can view all feedbacks
-  if (isSuperAdmin || isHrAdmin) {
-    return feedbacks;
-  }
-
-  // 2. Project Manager can view:
-  //    - Feedbacks authored by this PM
-  //    - Feedbacks given by Executives (CEO/CTO) to this PM
-  if (isPm) {
-    return feedbacks.filter(fb => 
-      fb.reviewerId === activeEmployee.id || 
-      fb.targetEmployeeId === activeEmployee.id ||
-      fb.targetEmployeeCode === activeEmployee.employeeId
-    );
-  }
-
-  // 3. Regular Employees: STRICT PRIVACY — only see their own feedback.
-  //    Matched on identity only. The removed `targetEmployeeName` equality
-  //    fallback meant two employees who share a name read each other's
-  //    appraisals, and it is not a condition the security rules accept either.
-  return feedbacks.filter(fb =>
-    fb.targetEmployeeId === activeEmployee.id ||
-    fb.targetEmployeeCode === activeEmployee.employeeId
+  // `role` is the session's effective role and wins when the directory record
+  // has not loaded a role yet; tierOf reads the employee record itself.
+  const viewerTier = Math.max(
+    tierOf(activeEmployee),
+    tierOf({ role: activeEmployee.role || role })
   );
+
+  const isMine = (fb: PerformanceFeedback) =>
+    isSamePerson(activeEmployee, { id: fb.targetEmployeeId, employeeId: fb.targetEmployeeCode });
+  const isAuthoredByMe = (fb: PerformanceFeedback) =>
+    isSamePerson(activeEmployee, { id: fb.reviewerId });
+
+  return feedbacks.filter(fb => {
+    // A review about you is always yours to read, whatever tier you are on.
+    if (isMine(fb)) return true;
+    // So is one you wrote -- a PM must be able to see its own review of an
+    // employee who has since been promoted past tier 1.
+    if (isAuthoredByMe(fb)) return true;
+    // Legacy rows written before subjectTier existed fail CLOSED: an unknown
+    // subject tier must not be treated as the most permissive one.
+    const subjectTier = typeof fb.subjectTier === 'number' ? fb.subjectTier : Number.MAX_SAFE_INTEGER;
+    return canViewTier(viewerTier, subjectTier);
+  });
+}
+
+/**
+ * The leadership note that goes with a review, stored OUT of the review document.
+ *
+ * P0 FIX: `privateLeadershipNotes` used to be a field on the feedback document
+ * itself, hidden behind `{isExecutive && ...}` in the UI. Firestore has no
+ * field-level read security, so the subject of the review -- who is entitled to
+ * read that document, and must be, in order to acknowledge it -- could open
+ * devtools and read the note about themselves. "Only visible to Executive
+ * Admins" was true of the markup and false of the data.
+ *
+ * It now lives at /performanceFeedbacks/{id}/confidential/notes, which rules
+ * restrict to isConfigAdmin() -- exactly the HR-and-board tier that writes it.
+ */
+const confidentialNoteRef = (feedbackId: string) =>
+  doc(db, 'performanceFeedbacks', feedbackId, 'confidential', 'notes');
+
+export async function saveConfidentialNote(feedbackId: string, text: string): Promise<boolean> {
+  try {
+    await setDoc(confidentialNoteRef(feedbackId), {
+      text,
+      updatedAt: new Date().toISOString()
+    });
+    return true;
+  } catch (error) {
+    console.error('Error saving confidential note:', error);
+    return false;
+  }
+}
+
+/**
+ * Read a leadership note on demand.
+ *
+ * Deliberately not part of the list subscription: it is one extra billed read per
+ * note, and a confidential note should be revealed on purpose rather than sit on
+ * screen through every scroll and screenshare.
+ *
+ * Returns null when there is no note or the caller is not entitled to it -- the
+ * caller cannot distinguish the two, which is the point.
+ */
+export async function fetchConfidentialNote(feedbackId: string): Promise<string | null> {
+  try {
+    const snap = await getDoc(confidentialNoteRef(feedbackId));
+    if (!snap.exists()) return null;
+    const text = String(snap.data()?.text || '').trim();
+    return text.length > 0 ? text : null;
+  } catch (error) {
+    console.error('Error reading confidential note:', error);
+    return null;
+  }
 }
 
 /**
@@ -153,26 +206,104 @@ export function getStoredFeedbacks(): PerformanceFeedback[] {
 }
 
 /**
- * Subscribe to the feedback this viewer is actually allowed to read.
+ * Every query this viewer is provably allowed to run, as a list.
  *
  * P0 FIX: both views listened to the whole `performanceFeedbacks` COLLECTION.
- * Firestore rejects a query outright when the rules cannot be satisfied for
- * every document it could return, and an employee may only read reviews about
- * themselves -- so the employee-facing listener was permission-denied in
- * production and the view fell back to whatever localStorage happened to hold.
- * Admins and PMs have a blanket read, so they may listen collection-wide;
- * everyone else gets a query narrowed to their own employee code, which
- * satisfies the rule for every returned document.
+ * Firestore rejects a query outright when its rules cannot be satisfied for
+ * every document the query could return, so the employee-facing listener was
+ * permission-denied in production and the view silently fell back to whatever
+ * localStorage happened to hold.
+ *
+ * A single query cannot OR across different fields, and a PM's entitlement spans
+ * three of them (tier-1 subjects, reviews it authored, reviews about itself), so
+ * this returns one query per disjunct of the read rule and the caller merges
+ * them. Each is a bare equality filter with client-side sorting, so none of them
+ * needs a composite index.
  */
-export function feedbackQueryFor(activeEmployee: Employee | null, role: UserRole | string) {
+export function feedbackQueriesFor(activeEmployee: Employee | null, role: UserRole | string) {
   const base = collection(db, 'performanceFeedbacks');
-  const effectiveRole = activeEmployee?.role || role;
-  if (effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'HR_ADMIN' || effectiveRole === 'PROJECT_MANAGER') {
-    return base;
+  if (!activeEmployee) return [];
+
+  const viewerTier = Math.max(
+    tierOf(activeEmployee),
+    tierOf({ role: activeEmployee.role || role })
+  );
+
+  // Executive board and HR have a blanket read, so one collection-wide listen is
+  // both permitted and cheapest.
+  if (viewerTier > TIER_PM) return [base];
+
+  const code = activeEmployee.employeeId;
+  const selfId = activeEmployee.id;
+  const qs = [];
+
+  if (viewerTier === TIER_PM) {
+    // Satisfies `isProjectManager() && subjectTier == TIER_EMPLOYEE`.
+    qs.push(query(base, where('subjectTier', '==', TIER_EMPLOYEE)));
+    // Satisfies `isAuthor()`.
+    if (selfId) qs.push(query(base, where('reviewerId', '==', selfId)));
   }
-  const code = activeEmployee?.employeeId;
-  // No code means no provably-readable subset: listening would only produce a
-  // permission-denied loop, so the caller must skip the subscription.
-  if (!code) return null;
-  return query(base, where('targetEmployeeCode', '==', code));
+
+  // Satisfies `isSubject()` via the bare employee code, which is the key
+  // firestore.rules resolves through getEmployeeId().
+  if (code) qs.push(query(base, where('targetEmployeeCode', '==', code)));
+
+  return qs;
+}
+
+/**
+ * Live subscription to this viewer's feedback, merged across every query their
+ * tier entitles them to run.
+ *
+ * Results are keyed by document id per query so a row that two queries both
+ * return -- a PM's own review of a tier-1 employee, for instance -- appears
+ * once, and so a document leaving one query's result set does not delete it from
+ * another's.
+ */
+export function subscribeToFeedbacks(
+  activeEmployee: Employee | null,
+  role: UserRole | string,
+  onData: (rows: PerformanceFeedback[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const queries = feedbackQueriesFor(activeEmployee, role);
+  if (queries.length === 0) {
+    // No provably-readable subset: listening would only produce a
+    // permission-denied loop. Report empty rather than leaving stale rows up.
+    onData([]);
+    return () => {};
+  }
+
+  const buckets: PerformanceFeedback[][] = queries.map(() => []);
+
+  const emit = () => {
+    const byId = new Map<string, PerformanceFeedback>();
+    for (const bucket of buckets) {
+      for (const fb of bucket) if (fb?.id) byId.set(fb.id, fb);
+    }
+    const merged = Array.from(byId.values());
+    merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    onData(merged);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
+    } catch (e) { /* quota or private mode -- the live list is still correct */ }
+  };
+
+  const unsubs = queries.map((q, i) =>
+    subscribeWithRecovery(
+      q,
+      (snapshot: any) => {
+        // No `if (!snapshot.empty)` guard: an empty result is a real answer.
+        // Skipping it left deleted reviews on screen indefinitely, because state
+        // stayed at whatever the previous snapshot or the local cache had put there.
+        const rows: PerformanceFeedback[] = [];
+        snapshot.forEach((d: any) => rows.push(d.data() as PerformanceFeedback));
+        buckets[i] = rows;
+        emit();
+      },
+      onError
+    )
+  );
+
+  return () => unsubs.forEach(u => u && u());
 }

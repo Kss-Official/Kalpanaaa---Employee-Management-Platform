@@ -27,16 +27,16 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { PerformanceFeedback, FeedbackCategory, FeedbackSentiment, Employee } from '../../types';
-import { 
-  getStoredFeedbacks, 
-  filterFeedbacksByRole, 
-  savePerformanceFeedback, 
-  deletePerformanceFeedback 
+import {
+  getStoredFeedbacks,
+  filterFeedbacksByRole,
+  savePerformanceFeedback,
+  deletePerformanceFeedback,
+  subscribeToFeedbacks,
+  saveConfidentialNote,
+  fetchConfidentialNote
 } from '../../lib/feedbackService';
-import { db, subscribeWithRecovery } from '../../lib/firebase';
-import { feedbackQueryFor } from '../../lib/feedbackService';
-import { collection } from 'firebase/firestore';
-import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { canReview, tierOf } from '../../lib/hierarchy';
 import { useHaptic } from '../../hooks/useHaptic';
 
 const FEEDBACK_CATEGORIES: FeedbackCategory[] = [
@@ -59,29 +59,18 @@ export const FeedbackHub: React.FC = () => {
   // Real-time Feedbacks state
   const [allFeedbacks, setAllFeedbacks] = useState<PerformanceFeedback[]>(() => getStoredFeedbacks());
 
-  // Firestore sync, scoped to what this viewer is allowed to read (see
-  // feedbackQueryFor -- a collection-wide listen is denied for employees).
+  // Firestore sync, scoped to what this viewer's TIER is allowed to read. A PM's
+  // entitlement spans three fields, and a single Firestore query cannot OR across
+  // fields, so subscribeToFeedbacks runs one listener per disjunct of the read
+  // rule and merges the results by document id.
   useEffect(() => {
     if (!isAuthenticated) return;
-    const q = feedbackQueryFor(activeEmployee, role);
-    if (!q) return;
-    const unsub = subscribeWithRecovery(
-      q,
-      (snapshot) => {
-        // No `if (!snapshot.empty)` guard: an empty result is a real answer.
-        // Skipping it left deleted or never-existent reviews on screen forever,
-        // because state stayed at whatever the previous snapshot or the local
-        // cache had put there.
-        const fetched: PerformanceFeedback[] = [];
-        snapshot.forEach(d => fetched.push(d.data() as PerformanceFeedback));
-        fetched.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setAllFeedbacks(fetched);
-        localStorage.setItem('kss_performance_feedbacks', JSON.stringify(fetched));
-      },
+    return subscribeToFeedbacks(
+      activeEmployee,
+      role,
+      setAllFeedbacks,
       (err) => console.warn('[FeedbackHub] Firestore listener error:', err)
     );
-
-    return () => unsub();
   }, [isAuthenticated, activeEmployee, role]);
 
   // Filtered by RBAC for this logged-in viewer
@@ -112,21 +101,16 @@ export const FeedbackHub: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<string | null>(null);
 
-  // List of eligible employees who can receive feedback from current reviewer
+  // Who this reviewer may write about at all: strictly below their own tier.
+  //
+  // P0 FIX: the PM branch was `!isExecutiveOrLeadership(e)`, which excluded the
+  // CTO and CEO but still let a PM file a formal appraisal about a PEER PM -- and
+  // about HR, whose role is not "executive leadership". canReview() applies the
+  // same strictly-below test the create rule now enforces server-side, so the
+  // dropdown can no longer offer a target whose write would be rejected.
   const eligibleTargetEmployees = useMemo(() => {
-    return employees.filter(e => {
-      if (e.status === 'Terminated') return false;
-      if (e.id === activeEmployee?.id) return false; // cannot review self
-
-      // PM can review employees in their department or general workforce (non-executives)
-      if (isPm) {
-        return !isExecutiveOrLeadership(e);
-      }
-
-      // CEO / CTO / Super Admin can review ANY PM or Employee
-      return true;
-    });
-  }, [employees, activeEmployee, isPm]);
+    return employees.filter(e => canReview(activeEmployee, e));
+  }, [employees, activeEmployee]);
 
   // Filtered display feedbacks
   const displayFeedbacks = useMemo(() => {
@@ -219,31 +203,64 @@ export const FeedbackHub: React.FC = () => {
       reviewerDesignation: activeEmployee.designation || (isSuperAdmin ? 'Executive Leadership' : isPm ? 'Project Manager' : 'Reviewer'),
       reviewerPhotoUrl: activeEmployee.profilePhotoUrl,
 
+      // Denormalised so firestore.rules can authorise reads without a billed
+      // lookup of the subject's role. Stamped from the directory record at write
+      // time and immutable afterwards (see the update rule), which is what keeps
+      // a review visible to the tier that was entitled to it even after the
+      // subject is promoted.
+      subjectTier: tierOf(targetEmp),
+
       category,
       rating,
       sentiment,
       strengths: strengths.trim(),
       areasForImprovement: areasForImprovement.trim(),
       actionItems: actionItemsList.length > 0 ? actionItemsList : (actionItemInput.trim() ? [actionItemInput.trim()] : ['Follow up on sprint goals']),
-      privateLeadershipNotes: privateNotes.trim(),
       isAcknowledged: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
+    // The leadership note goes to a subcollection the subject cannot read, and it
+    // goes FIRST so `hasConfidentialNote` can record what actually landed rather
+    // than what we hoped would. A flag that claims a note the note store never
+    // accepted is worse than no flag.
+    const note = privateNotes.trim();
+    const noteSaved = note.length > 0 ? await saveConfidentialNote(newFeedback.id, note) : false;
+    newFeedback.hasConfidentialNote = noteSaved;
+
     const res = await savePerformanceFeedback(newFeedback);
 
     if (res.success) {
-      setSubmitFeedback('✓ Feedback successfully sent to employee!');
+      setSubmitFeedback(
+        note.length > 0 && !noteSaved
+          ? '⚠ Review sent, but the leadership note could not be saved.'
+          : '✓ Feedback successfully sent to employee!'
+      );
       setTimeout(() => {
         setIsComposeModalOpen(false);
         setIsSubmitting(false);
         setSubmitFeedback(null);
-      }, 1200);
+      }, note.length > 0 && !noteSaved ? 3000 : 1200);
     } else {
       setSubmitFeedback(res.message);
       setIsSubmitting(false);
     }
+  };
+
+  // Leadership notes are fetched one at a time, on an explicit reveal, because
+  // each one is a separate billed read and a confidential note should not be
+  // sitting on screen through every scroll and screenshare.
+  const [revealedNotes, setRevealedNotes] = useState<Record<string, string>>({});
+  const [loadingNoteId, setLoadingNoteId] = useState<string | null>(null);
+
+  const handleRevealNote = async (fbId: string) => {
+    triggerHaptic();
+    setLoadingNoteId(fbId);
+    const text = await fetchConfidentialNote(fbId);
+    // A denial and an empty note are indistinguishable here by design.
+    setRevealedNotes(prev => ({ ...prev, [fbId]: text || 'No leadership note is stored on this review.' }));
+    setLoadingNoteId(null);
   };
 
   const handleDelete = async (fbId: string) => {
@@ -499,13 +516,26 @@ export const FeedbackHub: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Private Leadership Note (Only visible to Admin) */}
-                    {fb.privateLeadershipNotes && isExecutive && (
+                    {/* Leadership note: HR and the board only, revealed on demand.
+                        The text is never in this document -- see
+                        fetchConfidentialNote and the /confidential rules block. */}
+                    {fb.hasConfidentialNote && isExecutive && (
                       <div className="p-2.5 bg-purple-500/5 rounded-xl border border-purple-500/20 text-[11px]">
                         <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider block">
                           🔒 Leadership Private Note:
                         </span>
-                        <p className="text-purple-200 italic mt-0.5">{fb.privateLeadershipNotes}</p>
+                        {revealedNotes[fb.id] ? (
+                          <p className="text-purple-200 italic mt-0.5">{revealedNotes[fb.id]}</p>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleRevealNote(fb.id)}
+                            disabled={loadingNoteId === fb.id}
+                            className="mt-1 text-[10px] font-bold text-purple-300 hover:text-purple-100 underline underline-offset-2 disabled:opacity-50 cursor-pointer"
+                          >
+                            {loadingNoteId === fb.id ? 'Opening…' : 'Reveal note'}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

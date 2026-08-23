@@ -672,7 +672,38 @@ service cloud.firestore {
         );
       }
 
-      allow read: if isConfigAdmin() || isProjectManager() || isSubject();
+      // The caller's own tier, kept in lockstep with src/lib/hierarchy.ts.
+      // CTO and CEO are peers on tier 5, HR is 3, PM is 2, everyone else 1;
+      // tier 4 is left free so an intermediate executive layer can be added
+      // without renumbering the subjectTier already written to documents.
+      // isSuperAdmin() is tested first because isHrAdmin() and
+      // isProjectManager() both OR it in.
+      function callerTier() {
+        return isSuperAdmin() ? 5 : (isHrAdmin() ? 3 : (isProjectManager() ? 2 : 1));
+      }
+
+      // Hierarchy-wise visibility, enforced HERE rather than in the UI.
+      //
+      //   CTO/CEO (5) and HR (3)  -> the whole appraisal record, for compliance.
+      //   PM      (2)             -> tier-1 employees, plus anything they wrote
+      //                              and anything written about them.
+      //   Employee(1)             -> only reviews about themselves.
+      //
+      // The PM clause reads subjectTier off the DOCUMENT instead of looking the
+      // subject's role up, because every get() in a rule is a billed read capped
+      // at ten per request -- a rule cannot walk a hierarchy. It is also the last
+      // disjunct on purpose: || short-circuits, so a document written before
+      // subjectTier existed still resolves through isSubject()/isAuthor(), and a
+      // PM hitting one gets a denial rather than a blanket pass. Missing tier
+      // fails CLOSED.
+      //
+      // P0 FIX: `isProjectManager()` used to sit here unqualified, so every PM
+      // could read HR's, the CEO's and every peer PM's appraisals. Scoping was
+      // only ever done client-side.
+      allow read: if isConfigAdmin() ||
+        isSubject() ||
+        isAuthor() ||
+        (isProjectManager() && resource.data.subjectTier == 1);
 
       // A review must be filed under the author's OWN identity and never about
       // themselves. Without the reviewerId pin, any PM could publish an
@@ -690,22 +721,51 @@ service cloud.firestore {
         request.resource.data.rating is number &&
         request.resource.data.rating >= 1 &&
         request.resource.data.rating <= 5 &&
-        request.resource.data.isAcknowledged == false;
+        request.resource.data.isAcknowledged == false &&
+        // The declared subject tier is what every later read is authorised
+        // against, so it is checked on the way in: strictly below the author's
+        // own tier. A PM may therefore only file about tier 1, HR about tiers
+        // 1-2, and the CTO/CEO about anyone but each other -- which is the same
+        // strictly-below test canReview() applies in the client.
+        request.resource.data.subjectTier is number &&
+        request.resource.data.subjectTier >= 1 &&
+        request.resource.data.subjectTier < callerTier();
 
       // P0 FIX: the previous revision granted the SUBJECT a blanket `update`.
       // rating, sentiment, strengths, privateLeadershipNotes AND reviewerId all
       // live on this one document, so an employee could rewrite their own
       // appraisal, reassign reviewerId to themselves, and then satisfy the
       // delete rule below to destroy the original review outright.
+      //
+      // subjectTier is pinned for the same reason reviewerId is: it is the key
+      // the read rule authorises against, so letting it move would let an author
+      // widen or narrow who can see a review after the fact.
       allow update: if
-        (isConfigAdmin() && unchanged('reviewerId') && unchanged('targetEmployeeId')) ||
-        (isProjectManager() && isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId')) ||
+        (isConfigAdmin() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
+        (isProjectManager() && isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
         (isSubject() && isAcknowledgementOnly());
 
       // Acknowledged reviews are part of the appraisal record: only an admin may
       // retract one. An author can still withdraw their own unsigned draft.
       allow delete: if isConfigAdmin() ||
         (isAuthor() && resource.data.get('isAcknowledged', false) == false);
+
+      // The leadership note that goes with a review.
+      //
+      // P0 FIX: this was a `privateLeadershipNotes` FIELD on the parent document,
+      // hidden behind `{isExecutive && ...}` in the markup. Firestore has no
+      // field-level read security, and the subject of a review must be able to
+      // read that document in order to acknowledge it -- so every employee could
+      // read the confidential note written about them straight out of devtools.
+      //
+      // Moved into a subcollection because that is the only granularity Firestore
+      // authorises at. isConfigAdmin() is HR plus the board, which is exactly the
+      // tier that writes these notes; a PM never sees one, and neither does the
+      // subject. Rules on the parent do NOT cascade to subcollections, so this
+      // block is what protects the note, not the one above it.
+      match /confidential/{noteId} {
+        allow read, write: if isConfigAdmin();
+      }
     }
   }
 }

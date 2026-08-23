@@ -355,7 +355,33 @@ export interface PerformanceFeedback {
   strengths: string;
   areasForImprovement: string;
   actionItems: string[];
-  privateLeadershipNotes?: string;
+
+  /**
+   * Whether a leadership note accompanies this review.
+   *
+   * The note TEXT is deliberately not on this interface. It lived here as
+   * `privateLeadershipNotes` and was hidden behind an `isExecutive &&` guard in
+   * the markup, but Firestore has no field-level read security and the subject
+   * must be able to read this document in order to acknowledge it -- so the
+   * "private" note was readable by the person it was written about. It now lives
+   * at /performanceFeedbacks/{id}/confidential/notes, restricted to HR and the
+   * board, and is fetched on demand (see fetchConfidentialNote).
+   *
+   * This flag stays on the parent so the UI knows whether a note exists without
+   * spending a read per card. The subject learns that leadership commented; they
+   * do not learn what was said.
+   */
+  hasConfidentialNote?: boolean;
+
+  /**
+   * The subject's organisational tier AT THE TIME OF WRITING (see
+   * src/lib/hierarchy.ts). Denormalised deliberately: firestore.rules cannot
+   * look up the target's role without a billed document read, and rules are
+   * capped at ten of those per request. This one number is what makes
+   * hierarchy-wise read access enforceable on the server rather than merely
+   * hidden in the UI.
+   */
+  subjectTier: number;
 
   isAcknowledged: boolean;
   acknowledgedAt?: string;
