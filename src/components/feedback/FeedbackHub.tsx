@@ -24,7 +24,12 @@ import {
   ChevronRight,
   HeartHandshake,
   Target,
-  ArrowUpRight
+  ArrowUpRight,
+  Code,
+  Rocket,
+  Trophy,
+  Zap,
+  Bookmark
 } from 'lucide-react';
 import { PerformanceFeedback, FeedbackCategory, FeedbackSentiment, Employee } from '../../types';
 import {
@@ -36,6 +41,7 @@ import {
   saveConfidentialNote,
   fetchConfidentialNote
 } from '../../lib/feedbackService';
+import { FEEDBACK_TEMPLATES } from '../../lib/feedbackTemplates';
 import { canReview, tierOf } from '../../lib/hierarchy';
 import { useHaptic } from '../../hooks/useHaptic';
 
@@ -466,79 +472,87 @@ export const FeedbackHub: React.FC = () => {
                   </div>
 
                   {/* Reviewer Tag & Category Pill */}
-                  <div className="flex items-center justify-between gap-2 py-2 flex-wrap text-[10px]">
-                    <div className="flex items-center gap-1.5 text-slate-400">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Review by: <strong className="text-slate-200">{fb.reviewerName}</strong> ({fb.reviewerDesignation || fb.reviewerRole})</span>
+                  {/* Reviewer Tag & Category Pill */}
+                  {(() => {
+                    const tpl = FEEDBACK_TEMPLATES[fb.category] || FEEDBACK_TEMPLATES['Performance & Sprint Delivery'];
+                    return (
+                      <>
+                        <div className="flex items-center justify-between gap-2 py-2 flex-wrap text-[10px]">
+                          <div className="flex items-center gap-1.5 text-slate-400">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Review by: <strong className="text-slate-200">{fb.reviewerName}</strong> ({fb.reviewerDesignation || fb.reviewerRole})</span>
+                          </div>
+
+                          <span className={`px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider border ${tpl.theme.pillBg}`}>
+                            {fb.category}
+                          </span>
+                        </div>
+
+                        {/* Feedback Content Sections */}
+                        <div className="space-y-2.5 text-xs pt-1">
+                          {/* Field 1 (Strengths / Deliverables / Kudos) */}
+                          {fb.strengths && (
+                            <div className="p-3 bg-emerald-500/5 rounded-2xl border border-emerald-500/20 space-y-1">
+                              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> {tpl.field1.label}
+                              </span>
+                              <p className="text-slate-300 text-xs leading-relaxed">{fb.strengths}</p>
+                            </div>
+                          )}
+
+                          {/* Field 2 (Growth / Improvement / Leadership Opportunities) */}
+                          {fb.areasForImprovement && (
+                            <div className="p-3 bg-amber-500/5 rounded-2xl border border-amber-500/20 space-y-1">
+                              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                                <Target className="w-3 h-3" /> {tpl.field2.label}
+                              </span>
+                              <p className="text-slate-300 text-xs leading-relaxed">{fb.areasForImprovement}</p>
+                            </div>
+                          )}
+
+                          {/* Action Items */}
+                          {fb.actionItems && fb.actionItems.length > 0 && (
+                            <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 space-y-1.5">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                {tpl.actionItems.label}:
+                              </span>
+                              <ul className="space-y-1 text-[11px] text-slate-300">
+                                {fb.actionItems.map((item, i) => (
+                                  <li key={i} className="flex items-start gap-1.5">
+                                    <ChevronRight className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                                    <span>{item}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+
+                  {/* Leadership note: HR and the board only, revealed on demand.
+                      The text is never in this document -- see
+                      fetchConfidentialNote and the /confidential rules block. */}
+                  {fb.hasConfidentialNote && isExecutive && (
+                    <div className="p-2.5 bg-purple-500/5 rounded-xl border border-purple-500/20 text-[11px] mt-2.5">
+                      <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider block">
+                        🔒 Leadership Private Note:
+                      </span>
+                      {revealedNotes[fb.id] ? (
+                        <p className="text-purple-200 italic mt-0.5">{revealedNotes[fb.id]}</p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRevealNote(fb.id)}
+                          disabled={loadingNoteId === fb.id}
+                          className="mt-1 text-[10px] font-bold text-purple-300 hover:text-purple-100 underline underline-offset-2 disabled:opacity-50 cursor-pointer"
+                        >
+                          {loadingNoteId === fb.id ? 'Opening…' : 'Reveal note'}
+                        </button>
+                      )}
                     </div>
-
-                    <span className="px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider bg-slate-950 border border-slate-800 text-blue-300">
-                      {fb.category}
-                    </span>
-                  </div>
-
-                  {/* Feedback Content Sections */}
-                  <div className="space-y-2.5 text-xs pt-1">
-                    {/* Strengths */}
-                    {fb.strengths && (
-                      <div className="p-3 bg-emerald-500/5 rounded-2xl border border-emerald-500/20 space-y-1">
-                        <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Key Strengths &amp; Impact
-                        </span>
-                        <p className="text-slate-300 text-xs leading-relaxed">{fb.strengths}</p>
-                      </div>
-                    )}
-
-                    {/* Areas for Improvement */}
-                    {fb.areasForImprovement && (
-                      <div className="p-3 bg-amber-500/5 rounded-2xl border border-amber-500/20 space-y-1">
-                        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
-                          <Target className="w-3 h-3" /> Areas for Growth &amp; Focus
-                        </span>
-                        <p className="text-slate-300 text-xs leading-relaxed">{fb.areasForImprovement}</p>
-                      </div>
-                    )}
-
-                    {/* Action Items */}
-                    {fb.actionItems && fb.actionItems.length > 0 && (
-                      <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 space-y-1.5">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Action Items &amp; Next Sprint Deliverables:
-                        </span>
-                        <ul className="space-y-1 text-[11px] text-slate-300">
-                          {fb.actionItems.map((item, i) => (
-                            <li key={i} className="flex items-start gap-1.5">
-                              <ChevronRight className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Leadership note: HR and the board only, revealed on demand.
-                        The text is never in this document -- see
-                        fetchConfidentialNote and the /confidential rules block. */}
-                    {fb.hasConfidentialNote && isExecutive && (
-                      <div className="p-2.5 bg-purple-500/5 rounded-xl border border-purple-500/20 text-[11px]">
-                        <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider block">
-                          🔒 Leadership Private Note:
-                        </span>
-                        {revealedNotes[fb.id] ? (
-                          <p className="text-purple-200 italic mt-0.5">{revealedNotes[fb.id]}</p>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleRevealNote(fb.id)}
-                            disabled={loadingNoteId === fb.id}
-                            className="mt-1 text-[10px] font-bold text-purple-300 hover:text-purple-100 underline underline-offset-2 disabled:opacity-50 cursor-pointer"
-                          >
-                            {loadingNoteId === fb.id ? 'Opening…' : 'Reveal note'}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
 
                 {/* Footer Bar: Acknowledgment Status + Actions */}
@@ -572,178 +586,230 @@ export const FeedbackHub: React.FC = () => {
       )}
 
       {/* ── COMPOSE PERFORMANCE FEEDBACK MODAL ── */}
-      {isComposeModalOpen && (
-        <div className="fixed inset-0 z-[200] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]">
-            
-            {/* Modal Header */}
-            <div className="bg-slate-950 p-5 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
-                  {isExecutive ? 'Executive / Admin Review' : 'Project Manager Review'}
-                </span>
-                <h3 className="text-base font-black text-white mt-1">Submit Performance Feedback</h3>
-                <p className="text-xs text-slate-400">
-                  Provide formal feedback visible directly in the selected employee's portal.
-                </p>
-              </div>
+      {isComposeModalOpen && (() => {
+        const currentTemplate = FEEDBACK_TEMPLATES[category] || FEEDBACK_TEMPLATES['Performance & Sprint Delivery'];
 
-              <button
-                onClick={() => setIsComposeModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <form onSubmit={handleSubmitFeedback} className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+        return (
+          <div className="fixed inset-0 z-[200] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]">
               
-              {/* Target Employee Selector */}
-              <div>
-                <label className="block text-slate-300 font-bold mb-1.5">Select Employee / Project Manager:</label>
-                <select
-                  value={targetEmpId}
-                  onChange={e => setTargetEmpId(e.target.value)}
-                  required
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-medium text-xs focus:outline-hidden focus:border-blue-500"
+              {/* Modal Header */}
+              <div className="bg-slate-950 p-5 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2.5 py-0.5 rounded-md border border-blue-500/20">
+                    {isExecutive ? 'Executive / Admin Review' : 'Project Manager Review'}
+                  </span>
+                  <h3 className="text-base font-black text-white mt-1">
+                    {currentTemplate.title}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {currentTemplate.tagline}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setIsComposeModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer"
                 >
-                  {eligibleTargetEmployees.map(emp => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.fullName} ({emp.employeeId}) — {emp.designation} [{emp.department}]
-                    </option>
-                  ))}
-                </select>
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              {/* Category & Star Rating */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Modal Form */}
+              <form onSubmit={handleSubmitFeedback} className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+                
+                {/* Target Employee Selector */}
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1.5">Review Category:</label>
+                  <label className="block text-slate-300 font-bold mb-1.5">Select Employee / Project Manager:</label>
                   <select
-                    value={category}
-                    onChange={e => setCategory(e.target.value as FeedbackCategory)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-hidden focus:border-blue-500"
+                    value={targetEmpId}
+                    onChange={e => setTargetEmpId(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-medium text-xs focus:outline-hidden focus:border-blue-500"
                   >
-                    {FEEDBACK_CATEGORIES.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
+                    {eligibleTargetEmployees.map(emp => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.fullName} ({emp.employeeId}) — {emp.designation} [{emp.department}]
+                      </option>
                     ))}
                   </select>
                 </div>
 
-                {/* Rating (Interactive Stars) */}
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1.5">Performance Rating (1 to 5 Stars):</label>
-                  <div className="flex items-center gap-2 p-2 bg-slate-950 rounded-xl border border-slate-800">
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map(star => (
-                        <button
-                          key={star}
-                          type="button"
-                          onMouseEnter={() => setHoverRating(star)}
-                          onMouseLeave={() => setHoverRating(null)}
-                          onClick={() => setRating(star)}
-                          className="p-1 cursor-pointer transition-transform hover:scale-125"
-                        >
-                          <Star
-                            className={`w-5 h-5 ${
-                              star <= (hoverRating || rating)
-                                ? 'text-amber-400 fill-amber-400'
-                                : 'text-slate-700'
-                            }`}
-                          />
-                        </button>
+                {/* Category & Star Rating */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">Feedback Template Type:</label>
+                    <select
+                      value={category}
+                      onChange={e => {
+                        const newCat = e.target.value as FeedbackCategory;
+                        setCategory(newCat);
+                        // If fields are empty, load first preset of selected category
+                        const nextTpl = FEEDBACK_TEMPLATES[newCat];
+                        if (nextTpl && !strengths) {
+                          setStrengths(nextTpl.quickPresets[0]?.strengths || '');
+                          setAreasForImprovement(nextTpl.quickPresets[0]?.improvements || '');
+                          setActionItemsList(nextTpl.quickPresets[0]?.actions || []);
+                        }
+                      }}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold text-xs focus:outline-hidden focus:border-blue-500"
+                    >
+                      {FEEDBACK_CATEGORIES.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
                       ))}
+                    </select>
+                  </div>
+
+                  {/* Rating (Interactive Stars) */}
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1.5">Performance Rating (1 to 5 Stars):</label>
+                    <div className="flex items-center gap-2 p-2 bg-slate-950 rounded-xl border border-slate-800">
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <button
+                            key={star}
+                            type="button"
+                            onMouseEnter={() => setHoverRating(star)}
+                            onMouseLeave={() => setHoverRating(null)}
+                            onClick={() => setRating(star)}
+                            className="p-1 cursor-pointer transition-transform hover:scale-125"
+                          >
+                            <Star
+                              className={`w-5 h-5 ${
+                                star <= (hoverRating || rating)
+                                  ? 'text-amber-400 fill-amber-400'
+                                  : 'text-slate-700'
+                              }`}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                      <span className="font-mono font-bold text-white text-xs ml-auto">{rating} / 5 Stars</span>
                     </div>
-                    <span className="font-mono font-bold text-white text-xs ml-auto">{rating} / 5 Stars</span>
                   </div>
                 </div>
-              </div>
 
-              {/* Strengths & Key Achievements */}
-              <div>
-                <label className="block text-slate-300 font-bold mb-1.5">
-                  Key Strengths &amp; Notable Deliverables:
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={strengths}
-                  onChange={e => setStrengths(e.target.value)}
-                  placeholder="e.g. Exceptional leadership in the Q3 mobile refactor, sub-100ms API response time optimizations..."
-                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-emerald-500"
-                />
-              </div>
-
-              {/* Areas for Improvement */}
-              <div>
-                <label className="block text-slate-300 font-bold mb-1.5">
-                  Areas for Growth &amp; Development:
-                </label>
-                <textarea
-                  rows={2}
-                  required
-                  value={areasForImprovement}
-                  onChange={e => setAreasForImprovement(e.target.value)}
-                  placeholder="e.g. Proactively flag blockers during daily standups, write automated unit tests for edge cases..."
-                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-amber-500"
-                />
-              </div>
-
-              {/* Action Items List */}
-              <div>
-                <label className="block text-slate-300 font-bold mb-1.5">Action Items &amp; Next Sprint Goals:</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="e.g. Complete MediaPipe mesh audit, review PR #48"
-                    value={actionItemInput}
-                    onChange={e => setActionItemInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddActionItem(); } }}
-                    className="flex-1 px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddActionItem}
-                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-xs cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
-
-                {actionItemsList.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {actionItemsList.map((item, idx) => (
-                      <span
+                {/* 1-Click Quick Template Presets */}
+                <div className="p-3 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      1-Click Template Presets for {category}:
+                    </span>
+                    <span className="text-[10px] text-slate-500">Click to autofill</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {currentTemplate.quickPresets.map((preset, idx) => (
+                      <button
                         key={idx}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-300 border border-blue-500/20 text-[11px]"
+                        type="button"
+                        onClick={() => {
+                          setStrengths(preset.strengths);
+                          setAreasForImprovement(preset.improvements);
+                          setActionItemsList(preset.actions);
+                          triggerHaptic('light');
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-blue-600/20 hover:border-blue-500/50 text-slate-300 hover:text-white border border-slate-800 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
                       >
-                        <span>{item}</span>
-                        <X
-                          onClick={() => handleRemoveActionItem(idx)}
-                          className="w-3 h-3 hover:text-white cursor-pointer"
-                        />
-                      </span>
+                        <Bookmark className="w-3 h-3 text-blue-400" />
+                        <span>{preset.title}</span>
+                      </button>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
 
-              {/* Private Leadership Notes (CEO/CTO only) */}
-              {isExecutive && (
+                {/* Field 1 (Strengths / Deliverables / Kudos) */}
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1 text-[11px]">
-                    🔒 Private Leadership Notes (Optional — only visible to Executive Admins):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Potential candidate for promotion in Q4 review"
-                    value={privateNotes}
-                    onChange={e => setPrivateNotes(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-purple-500/30 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-hidden focus:border-purple-500"
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-slate-200 font-bold">
+                      {currentTemplate.field1.label}:
+                    </label>
+                    <span className="text-[10px] text-slate-500">{currentTemplate.field1.helper}</span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    required
+                    value={strengths}
+                    onChange={e => setStrengths(e.target.value)}
+                    placeholder={currentTemplate.field1.placeholder}
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-emerald-500 leading-relaxed"
                   />
                 </div>
-              )}
+
+                {/* Field 2 (Growth / Improvement / Next Level) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-slate-200 font-bold">
+                      {currentTemplate.field2.label}:
+                    </label>
+                    <span className="text-[10px] text-slate-500">{currentTemplate.field2.helper}</span>
+                  </div>
+                  <textarea
+                    rows={2}
+                    required
+                    value={areasForImprovement}
+                    onChange={e => setAreasForImprovement(e.target.value)}
+                    placeholder={currentTemplate.field2.placeholder}
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-amber-500 leading-relaxed"
+                  />
+                </div>
+
+                {/* Action Items List */}
+                <div>
+                  <label className="block text-slate-200 font-bold mb-1.5">
+                    {currentTemplate.actionItems.label}:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder={currentTemplate.actionItems.placeholder}
+                      value={actionItemInput}
+                      onChange={e => setActionItemInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddActionItem(); } }}
+                      className="flex-1 px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddActionItem}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-xs cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  {actionItemsList.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {actionItemsList.map((item, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-300 border border-blue-500/20 text-[11px]"
+                        >
+                          <span>{item}</span>
+                          <X
+                            onClick={() => handleRemoveActionItem(idx)}
+                            className="w-3 h-3 hover:text-white cursor-pointer"
+                          />
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Private Leadership Notes (CEO/CTO only) */}
+                {isExecutive && (
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">
+                      🔒 Private Leadership Notes (Optional — only visible to Executive Admins):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Potential candidate for promotion in Q4 review"
+                      value={privateNotes}
+                      onChange={e => setPrivateNotes(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-slate-950 border border-purple-500/30 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-hidden focus:border-purple-500"
+                    />
+                  </div>
+                )}
 
               {submitFeedback && (
                 <div className={`p-3 rounded-xl text-xs font-bold border flex items-center gap-2 ${

@@ -859,8 +859,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const attemptCounts = new Map<string, number>();
     const MAX_ATTEMPTS = 3;
 
-    const AUTO_CHECKOUT_CUTOFF_HOUR = 19;
-    const AUTO_CHECKOUT_CUTOFF_MINUTE = 15;
+    const AUTO_CHECKOUT_CUTOFF_HOUR = 23;
+    const AUTO_CHECKOUT_CUTOFF_MINUTE = 0;
 
     const isOwnRecord = (record: AttendanceRecord): boolean => {
       const emp = activeEmployeeRef.current;
@@ -899,7 +899,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           // Cutoff pinned to IST (+05:30) so the instant is identical on every
           // device regardless of local timezone (fix 1).
-          const autoCheckOutDate = new Date(`${record.date}T19:15:00+05:30`);
+          const autoCheckOutDate = new Date(`${record.date}T23:00:00+05:30`);
           if (Number.isNaN(autoCheckOutDate.getTime())) return;
           const forceCheckOutTime = autoCheckOutDate.toISOString();
 
@@ -939,7 +939,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           totalMins = Math.max(0, totalMins);
 
-          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 07:15 PM IST (Default Shift End)';
+          const updatedNotes = (record.notes ? record.notes + ' | ' : '') + 'SYSTEM: Auto-checked out at 11:00 PM IST (Shift End Cutoff)';
 
           // Auto close the record in Firestore
           setDoc(doc(db, 'attendance', record.id), {
@@ -955,7 +955,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               addAuditLogRef.current(
                 'AUTO_CHECKOUT',
                 `Att ID: ${record.id}`,
-                `Auto-checked out at 07:15 PM IST for ${record.date}`
+                `Auto-checked out at 11:00 PM IST for ${record.date}`
               );
             })
             .catch((err) => {

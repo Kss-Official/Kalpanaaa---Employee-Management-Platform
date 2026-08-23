@@ -21,6 +21,7 @@ import {
   acknowledgePerformanceFeedback,
   subscribeToFeedbacks
 } from '../../lib/feedbackService';
+import { FEEDBACK_TEMPLATES } from '../../lib/feedbackTemplates';
 import { useHaptic } from '../../hooks/useHaptic';
 
 export const EmployeeFeedbackView: React.FC = () => {
@@ -131,9 +132,19 @@ export const EmployeeFeedbackView: React.FC = () => {
                         {fb.reviewerDesignation || fb.reviewerRole}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 font-medium mt-0.5">
-                      Review Category: <strong className="text-slate-200">{fb.category}</strong>
-                    </p>
+                    {(() => {
+                      const tpl = FEEDBACK_TEMPLATES[fb.category] || FEEDBACK_TEMPLATES['Performance & Sprint Delivery'];
+                      return (
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${tpl.theme.pillBg}`}>
+                            {fb.category}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                            • {tpl.title}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -155,45 +166,52 @@ export const EmployeeFeedbackView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Sections */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                {/* Strengths */}
-                {fb.strengths && (
-                  <div className="p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/20 space-y-1.5">
-                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Key Strengths &amp; Impact
-                    </span>
-                    <p className="text-slate-300 leading-relaxed">{fb.strengths}</p>
-                  </div>
-                )}
+              {/* Sections with Dynamic Template Labels */}
+              {(() => {
+                const tpl = FEEDBACK_TEMPLATES[fb.category] || FEEDBACK_TEMPLATES['Performance & Sprint Delivery'];
+                return (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      {/* Field 1 (Strengths / Deliverables / Kudos) */}
+                      {fb.strengths && (
+                        <div className="p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/20 space-y-1.5">
+                          <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> {tpl.field1.label}
+                          </span>
+                          <p className="text-slate-300 leading-relaxed">{fb.strengths}</p>
+                        </div>
+                      )}
 
-                {/* Areas for Growth */}
-                {fb.areasForImprovement && (
-                  <div className="p-4 bg-amber-500/5 rounded-2xl border border-amber-500/20 space-y-1.5">
-                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Target className="w-3.5 h-3.5" /> Focus Areas &amp; Recommendations
-                    </span>
-                    <p className="text-slate-300 leading-relaxed">{fb.areasForImprovement}</p>
-                  </div>
-                )}
-              </div>
+                      {/* Field 2 (Growth / Improvement / Opportunities) */}
+                      {fb.areasForImprovement && (
+                        <div className="p-4 bg-amber-500/5 rounded-2xl border border-amber-500/20 space-y-1.5">
+                          <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <Target className="w-3.5 h-3.5" /> {tpl.field2.label}
+                          </span>
+                          <p className="text-slate-300 leading-relaxed">{fb.areasForImprovement}</p>
+                        </div>
+                      )}
+                    </div>
 
-              {/* Action Items List */}
-              {fb.actionItems && fb.actionItems.length > 0 && (
-                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2 text-xs">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                    Action Items &amp; Next Sprint Deliverables:
-                  </span>
-                  <ul className="space-y-1.5 text-slate-300">
-                    {fb.actionItems.map((item, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <ChevronRight className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                    {/* Action Items List */}
+                    {fb.actionItems && fb.actionItems.length > 0 && (
+                      <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2 text-xs">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                          {tpl.actionItems.label}:
+                        </span>
+                        <ul className="space-y-1.5 text-slate-300">
+                          {fb.actionItems.map((item, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <ChevronRight className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {/* Footer / Acknowledge */}
               <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">

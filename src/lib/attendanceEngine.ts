@@ -771,31 +771,31 @@ export function evaluateAttendanceScan(
     // Perform CHECK_IN
     const now = new Date();
 
-    // MORNING TIME WINDOW RULE: Office timing is 10:00 AM - 07:00 PM IST. Check-in opens from 09:30 AM IST (half hour early).
+    // MORNING TIME WINDOW RULE: Check-in opens from 08:00 AM IST onwards.
     const currentHourIST = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }).format(now), 10);
     const currentMinIST = parseInt(new Intl.DateTimeFormat('en-US', { minute: 'numeric', timeZone: 'Asia/Kolkata' }).format(now), 10);
 
-    if (currentHourIST < 9 || (currentHourIST === 9 && currentMinIST < 30)) {
-      const minRemaining = (9 - currentHourIST) * 60 + (30 - currentMinIST);
+    if (currentHourIST < 8) {
+      const minRemaining = (8 - currentHourIST) * 60 - currentMinIST;
       return {
         allowed: false,
         action: 'CHECK_IN',
         status: 'Present',
         locationVerified: false,
         distanceMeters: 0,
-        message: `Check-In Restricted: Morning shift check-in opens at 09:30 AM IST. Please wait until 09:30 AM to check in (${minRemaining} mins remaining).`
+        message: `Check-In Restricted: Morning check-in opens at 08:00 AM IST. Please wait until 08:00 AM to check in (${minRemaining} mins remaining).`
       };
     }
 
-    // EVENING TIME WINDOW RULE: Office timing is 10:00 AM - 07:00 PM IST with auto-checkout at 07:15 PM.
-    if (currentHourIST > 19 || (currentHourIST === 19 && currentMinIST >= 15)) {
+    // EVENING TIME WINDOW RULE: Check-in and check-out allowed until 11:00 PM IST (23:00 IST cutoff).
+    if (currentHourIST >= 23) {
       return {
         allowed: false,
         action: 'CHECK_IN',
         status: 'Present',
         locationVerified: false,
         distanceMeters: 0,
-        message: `Check-In Blocked: Today's shift ended at 07:00 PM IST (Cutoff 07:15 PM IST). New check-ins are not permitted after shift end.`
+        message: `Check-In Blocked: Today's check-in window closed at 11:00 PM IST. New check-ins are not permitted after 11:00 PM.`
       };
     }
 
