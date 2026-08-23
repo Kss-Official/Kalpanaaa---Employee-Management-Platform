@@ -2475,8 +2475,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (settings.gpsRequired === false) return null;
 
     const emp = findEmployee(employeeId);
-    const isSelfAction = !!emp && !!activeEmployee && (emp.id === activeEmployee.id);
-    if (!isSelfAction) return null;
+    const isSelfAction = !!emp && !!activeEmployee && (
+      emp.id === activeEmployee.id ||
+      emp.employeeId === activeEmployee.employeeId ||
+      emp.uid === activeEmployee.uid
+    );
+    if (!isSelfAction && (role === 'SUPER_ADMIN' || role === 'HR_ADMIN')) return null;
 
     const todayStr = getWorkDate(new Date());
     if (isApprovedWfhToday(emp, todayStr)) return null;
@@ -2546,6 +2550,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // isApprovedWfhToday, so check-in, check-out and breaks cannot drift apart.
     const isApprovedWfh = isApprovedWfhToday(emp, todayStr);
 
+    let coords = (lat !== undefined && lon !== undefined) ? { lat, lon } : null;
+    if (!coords && !isApprovedWfh && settings.gpsRequired !== false) {
+      coords = await getCurrentPositionOrNull();
+    }
+    const finalLat = coords?.lat ?? lat;
+    const finalLon = coords?.lon ?? lon;
+
     const effectiveSettings: CompanySettings = {
       ...settings,
       officeLatitude: companyWorkZone.latitude,
@@ -2554,14 +2565,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       gpsRequired: settings.gpsRequired !== false
     };
 
-    const evalResult = evaluateAttendanceScan(emp, existingRec, effectiveSettings, lat, lon, isApprovedWfh);
+    const evalResult = evaluateAttendanceScan(emp, existingRec, effectiveSettings, finalLat, finalLon, isApprovedWfh);
 
     if (!evalResult.allowed && evalResult.action === 'CHECK_IN') {
       return { success: false, message: evalResult.message };
     }
 
-    const distMeters = (lat !== undefined && lon !== undefined)
-      ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
+    const distMeters = (finalLat !== undefined && finalLon !== undefined)
+      ? calculateGpsDistanceMeters(finalLat, finalLon, companyWorkZone.latitude, companyWorkZone.longitude)
       : 0;
 
     // ATOMIC IDEMPOTENT TRANSACTION
@@ -2702,6 +2713,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // isApprovedWfhToday, so check-in, check-out and breaks cannot drift apart.
     const isApprovedWfh = isApprovedWfhToday(emp, todayStr);
 
+    let coords = (lat !== undefined && lon !== undefined) ? { lat, lon } : null;
+    if (!coords && !isApprovedWfh && settings.gpsRequired !== false) {
+      coords = await getCurrentPositionOrNull();
+    }
+    const finalLat = coords?.lat ?? lat;
+    const finalLon = coords?.lon ?? lon;
+
+    const isGpsEnforced = settings.gpsRequired !== false;
+
+    // Strict GPS geofence enforcement on Check-Out
+    if (!isApprovedWfh && isGpsEnforced) {
+      if (finalLat === undefined || finalLon === undefined) {
+        return {
+          success: false,
+          message: 'GPS Location Required: Enable location permissions to check out. Check-out must strictly be performed at the company office.'
+        };
+      }
+
+      const checkoutDistance = calculateGpsDistanceMeters(
+        finalLat,
+        finalLon,
+        companyWorkZone.latitude,
+        companyWorkZone.longitude
+      );
+      const radius = companyWorkZone.radiusMeters || settings.allowedRadiusMeters || 300;
+
+      if (checkoutDistance > radius) {
+        return {
+          success: false,
+          message: `Check-Out Blocked: You are ${checkoutDistance}m away from the company office (Allowed limit: ${radius}m). On normal office days, check-out must strictly be performed at the company office.`
+        };
+      }
+    }
+
     // ATOMIC IDEMPOTENT TRANSACTION
     const docRef = doc(db, 'attendance', recordId);
 
@@ -2726,8 +2771,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
         }
 
-        const distMeters = (lat !== undefined && lon !== undefined)
-          ? calculateGpsDistanceMeters(lat, lon, companyWorkZone.latitude, companyWorkZone.longitude)
+        const distMeters = (finalLat !== undefined && finalLon !== undefined)
+          ? calculateGpsDistanceMeters(finalLat, finalLon, companyWorkZone.latitude, companyWorkZone.longitude)
           : (existingData.distanceFromOffice || 0);
 
         // Compute workingMinutes inside checkout transaction from the read snapshot

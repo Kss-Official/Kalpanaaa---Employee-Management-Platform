@@ -19,7 +19,11 @@ import {
   Briefcase,
   KeyRound,
   X,
-  ScanFace
+  ScanFace,
+  Laptop,
+  Monitor,
+  Copy,
+  Check
 } from 'lucide-react';
 import { UserRole } from '../../types';
 import { sendPasswordResetEmail } from 'firebase/auth';
@@ -49,15 +53,34 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
   const { loginWithEmail, isLoading, settings } = useAuth();
   const { triggerHaptic } = useHaptic();
 
-
   const [showPassword, setShowPassword] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Mobile viewport detection
+  const [isMobileScreen, setIsMobileScreen] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [bypassMobileWarning, setBypassMobileWarning] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileScreen(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleCopyLink = () => {
+    triggerHaptic('light');
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText('https://www.kalpanaaasoftwaresolutions.in/');
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }
+  };
 
   // Sign In state
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-
-
 
   // Forgot password modal
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
@@ -217,29 +240,87 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
         >
 
 
-          <div className="p-6 sm:p-8 space-y-6">
-            
-            {/* Feedback Notification Banner */}
-            {feedback && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`p-4 rounded-2xl border text-xs font-medium flex items-center gap-3 ${
-                feedback.type === 'success' 
-                  ? 'bg-[var(--accent-emerald)]/10 border-[var(--accent-emerald)]/20 text-[var(--accent-emerald)]' 
-                  : 'bg-[var(--accent-rose)]/10 border-[var(--accent-rose)]/20 text-[var(--accent-rose)]'
-              }`}>
-                {feedback.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
-                <span>{feedback.message}</span>
-              </motion.div>
-            )}
+          {isMobileScreen && !bypassMobileWarning ? (
+            <div className="p-6 sm:p-8 text-center space-y-5">
+              <div className="w-16 h-16 rounded-3xl bg-blue-600/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mx-auto shadow-lg shadow-blue-500/10">
+                <Laptop className="w-8 h-8" />
+              </div>
 
-            {/* EMPLOYEE SIGN IN */}
-              <form onSubmit={handleSignIn} className="space-y-5">
-                <div>
-                  <h2 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">Employee Portal Sign In</h2>
-                  <p className="text-xs text-[var(--text-secondary)] mt-1">Enter your company email address and password to access your workspace.</p>
+              <div className="space-y-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                  <Monitor className="w-3.5 h-3.5" />
+                  Desktop View Required
+                </span>
+                <h2 className="text-xl font-black text-white tracking-tight">Kindly Use Desktop or Laptop</h2>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-md mx-auto">
+                  The <strong className="text-white font-bold">Kalpanaaa Employee Management Platform</strong> is designed exclusively for desktop and laptop computers to ensure full security, face biometric verification, and complete dashboard operations.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 text-left space-y-2 text-[11px] text-slate-400">
+                <div className="flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1.5 shrink-0" />
+                  <span>Please open <strong>https://www.kalpanaaasoftwaresolutions.in/</strong> in your laptop or desktop web browser.</span>
                 </div>
+                <div className="flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+                  <span>Employee check-ins, attendance logs, ID cards, and payslips are optimized for larger displays.</span>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-2xl shadow-lg shadow-blue-900/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {copiedLink ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedLink ? '✓ Portal Link Copied!' : 'Copy Portal URL'}</span>
+                </button>
+
+                {onBackToLanding && (
+                  <button
+                    type="button"
+                    onClick={() => { triggerHaptic('light'); onBackToLanding(); }}
+                    className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-2xl border border-slate-800 transition-colors cursor-pointer"
+                  >
+                    ← Return to Homepage
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setBypassMobileWarning(true)}
+                  className="text-[10px] text-slate-500 hover:text-slate-400 underline underline-offset-4 transition-colors pt-2 block mx-auto cursor-pointer"
+                >
+                  Continue anyway on this device
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="p-6 sm:p-8 space-y-6">
+              
+              {/* Feedback Notification Banner */}
+              {feedback && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`p-4 rounded-2xl border text-xs font-medium flex items-center gap-3 ${
+                  feedback.type === 'success' 
+                    ? 'bg-[var(--accent-emerald)]/10 border-[var(--accent-emerald)]/20 text-[var(--accent-emerald)]' 
+                    : 'bg-[var(--accent-rose)]/10 border-[var(--accent-rose)]/20 text-[var(--accent-rose)]'
+                }`}>
+                  {feedback.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
+                  <span>{feedback.message}</span>
+                </motion.div>
+              )}
+
+              {/* EMPLOYEE SIGN IN */}
+                <form onSubmit={handleSignIn} className="space-y-5">
+                  <div>
+                    <h2 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">Employee Portal Sign In</h2>
+                    <p className="text-xs text-[var(--text-secondary)] mt-1">Enter your company email address and password to access your workspace.</p>
+                  </div>
 
                 <div className="space-y-4 pt-2">
                   <div>
@@ -305,8 +386,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onBackToLanding }) => {
                   </div>
                 </div>
               </form>
-
-          </div>
+            </div>
+          )}
         </motion.div>
       </main>
 

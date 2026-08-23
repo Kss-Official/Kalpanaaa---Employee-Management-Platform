@@ -44,6 +44,7 @@ export const HRProfileView: React.FC = () => {
     submitLeaveRequest,
     cancelLeaveRequest,
     companyWorkZone,
+    settings,
     updateEmployee
   } = useAuth();
 
@@ -108,11 +109,47 @@ export const HRProfileView: React.FC = () => {
     setIsFaceModalOpen(true);
   };
 
+  // Acquire a single live GPS fix. Resolves null when permission is denied, the
+  // device cannot report a position, or the request times out.
+  const getFixOrNull = (): Promise<{ lat: number; lon: number; accuracy: number } | null> =>
+    new Promise(resolve => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve({
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracy: Math.round(pos.coords.accuracy) || 10,
+        }),
+        () => resolve(null),
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 }
+      );
+    });
+
   const executeHrCheckInProcess = async () => {
     setLoading(true);
 
+    // ── GEOFENCE FIX ───────────────────────────────────────────────────────────
+    // This called checkIn(targetEmployee.id) with NO coordinates at all. Because
+    // targetEmployee falls back to activeEmployee (see above), for a logged-in HR
+    // user this was a SELF check-in that skipped the office geofence entirely.
+    // Now a live fix is acquired first, and a self check-in is refused outright
+    // when the geofence is on and no fix can be obtained. Checking somebody ELSE
+    // in stays coordinate-free — that is a legitimate admin correction.
+    const isSelfCheckIn = !!activeEmployee && !!targetEmployee && targetEmployee.id === activeEmployee.id;
+    const geofenceOn = settings.gpsRequired !== false;
+
+    let fix: { lat: number; lon: number; accuracy: number } | null = null;
+    if (isSelfCheckIn && geofenceOn) {
+      fix = await getFixOrNull();
+      if (!fix) {
+        toast.error('Location Permission Required: you must allow location access to check in at the office.');
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
-      const res = await checkIn(targetEmployee.id);
+      const res = await checkIn(targetEmployee.id, fix?.lat, fix?.lon, fix?.accuracy);
       if (res.success) {
         toast.success(res.message || 'Check-In recorded successfully via Face Biometrics!');
       } else {
