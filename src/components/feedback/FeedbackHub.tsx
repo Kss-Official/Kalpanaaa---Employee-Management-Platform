@@ -843,7 +843,8 @@ export const FeedbackHub: React.FC = () => {
             </form>
           </div>
         </div>
-      )}
+      );
+    })()}
 
     </div>
   );
