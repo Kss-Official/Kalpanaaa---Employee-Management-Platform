@@ -153,6 +153,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {[
                   { id: 'emp_dashboard', label: 'Dashboard', icon: LayoutDashboard },
                   { id: 'emp_attendance', label: 'Attendance', icon: UserCheck },
+                  { id: 'emp_feedback', label: 'My Feedback & Reviews', icon: MessageSquare },
                   { id: 'emp_leave', label: 'Leave & WFH', icon: CalendarCheck2 },
                   { id: 'company_rules', label: 'Company & Employee Rules', icon: FileText },
                   { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },
