@@ -228,6 +228,12 @@ export interface AuditLog {
   ipAddress?: string;
 }
 
+export interface CompanyHoliday {
+  date: string; // YYYY-MM-DD
+  name: string;
+  dayOfWeek: string;
+}
+
 export interface CompanySettings {
   companyName: string;
   logoUrl: string;
@@ -250,6 +256,7 @@ export interface CompanySettings {
   lunchBreakDurationMinutes: number; // 30
   wfhEnabled: boolean;
   companyWideWfhDates?: string[]; // Dates (YYYY-MM-DD) assigned by CEO or CTO for Office-Wide WFH
+  holidayDates?: string[]; // Declared Company Holiday Dates (YYYY-MM-DD)
   
   // QR settings
   qrTokenLifetimeMinutes: number;

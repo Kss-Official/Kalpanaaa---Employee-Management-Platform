@@ -40,6 +40,39 @@ export const SHIFT_TOTAL_MINUTES =
 /** Human-readable shift label for UI headers, e.g. "10:00 AM – 7:00 PM IST". */
 export const SHIFT_LABEL = '10:00 AM – 7:00 PM IST';
 
+export interface CompanyHolidayItem {
+  date: string; // YYYY-MM-DD
+  name: string;
+  dayOfWeek: string;
+}
+
+/** Official Company & Declared Public Holidays (2026) */
+export const OFFICIAL_COMPANY_HOLIDAYS_2026: CompanyHolidayItem[] = [
+  { date: '2026-01-01', name: "New Year's Day", dayOfWeek: 'Thursday' },
+  { date: '2026-01-26', name: 'Republic Day', dayOfWeek: 'Monday' },
+  { date: '2026-03-04', name: 'Holi', dayOfWeek: 'Wednesday' },
+  { date: '2026-03-21', name: 'Id-ul-Fitr (Ramzan Eid)', dayOfWeek: 'Saturday' },
+  { date: '2026-04-03', name: 'Good Friday', dayOfWeek: 'Friday' },
+  { date: '2026-04-14', name: 'Ambedkar Jayanti', dayOfWeek: 'Tuesday' },
+  { date: '2026-05-01', name: 'Buddha Purnima', dayOfWeek: 'Friday' },
+  { date: '2026-05-28', name: 'Id-ul-Zuha (Bakrid)', dayOfWeek: 'Thursday' },
+  { date: '2026-06-26', name: 'Muharram', dayOfWeek: 'Friday' },
+  { date: '2026-08-15', name: 'Independence Day', dayOfWeek: 'Saturday' },
+  { date: '2026-08-26', name: 'Milad-un-Nabi (Id-E-Milad)', dayOfWeek: 'Wednesday' },
+  { date: '2026-10-02', name: 'Mahatma Gandhi Jayanti', dayOfWeek: 'Friday' },
+  { date: '2026-10-20', name: 'Dussehra (Vijayadashami)', dayOfWeek: 'Tuesday' },
+  { date: '2026-11-01', name: 'Karnataka Rajyotsava', dayOfWeek: 'Sunday' },
+  { date: '2026-11-08', name: 'Diwali (Deepavali)', dayOfWeek: 'Sunday' },
+  { date: '2026-11-24', name: "Guru Nanak's Birthday", dayOfWeek: 'Tuesday' },
+  { date: '2026-12-25', name: 'Christmas Day', dayOfWeek: 'Friday' },
+];
+
+export const OFFICIAL_HOLIDAY_DATES_2026: string[] = OFFICIAL_COMPANY_HOLIDAYS_2026.map(h => h.date);
+
+export function getHolidayInfo(dateStr: string): CompanyHolidayItem | undefined {
+  return OFFICIAL_COMPANY_HOLIDAYS_2026.find(h => h.date === dateStr);
+}
+
 /**
  * IST is a fixed UTC+05:30 with no daylight saving, so a company wall-clock time
  * on a given calendar date is an exact offset from that date's UTC midnight.
@@ -967,11 +1000,14 @@ export type RosterRecord = AttendanceRecord & { isSynthetic?: boolean };
 /** True when `dateStr` (YYYY-MM-DD, IST) is a non-working day for the company. */
 export function isNonWorkingDay(
   dateStr: string,
-  holidayDates: string[] = [],
+  holidayDates?: string[],
   weeklyOffDays: number[] = WEEKLY_OFF_DAYS
 ): boolean {
   if (!dateStr) return false;
-  if (holidayDates.includes(dateStr)) return true;
+  const holidays = (Array.isArray(holidayDates) && holidayDates.length > 0)
+    ? holidayDates
+    : OFFICIAL_HOLIDAY_DATES_2026;
+  if (holidays.includes(dateStr)) return true;
   // Parse as a plain calendar date — appending T00:00:00Z keeps the weekday
   // independent of the machine timezone (a bare 'YYYY-MM-DD' is already UTC,
   // but being explicit documents the intent).

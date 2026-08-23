@@ -82,6 +82,7 @@ import {
   shiftMonthKey,
   formatMonthKey,
   getDayName,
+  getHolidayInfo,
   SHIFT_LABEL,
   SHIFT_TOTAL_MINUTES
 } from '../../lib/attendanceEngine';
@@ -1990,25 +1991,34 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   }
 
                   const rec: any = cell.record;
-                  const status: string = rec?.status || (cell.isNonWorking ? 'Holiday' : cell.isFuture ? '' : '');
+                  const holidayInfo = cell.dateStr ? getHolidayInfo(cell.dateStr) : undefined;
+                  const isSun = cell.dateStr ? new Date(`${cell.dateStr}T00:00:00Z`).getUTCDay() === 0 : false;
+                  const status: string = rec?.status || (cell.isNonWorking ? (holidayInfo ? holidayInfo.name : 'Weekly Off') : cell.isFuture ? '' : '');
                   const cfg = (() => {
-                    if (status === 'Present') return { bg: 'bg-emerald-500/10 border-emerald-500/30', text: 'text-emerald-400', dot: 'bg-emerald-500' };
-                    if (status === 'Late') return { bg: 'bg-amber-500/10 border-amber-500/30', text: 'text-amber-400', dot: 'bg-amber-500' };
-                    if (status === 'Work From Home' || rec?.isWfh) return { bg: 'bg-sky-500/10 border-sky-500/30', text: 'text-sky-400', dot: 'bg-sky-500' };
-                    if (status === 'Absent') return { bg: 'bg-rose-500/10 border-rose-500/30', text: 'text-rose-400', dot: 'bg-rose-500' };
-                    if (status === 'On Leave') return { bg: 'bg-violet-500/10 border-violet-500/30', text: 'text-violet-400', dot: 'bg-violet-500' };
-                    if (status === 'Half Day') return { bg: 'bg-orange-500/10 border-orange-500/30', text: 'text-orange-400', dot: 'bg-orange-500' };
-                    if (status === 'Holiday' || cell.isNonWorking) return { bg: 'bg-slate-800/40 border-slate-800', text: 'text-slate-500', dot: 'bg-slate-600' };
+                    if (rec?.status === 'Present') return { bg: 'bg-emerald-500/10 border-emerald-500/30', text: 'text-emerald-400', dot: 'bg-emerald-500' };
+                    if (rec?.status === 'Late') return { bg: 'bg-amber-500/10 border-amber-500/30', text: 'text-amber-400', dot: 'bg-amber-500' };
+                    if (rec?.status === 'Work From Home' || rec?.isWfh) return { bg: 'bg-sky-500/10 border-sky-500/30', text: 'text-sky-400', dot: 'bg-sky-500' };
+                    if (rec?.status === 'Absent') return { bg: 'bg-rose-500/10 border-rose-500/30', text: 'text-rose-400', dot: 'bg-rose-500' };
+                    if (rec?.status === 'On Leave') return { bg: 'bg-violet-500/10 border-violet-500/30', text: 'text-violet-400', dot: 'bg-violet-500' };
+                    if (rec?.status === 'Half Day') return { bg: 'bg-orange-500/10 border-orange-500/30', text: 'text-orange-400', dot: 'bg-orange-500' };
+                    if (cell.isNonWorking || status === 'Holiday' || isSun || holidayInfo) {
+                      return { 
+                        bg: holidayInfo ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-900/60 border-slate-800', 
+                        text: holidayInfo ? 'text-indigo-400' : 'text-slate-500', 
+                        dot: holidayInfo ? 'bg-indigo-400' : 'bg-slate-600' 
+                      };
+                    }
                     return { bg: 'bg-slate-950/50 border-slate-800/60', text: 'text-slate-600', dot: '' };
                   })();
 
                   const mins = Math.max(0, Number(rec?.workingMinutes) || 0);
+                  const displayLabel = holidayInfo ? `Holiday: ${holidayInfo.name}` : (isSun ? 'Weekly Off (Sunday)' : status);
 
                   return (
                     <div
                       key={cell.dateStr}
                       data-testid={`cal-day-${cell.dateStr}`}
-                      title={`${getDayName(cell.dateStr, true)} ${cell.dateStr}${status ? ` — ${status}` : cell.isFuture ? ' — upcoming' : ''}${mins > 0 ? ` — ${formatDuration(mins * 60)}` : ''}`}
+                      title={`${getDayName(cell.dateStr, true)} ${cell.dateStr}${displayLabel ? ` — ${displayLabel}` : cell.isFuture ? ' — upcoming' : ''}${mins > 0 ? ` — ${formatDuration(mins * 60)}` : ''}`}
                       className={`aspect-square rounded-xl border p-1.5 flex flex-col justify-between transition-all ${cfg.bg} ${
                         cell.isToday ? 'ring-2 ring-blue-500/60' : ''
                       } ${cell.isFuture ? 'opacity-40' : ''}`}

@@ -215,6 +215,66 @@ test('state machine: check-in blocked before shift start and after shift end', (
   }
 });
 
+// ── Geofence regression: check-in must be blocked outside the office ─────────
+// Commit e61335b silently replaced the two blocking returns in the CHECK_IN branch
+// with a no-op assignment, so check-in succeeded from any location while check-out
+// kept enforcing. These tests exist so that cannot happen again unnoticed.
+test('geofence: check-in is blocked outside the allowed radius', () => {
+  const settings = { ...baseSettings, gpsRequired: true };
+  const t = mock.timers;
+  t.enable({ apis: ['Date'] });
+  try {
+    t.setTime(new Date(2026, 7, 20, 10, 0).getTime()); // inside the check-in window
+    // ~700km from the office
+    const r = engine.evaluateAttendanceScan({}, undefined, settings, 12.0, 77.0);
+    assert.equal(r.action, 'CHECK_IN');
+    assert.equal(r.allowed, false);
+    assert.equal(r.locationVerified, false);
+    assert.match(r.message, /Check-In Blocked/);
+  } finally {
+    t.reset();
+  }
+});
+
+test('geofence: check-in is blocked when no GPS fix is supplied', () => {
+  const settings = { ...baseSettings, gpsRequired: true };
+  const t = mock.timers;
+  t.enable({ apis: ['Date'] });
+  try {
+    t.setTime(new Date(2026, 7, 20, 10, 0).getTime());
+    const r = engine.evaluateAttendanceScan({}, undefined, settings);
+    assert.equal(r.allowed, false);
+    assert.match(r.message, /GPS Location Required/);
+  } finally {
+    t.reset();
+  }
+});
+
+test('geofence: check-in succeeds at the office, and approved WFH bypasses the radius', () => {
+  const settings = { ...baseSettings, gpsRequired: true };
+  const t = mock.timers;
+  t.enable({ apis: ['Date'] });
+  try {
+    t.setTime(new Date(2026, 7, 20, 10, 0).getTime());
+
+    // Standing on the office coordinates → distance 0, well inside the radius.
+    const atOffice = engine.evaluateAttendanceScan({}, undefined, settings, 17.44, 78.38);
+    assert.equal(atOffice.allowed, true);
+    assert.equal(atOffice.locationVerified, true);
+
+    // Approved WFH must still be able to check in from far away.
+    const wfh = engine.evaluateAttendanceScan({}, undefined, settings, 12.0, 77.0, true);
+    assert.equal(wfh.allowed, true);
+    assert.equal(wfh.locationVerified, true);
+
+    // An admin who disables the geofence must not be blocked either.
+    const gpsOff = engine.evaluateAttendanceScan({}, undefined, { ...baseSettings, gpsRequired: false }, 12.0, 77.0);
+    assert.equal(gpsOff.allowed, true);
+  } finally {
+    t.reset();
+  }
+});
+
 // ── P0 incident regression: listener recovery & auth fallback policy ─────────
 
 test('listener policy: permission-denied and unauthenticated are NOT retryable', () => {

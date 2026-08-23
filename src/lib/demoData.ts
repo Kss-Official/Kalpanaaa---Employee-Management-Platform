@@ -1,4 +1,5 @@
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, DocumentTemplate, LeaveRequest } from '../types';
+import { OFFICIAL_HOLIDAY_DATES_2026 } from './attendanceEngine';
 
 export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
   companyName: 'Kalpanaaa Software Solutions Pvt. Ltd.',
@@ -20,6 +21,7 @@ export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
   lunchBreakDurationMinutes: 30,
   wfhEnabled: true,
   companyWideWfhDates: [],
+  holidayDates: OFFICIAL_HOLIDAY_DATES_2026,
   
   qrTokenLifetimeMinutes: 10,
   qrAttendanceEnabled: true,

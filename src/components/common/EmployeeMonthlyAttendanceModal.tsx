@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
+import { isNonWorkingDay, getHolidayInfo } from '../../lib/attendanceEngine';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { useHaptic } from '../../hooks/useHaptic';
 
@@ -256,23 +257,43 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     };
   }, [empRecords, activeScope, selectedWeekNum, selectedDayRecord, daysInMonth]);
 
+  const holidayDates = useMemo<string[]>(
+    () => (((settings as any)?.holidayDates) || []) as string[],
+    [settings]
+  );
+
+  const todayStr = todayInIST();
+
   // Monthly Counts
   let presentDays = 0;
   let lateDays = 0;
   let wfhDays = 0;
   let leaveDays = 0;
+  let holidayDays = 0;
+  let absentDays = 0;
 
   for (let d = 1; d <= daysInMonth; d++) {
     const dateFormatted = `${selectedYearMonth}-${String(d).padStart(2, '0')}`;
     const rec = recordsByDate.get(dateFormatted);
+    const nonWorking = isNonWorkingDay(dateFormatted, holidayDates);
+    const isFuture = dateFormatted > todayStr;
 
     if (rec) {
       if (rec.status === 'Late') lateDays++;
       else if (rec.isWfh || rec.status === 'Work From Home') wfhDays++;
       else if (rec.status === 'Present' || rec.checkInAt) presentDays++;
+      else if (rec.status === 'On Leave') leaveDays++;
+      else if (rec.status === 'Holiday') holidayDays++;
+      else if (rec.status === 'Absent') absentDays++;
     } else {
       const hasLeave = empLeaveRequests.some(l => dateFormatted >= l.startDate && dateFormatted <= l.endDate);
-      if (hasLeave) leaveDays++;
+      if (hasLeave) {
+        leaveDays++;
+      } else if (nonWorking) {
+        holidayDays++;
+      } else if (!isFuture) {
+        absentDays++;
+      }
     }
   }
 
@@ -484,7 +505,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
               </div>
 
               {/* Monthly Turnout KPIs */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 w-full lg:w-auto text-center text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 w-full lg:w-auto text-center text-xs">
                 <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present</span>
                   <span className="text-base font-black text-emerald-400 font-mono">{presentDays} Days</span>
@@ -500,6 +521,10 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                 <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Leave</span>
                   <span className="text-base font-black text-purple-400 font-mono">{leaveDays} Days</span>
+                </div>
+                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 col-span-2 sm:col-span-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Holiday / Off</span>
+                  <span className="text-base font-black text-slate-300 font-mono">{holidayDays} Days</span>
                 </div>
               </div>
             </div>
@@ -621,12 +646,14 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Late</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> WFH</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-400" /> Leave</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Holiday / Off</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400" /> Absent</span>
                 </div>
               </div>
 
               {/* Day Headers */}
               <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] font-black text-slate-500 uppercase tracking-wider bg-slate-950 py-2 rounded-xl border border-slate-800">
-                <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                <span className="text-rose-400/80">Sun (Off)</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
               </div>
 
               {/* Day Cells Grid */}
@@ -640,10 +667,13 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   const dateFormatted = `${selectedYearMonth}-${String(dayNum).padStart(2, '0')}`;
                   const rec = recordsByDate.get(dateFormatted);
                   const isApprovedLeave = empLeaveRequests.some(l => dateFormatted >= l.startDate && dateFormatted <= l.endDate);
+                  const isNonWorking = isNonWorkingDay(dateFormatted, holidayDates);
+                  const holidayInfo = getHolidayInfo(dateFormatted);
+                  const isFuture = dateFormatted > todayStr;
 
                   let statusBg = 'bg-slate-950 border-slate-800 text-slate-400';
                   let statusLabel = 'Absent';
-                  let statusDot = 'bg-slate-700';
+                  let statusDot = 'bg-rose-500';
 
                   if (rec) {
                     if (rec.status === 'Present') {
@@ -658,11 +688,39 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       statusBg = 'bg-sky-500/10 border-sky-500/30 text-sky-300';
                       statusLabel = 'WFH';
                       statusDot = 'bg-sky-400';
+                    } else if (rec.status === 'On Leave') {
+                      statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
+                      statusLabel = 'Leave';
+                      statusDot = 'bg-purple-400';
+                    } else if (rec.status === 'Holiday') {
+                      statusBg = 'bg-slate-800/40 border-slate-800 text-slate-400';
+                      statusLabel = holidayInfo ? holidayInfo.name : 'Holiday';
+                      statusDot = 'bg-slate-500';
+                    } else if (rec.status === 'Half Day') {
+                      statusBg = 'bg-orange-500/10 border-orange-500/30 text-orange-300';
+                      statusLabel = 'Half Day';
+                      statusDot = 'bg-orange-400';
+                    } else if (rec.status === 'Absent') {
+                      statusBg = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
+                      statusLabel = 'Absent';
+                      statusDot = 'bg-rose-400';
                     }
                   } else if (isApprovedLeave) {
                     statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
                     statusLabel = 'Leave';
                     statusDot = 'bg-purple-400';
+                  } else if (isNonWorking) {
+                    statusBg = 'bg-slate-900/60 border-slate-800/80 text-slate-400';
+                    statusLabel = holidayInfo ? holidayInfo.name : 'Weekly Off';
+                    statusDot = 'bg-slate-600';
+                  } else if (isFuture) {
+                    statusBg = 'bg-slate-950/40 border-slate-900 text-slate-600';
+                    statusLabel = 'Upcoming';
+                    statusDot = 'bg-slate-800';
+                  } else {
+                    statusBg = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
+                    statusLabel = 'Absent';
+                    statusDot = 'bg-rose-400';
                   }
 
                   const isSelected = selectedDateStr === dateFormatted;
@@ -676,7 +734,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       }}
                       className={`p-2 min-h-[60px] rounded-2xl border flex flex-col justify-between transition-all cursor-pointer ${statusBg} ${
                         isSelected ? 'ring-2 ring-blue-500 border-blue-400 scale-[1.02] shadow-lg' : 'hover:scale-[1.02]'
-                      }`}
+                      } ${isFuture && !rec ? 'opacity-50' : ''}`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-black text-white">{dayNum}</span>
@@ -684,7 +742,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       </div>
 
                       <div className="space-y-0.5">
-                        <span className="text-[9px] font-bold block truncate">{statusLabel}</span>
+                        <span className="text-[9px] font-bold block truncate" title={statusLabel}>{statusLabel}</span>
                         {rec?.checkInAt && (
                           <span className="text-[9px] font-mono text-slate-300 block truncate">
                             {toISTTimeString(rec.checkInAt)}
