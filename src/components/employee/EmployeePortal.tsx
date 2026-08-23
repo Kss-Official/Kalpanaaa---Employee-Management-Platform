@@ -568,8 +568,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     ? liveDistanceMeters <= companyWorkZone.radiusMeters
     : false;
 
-  // GPS location verification is active for manual Check-In & Check-Out.
-  // Geofence automated breaks are completely disabled (all breaks & check-ins are manually triggered on laptop).
+  // GPS location verification is enforced for check-in, check-out AND every break
+  // (meal, tea, huddle, training…). All of them are office-only unless the day is an
+  // approved WFH day or an admin has switched settings.gpsRequired off. The live fix
+  // above is handed to the break calls so they reuse it instead of re-acquiring one.
 
   // Generate Static QR Code for ID Card (Company Website)
   useEffect(() => {
@@ -695,7 +697,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     triggerHaptic('medium');
     try {
       if (!activeEmployee) return;
-      const res = await startBreak(activeEmployee.id, type);
+      const res = await startBreak(activeEmployee.id, type, gpsLocation?.lat, gpsLocation?.lon);
       if (res.success) {
         triggerHaptic('success');
         const emojiMap: Record<string, string> = {
@@ -729,7 +731,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     triggerHaptic('medium');
     try {
       if (!activeEmployee) return;
-      const res = await endBreak(activeEmployee.id);
+      const res = await endBreak(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon);
       if (res.success) {
         triggerHaptic('success');
         setActionFeedback({ success: true, message: res.message || 'Break ended. Welcome back! 👋' });
@@ -2484,7 +2486,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
                   <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800/80">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Work Location</span>
-                    <span className="text-xs font-bold text-white">{activeEmployee.workLocation || 'AGPS Nagar HQ Campus'}</span>
+                    <span className="text-xs font-bold text-white">{activeEmployee.workLocation || 'Kalpanaaa Headquarters'}</span>
                   </div>
 
                   <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800/80 sm:col-span-2 md:col-span-3">

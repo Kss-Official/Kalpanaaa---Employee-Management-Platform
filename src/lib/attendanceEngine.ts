@@ -803,9 +803,38 @@ export function evaluateAttendanceScan(
     const isLateArrival = currentHourIST > 10 || (currentHourIST === 10 && currentMinIST > 15);
     let status: 'Present' | 'Late' = isLateArrival ? 'Late' : 'Present';
 
-    // GPS Location Verification on Normal Days
+    // ── Strict GPS enforcement on normal office days (RESTORED) ───────────────
+    // Commit e61335b ("Allow web check-in for Kuruva Mahesh and fix geofence
+    // check") replaced the two blocks below with a bare `locationVerified = false`.
+    // That assignment is a no-op — the variable is already false on this path — and
+    // the function then returned `allowed: true` regardless, so check-in succeeded
+    // from ANY location and was merely relabelled "Web Terminal Standard Mode".
+    // Check-out kept its enforcement, which is why only check-in leaked.
+    //
+    // Both documented escape hatches are untouched: an approved WFH day bypasses
+    // this entirely (handled above), and an admin can still disable the geofence
+    // wholesale with settings.gpsRequired = false.
     if (!isApprovedWfh && isGpsEnforced && !locationVerified) {
-      locationVerified = false;
+      if (userLat === undefined || userLon === undefined) {
+        return {
+          allowed: false,
+          action: 'CHECK_IN',
+          status,
+          locationVerified: false,
+          distanceMeters: 0,
+          message: 'GPS Location Required: On normal office days, you must enable GPS location permissions to check in near the office.'
+        };
+      }
+
+      const radius = settings.allowedRadiusMeters || 300;
+      return {
+        allowed: false,
+        action: 'CHECK_IN',
+        status,
+        locationVerified: false,
+        distanceMeters,
+        message: `Check-In Blocked: You are ${distanceMeters}m away from company office (Allowed limit: ${radius}m). On normal days you must check in at the company office location. Submit a WFH request to check in from home.`
+      };
     }
 
     return {

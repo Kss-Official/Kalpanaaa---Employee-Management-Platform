@@ -113,7 +113,14 @@ export interface Employee {
   gender: 'Male' | 'Female' | 'Other' | 'Prefer not to say';
   dateOfBirth: string;
   profilePhotoUrl?: string;
+  // The resume blob now lives at employees/{id}/private/resume, not here — an
+  // uncompressed base64 PDF on this document was streamed to every client that
+  // listens to /employees (see src/lib/employeeResume.ts). Kept optional because
+  // historical records still carry it inline and the fallback path still reads it.
   resumeUrl?: string;
+  // Marks "a resume exists in the subcollection" so the admin form's required-field
+  // check passes without the parent document having to carry the bytes.
+  hasResume?: boolean;
 
   // Employment
   department: string;

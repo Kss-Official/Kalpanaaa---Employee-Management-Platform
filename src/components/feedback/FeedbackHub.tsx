@@ -201,13 +201,19 @@ export const FeedbackHub: React.FC = () => {
       targetEmployeeRole: targetEmp.role,
       targetEmployeeDesignation: targetEmp.designation,
       targetEmployeeDepartment: targetEmp.department,
-      targetEmployeePhotoUrl: targetEmp.profilePhotoUrl,
+      // COST FIX: targetEmployeePhotoUrl / reviewerPhotoUrl are deliberately NOT
+      // stamped here any more. They copied ~30-50KB of base64 image onto every
+      // review document (~80KB per doc for the pair), and that blob was then
+      // re-streamed to every reader of the collection. Both render sites now
+      // resolve the avatar from the `employees` directory already in context,
+      // falling back to the stored field for historical documents. Dropping the
+      // copy also fixes a staleness bug: a review used to keep showing whatever
+      // photo the person had on the day it was written.
 
       reviewerId: activeEmployee.id,
       reviewerName: activeEmployee.fullName,
       reviewerRole: activeEmployee.role,
       reviewerDesignation: activeEmployee.designation || (isSuperAdmin ? 'Executive Leadership' : isPm ? 'Project Manager' : 'Reviewer'),
-      reviewerPhotoUrl: activeEmployee.profilePhotoUrl,
 
       // Denormalised so firestore.rules can authorise reads without a billed
       // lookup of the subject's role. Stamped from the directory record at write
@@ -436,7 +442,7 @@ export const FeedbackHub: React.FC = () => {
                   <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <img
-                        src={fb.targetEmployeePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(fb.targetEmployeeName)}&background=0f172a&color=fff`}
+                        src={employees.find(e => e.id === fb.targetEmployeeId)?.profilePhotoUrl || fb.targetEmployeePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(fb.targetEmployeeName)}&background=0f172a&color=fff`}
                         alt={fb.targetEmployeeName}
                         className="w-11 h-11 rounded-2xl object-cover border-2 border-blue-500/40 shadow-sm shrink-0"
                       />

@@ -25,7 +25,7 @@ import { FEEDBACK_TEMPLATES } from '../../lib/feedbackTemplates';
 import { useHaptic } from '../../hooks/useHaptic';
 
 export const EmployeeFeedbackView: React.FC = () => {
-  const { activeEmployee, role, isAuthenticated } = useAuth();
+  const { activeEmployee, employees, role, isAuthenticated } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const [allFeedbacks, setAllFeedbacks] = useState<PerformanceFeedback[]>(() => getStoredFeedbacks());
@@ -121,7 +121,7 @@ export const EmployeeFeedbackView: React.FC = () => {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                 <div className="flex items-center gap-3.5">
                   <img
-                    src={fb.reviewerPhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(fb.reviewerName)}&background=0284c7&color=fff`}
+                    src={employees.find(e => e.id === fb.reviewerId)?.profilePhotoUrl || fb.reviewerPhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(fb.reviewerName)}&background=0284c7&color=fff`}
                     alt={fb.reviewerName}
                     className="w-12 h-12 rounded-2xl object-cover border-2 border-blue-500/50 shadow-md shrink-0"
                   />

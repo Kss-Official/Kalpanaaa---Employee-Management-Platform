@@ -1,19 +1,19 @@
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, DocumentTemplate, LeaveRequest } from '../types';
 
 export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
-  companyName: 'Kalpanaaa Software Solutions',
-  logoUrl: 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=120&auto=format&fit=crop&q=80',
-  companyAddress: 'No. 14, Bhoganahalli, Sarjapur Road, Bengaluru, KA 560102',
-  companyPhone: '+91 (040) 4821-9900',
+  companyName: 'Kalpanaaa Software Solutions Pvt. Ltd.',
+  logoUrl: '/pwa-192x192.png',
+  companyAddress: 'Kalpanaaa Software Solutions Headquarters, 822, 9th Main, 1st C Cross, HRBR Layout, Kalyan Nagar, Bengaluru – 560043',
+  companyPhone: '+91 (080) 4821-9900',
   companyEmail: 'hr@kalpanaaa.in',
   
-  officeName: 'Kalpanaaa Main Office HQ',
+  officeName: 'Kalpanaaa Software Solutions HQ',
   officeLatitude: 13.014333,
   officeLongitude: 77.646000,
   gpsRequired: true,
   allowedRadiusMeters: 500,
-  workStartTime: '10:00',
-  workEndTime: '19:00',
+  workStartTime: '08:00',
+  workEndTime: '23:00',
   gracePeriodMinutes: 15,
   lateThresholdMinutes: 15,
   teaBreakDurationMinutes: 10,
@@ -25,8 +25,8 @@ export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
   qrAttendanceEnabled: true,
   
   pdfHeaderTitle: 'CONFIDENTIAL WORKFORCE & ATTENDANCE STATEMENT',
-  authorizedSignatureName: 'Akshit',
-  authorizedSignatureTitle: 'Chief Executive Officer (CEO)'
+  authorizedSignatureName: 'Akshit Ujjain',
+  authorizedSignatureTitle: 'Chief Executive Officer (CEO) & Founder'
 };
 
 const TODAY_STR = new Date().toISOString().split('T')[0];

@@ -408,6 +408,30 @@ service cloud.firestore {
           (resource != null && resource.data.get('employeeUid', '~none~') == request.auth.uid)
         );
       }
+
+      // The employee's resume, held out of the parent document on purpose.
+      //
+      // COST FIX: resumeUrl was an *uncompressed* base64 PDF stored inline on
+      // employees/{employeeId}. Read above is collection-wide because every portal
+      // needs the directory, so each client streamed every employee's entire
+      // resume on first sync — by far the largest egress item in the project, and
+      // it grew with headcount. Rules on the parent do NOT cascade to
+      // subcollections, so this block is what authorises the relocated blob.
+      //
+      // HR/admins manage resumes, and an employee may read their OWN. Nobody reads
+      // a colleague's: the dual keying mirrors /employees, since the seeded
+      // majority are keyed by their 'emp-KSS…' document id rather than a real uid.
+      // Deliberately no employee WRITE — resumes are uploaded through the admin
+      // form (EmployeeFormModal), never self-service.
+      //
+      // Until this is deployed the subcollection is denied, which is expected:
+      // writeEmployeeResume() (src/lib/employeeResume.ts) reports the failure and
+      // the caller falls back to storing the resume inline exactly as before.
+      match /private/{docId} {
+        allow read: if isConfigAdmin() ||
+          (isRealUser() && (employeeId == request.auth.uid || employeeId == getEmployeeDocId()));
+        allow write: if isConfigAdmin();
+      }
     }
 
     // ── 3. Attendance Records (Live Workforce & Single Source of Truth) ──

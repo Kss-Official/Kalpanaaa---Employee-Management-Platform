@@ -43,9 +43,10 @@ import {
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
 import { classifyError, shouldFallbackToLocalLogin } from '../lib/errors';
-import { fetchAbsoluteTime, toISTTimeString } from '../lib/absoluteTime';
+import { fetchAbsoluteTime, toISTTimeString, todayInIST } from '../lib/absoluteTime';
 import { sendKssNotification, sendAdminBroadcast, registerFcmToken, unregisterFcmToken, KssNotification } from '../lib/notifications';
 import { clearAllFaceEngineState } from '../lib/faceDescriptorStore';
+import { writeEmployeeResume, backfillEmployeeResumes } from '../lib/employeeResume';
 import { LeaveService } from '../lib/leaveService';
 
 const generateDeviceFingerprint = () => {
@@ -89,7 +90,7 @@ const sanitizeInput = <T extends any>(data: T): T => {
 };
 
 // Helper for allocating specific employee IDs to founders and starting others from 004
-export const getAssignedEmployeeDetails = (fullName: string, employees: Employee[]) => {
+const getAssignedEmployeeDetails = (fullName: string, employees: Employee[]) => {
   const name = (fullName || '').toLowerCase().trim();
   
   if (name.includes('gaurav')) {
@@ -169,8 +170,8 @@ interface AuthContextType {
   recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   checkIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   checkOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
-  startBreak: (employeeId: string, breakType?: string) => Promise<{ success: boolean; message: string }>;
-  endBreak: (employeeId: string) => Promise<{ success: boolean; message: string }>;
+  startBreak: (employeeId: string, breakType?: string, lat?: number, lon?: number) => Promise<{ success: boolean; message: string }>;
+  endBreak: (employeeId: string, lat?: number, lon?: number) => Promise<{ success: boolean; message: string }>;
   updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => void;
   applyAttendanceCorrection: (
     record: AttendanceRecord & { isSynthetic?: boolean },
@@ -390,7 +391,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     return {
-      name: 'Kalpanaaa Software Solutions — Main Office',
+      name: 'Kalpanaaa Software Solutions HQ',
       latitude: INITIAL_COMPANY_SETTINGS.officeLatitude || 13.014316,
       longitude: INITIAL_COMPANY_SETTINGS.officeLongitude || 77.64052,
       radiusMeters: INITIAL_COMPANY_SETTINGS.allowedRadiusMeters || 100,
@@ -1238,8 +1239,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Subscribe to attendance records (Single Source of Truth: Firestore only)
         const attQuery = collection(db, 'attendance');
 
-        let hasRunMigration = false;
-
         unsubAtt = onSnapshot(attQuery, (snapshot) => {
           const fetched: AttendanceRecord[] = [];
           if (!snapshot.empty) {
@@ -1370,11 +1369,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setAttendance(consolidated);
           setAttendanceSyncStatus('synced');
 
-          // Run one-time background migration on initial snapshot
-          if (!hasRunMigration) {
-            hasRunMigration = true;
-            runAttendanceMigration().catch(() => {});
-          }
+          // ── COST FIX: the migration used to be kicked off from right here ──
+          // runAttendanceMigration() ran on EVERY client's first snapshot, for every
+          // role, with no gate. It full-scans /attendance AND /employees via getDocs
+          // (attendanceMigration.ts:131,140) plus a per-legacy-doc getDoc in a loop,
+          // so a ~20k-record collection billed ~20k server reads per session —
+          // roughly 2,000,000 reads/day across ~100 daily logins, against a
+          // 50,000/day free allowance (~40x over).
+          //
+          // Nothing that portals RENDER is lost by removing it from the read path:
+          // identity resolution, canonical-uid mapping and de-duplication are all
+          // computed IN MEMORY above, for every role.
+          //
+          // The migration's only side effect is PERSISTING repairs, and the one that
+          // reaches an employee is the fabricated-shift repair. Note an employee CAN
+          // write their own attendance rows (firestore.rules ownsAttendanceData), so
+          // the honest reason gating is safe is not "employees couldn't write anyway"
+          // — it is that fabrication is no longer produced. Those rows were written by
+          // the LEGACY migration (see the comment on isFabricatedCheckoutOnly in
+          // attendanceEngine.ts), so the repair set is finite and historical: one
+          // admin pass drains a backlog that never regrows. What used to happen on
+          // every employee login was therefore a no-op costing ~20k reads.
+          // Ownership now sits in the admin-gated, once-per-day effect below.
         }, (error) => {
           handleFirestoreError(error, OperationType.LIST, 'attendance');
           setAttendanceSyncStatus('synced');
@@ -1575,7 +1591,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           } else {
             const defaultZone: WorkZone = {
-              name: 'Kalpanaaa Software Solutions — Main Office',
+              name: 'Kalpanaaa Software Solutions HQ',
               latitude: 13.014333,
               longitude: 77.646000,
               radiusMeters: 300,
@@ -1659,6 +1675,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     return () => unsubLogs();
   }, [isAuthenticated, authUid, role]);
+
+  // ── COST FIX: admin-owned, once-per-day attendance migration ────────────────
+  // The legacy→canonical attendance migration (and its shift-fabrication repair)
+  // is a maintenance job, not a read path. It was previously fired from the
+  // attendance snapshot handler on every client, which full-scanned /attendance
+  // and /employees once per session and alone consumed ~40x the daily free read
+  // allowance. Two guards make it cheap without making it useless:
+  //
+  //  • Role gate — SUPER_ADMIN / HR_ADMIN only, mirroring the audit-log effect
+  //    above. This reads the `role` STATE, deliberately not `roleRef.current`:
+  //    the ref is synced by its own effect and still holds the 'EMPLOYEE' default
+  //    at the moment the first attendance snapshot lands, so gating in place
+  //    would have skipped admins too and the repairs would never have run at all.
+  //
+  //  • Persisted day latch — the old in-closure `let hasRunMigration` reset on
+  //    every re-init, so the scan re-ran on every mount and reconnect.
+  //    localStorage survives both. The migration is idempotent, so a failure
+  //    intentionally leaves the latch unset and retries on the next admin session.
+  useEffect(() => {
+    if (!isAuthenticated || !authUid) return;
+    if (role !== 'SUPER_ADMIN' && role !== 'HR_ADMIN') return;
+
+    const dayKey = `kss_att_migration_v1:${todayInIST()}`;
+    if (localStorage.getItem(dayKey) === 'done') return;
+
+    let cancelled = false;
+    runAttendanceMigration()
+      .then(() => {
+        if (!cancelled) localStorage.setItem(dayKey, 'done');
+      })
+      .catch(() => { /* transient — retried on the next admin session */ });
+
+    return () => { cancelled = true; };
+  }, [isAuthenticated, authUid, role]);
+
+  // ── One-time resume backfill, exposed to admin sessions only ─────────────────
+  // Deliberately NOT auto-run: it rewrites every employee document, so an operator
+  // triggers it explicitly, once, after firestore.rules has been deployed. Attached
+  // here rather than shipped as a Node script because it must execute with a real
+  // admin's credentials — the subcollection is admin-write-only.
+  //
+  // From the devtools console of an HR/SUPER_ADMIN session:
+  //   await __kssBackfillResumes()                  // dry run — reports, changes nothing
+  //   await __kssBackfillResumes({ dryRun: false }) // performs the migration
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (role !== 'SUPER_ADMIN' && role !== 'HR_ADMIN') return;
+
+    (window as any).__kssBackfillResumes = backfillEmployeeResumes;
+    return () => { delete (window as any).__kssBackfillResumes; };
+  }, [isAuthenticated, role]);
 
   // ── Session Restore: Already done synchronously via useState initializers above ──
   // This effect only clears stale sessions that couldn't be matched on mount.
@@ -2245,8 +2312,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setEmployees(prev => [newEmp, ...prev]);
 
+    // ── COST FIX: keep the base64 resume off the parent document ────────────────
+    // /employees is listened to collection-wide by every client, so an inline
+    // resume was re-streamed to all of them. It goes to a subcollection nobody
+    // listens to instead. If that write is rejected — which it is until the
+    // subcollection rule is deployed — we fall back to persisting it inline
+    // exactly as before, so employee creation works in both states.
+    const resumeDataUrl = newEmp.resumeUrl || '';
+    const storedOutOfBand = resumeDataUrl
+      ? await writeEmployeeResume(newEmp.id, resumeDataUrl, `${newEmp.employeeId}-resume`)
+      : false;
+
+    const { resumeUrl: _omitResume, ...empWithoutResume } = newEmp;
+    const empPayload: Record<string, any> = storedOutOfBand
+      ? { ...empWithoutResume, hasResume: true }
+      : newEmp;
+
     // Persist to Firestore
-    setDoc(doc(db, 'employees', newEmp.id), newEmp).catch(err => {
+    setDoc(doc(db, 'employees', newEmp.id), empPayload).catch(err => {
       handleFirestoreError(err, OperationType.WRITE, `employees/${newEmp.id}`);
     });
 
@@ -2258,12 +2341,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // TOP 1% SECURITY: XSS Sanitization
     const sanitizedUpdates = sanitizeInput(updates);
 
+    // ── COST FIX: a newly uploaded resume is routed out of band ─────────────────
+    // It goes to employees/{id}/private/resume rather than onto this document,
+    // because /employees is listened to collection-wide. Captured before the state
+    // update since the relocation is async and the parent write below is not.
+    const incomingResume = typeof sanitizedUpdates.resumeUrl === 'string' ? sanitizedUpdates.resumeUrl : '';
+
     setEmployees(prev => prev.map(e => {
       if (e.id === id) {
         const updated = { ...e, ...sanitizedUpdates, updatedAt: new Date().toISOString() };
 
+        // ── COST FIX: don't rewrite the base64 blobs on every unrelated edit ──
+        // This wrote the ENTIRE merged record, so changing a phone number also
+        // re-uploaded profilePhotoUrl and the (uncompressed) base64 resumeUrl.
+        // That padded the write, and worse, churned the document — which
+        // invalidates the field in every other client's persistent cache and
+        // makes them all re-download the blobs on their next snapshot.
+        //
+        // The full record is still sent so a document that somehow does not exist
+        // yet is created complete (merge:true on a missing doc would otherwise
+        // persist only the changed keys). The two heavy fields are simply omitted
+        // unless they are genuinely part of this update; merge:true leaves the
+        // stored values untouched when a key is absent.
+        const payload: Record<string, any> = { ...updated };
+        if (!('profilePhotoUrl' in sanitizedUpdates)) delete payload.profilePhotoUrl;
+        // resumeUrl NEVER goes on the parent document any more — it is handled out
+        // of band below. Dropping it unconditionally also avoids writing an empty
+        // string back: EmployeeFormModal seeds its form with
+        // `employeeToEdit?.resumeUrl || ''`, so for an already-relocated employee
+        // every unrelated edit would otherwise push `resumeUrl: ''` to Firestore.
+        // No surface clears a resume (the form requires one), so there is nothing
+        // legitimate to propagate.
+        delete payload.resumeUrl;
+
         // Persist update to Firestore
-        setDoc(doc(db, 'employees', id), updated, { merge: true }).catch(err => {
+        setDoc(doc(db, 'employees', id), payload, { merge: true }).catch(err => {
           handleFirestoreError(err, OperationType.UPDATE, `employees/${id}`);
         });
 
@@ -2271,6 +2383,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return e;
     }));
+
+    // Relocate the resume, then record the outcome on the parent: a marker if it
+    // landed in the subcollection, or the blob inline if that was rejected (which
+    // it is until the subcollection rule is deployed). Either way the resume is
+    // never lost, and the admin form's required-field check still passes.
+    if (incomingResume) {
+      writeEmployeeResume(id, incomingResume, `${id}-resume`).then(storedOutOfBand => {
+        const marker = storedOutOfBand ? { hasResume: true } : { resumeUrl: incomingResume };
+        setDoc(doc(db, 'employees', id), marker, { merge: true }).catch(err => {
+          handleFirestoreError(err, OperationType.UPDATE, `employees/${id}`);
+        });
+      });
+    }
 
     addAuditLog('EMPLOYEE_UPDATED', `Employee ID: ${id}`, `Fields updated: ${Object.keys(updates).join(', ')}`);
   };
@@ -2292,6 +2417,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     updateEmployee(employeeId, { qrToken: newToken });
     addAuditLog('QR_REGENERATED', `Employee ${employeeId}`, 'Regenerated cryptographic attendance pass');
     return newToken;
+  };
+
+  // ── Shared attendance-location policy ───────────────────────────────────────
+  // Extracted so check-in and the break paths cannot drift apart. Breaks used to
+  // have NO geofence at all, so an employee blocked from checking in outside the
+  // office could still start and end meal/tea breaks from anywhere.
+
+  /**
+   * Is today an approved work-from-home day for this employee? Company-wide dates,
+   * the employee's own approved list, and an approved WFH leave request all count.
+   * The KSS2407004 carve-out is preserved verbatim from the check-in path (B27).
+   */
+  const isApprovedWfhToday = (emp: Employee | undefined, todayStr: string): boolean => {
+    if (!emp) return false;
+    if (emp.employeeId === 'KSS2407004') return false;
+    return (companyWideWfhDates || []).includes(todayStr) ||
+      (settings.companyWideWfhDates || []).includes(todayStr) ||
+      (emp.approvedWfhDates || []).includes(todayStr) ||
+      leaveRequests.some(r =>
+        r.type === 'WFH' &&
+        r.status === 'Approved' &&
+        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
+        todayStr >= r.startDate &&
+        todayStr <= r.endDate
+      );
+  };
+
+  /** One-shot position read, resolving to null rather than throwing. */
+  const getCurrentPositionOrNull = (): Promise<{ lat: number; lon: number } | null> =>
+    new Promise(resolve => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        () => resolve(null),
+        // maximumAge lets the browser hand back the fix the portal's watchPosition
+        // already has, so this rarely costs an extra hardware acquisition.
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 }
+      );
+    });
+
+  /**
+   * Gate a self-service break on the office geofence, mirroring check-in.
+   *
+   * Only applies when the signed-in user is acting on their OWN record. An admin or
+   * HR user closing someone else's forgotten break is a correction — their handset's
+   * position says nothing about where that employee is — so those calls pass through.
+   *
+   * Returns null when the break is allowed, or the message explaining the block.
+   */
+  const verifyBreakLocation = async (
+    employeeId: string,
+    action: 'start' | 'end',
+    lat?: number,
+    lon?: number
+  ): Promise<string | null> => {
+    if (settings.gpsRequired === false) return null;
+
+    const emp = findEmployee(employeeId);
+    const isSelfAction = !!emp && !!activeEmployee && (emp.id === activeEmployee.id);
+    if (!isSelfAction) return null;
+
+    const todayStr = getWorkDate(new Date());
+    if (isApprovedWfhToday(emp, todayStr)) return null;
+
+    let coords = (lat !== undefined && lon !== undefined) ? { lat, lon } : null;
+    if (!coords) coords = await getCurrentPositionOrNull();
+
+    const verb = action === 'start' ? 'start' : 'end';
+    if (!coords) {
+      return `GPS Location Required: enable location permissions to ${verb} a break. Breaks may only be taken at the company office.`;
+    }
+
+    const distanceMeters = calculateGpsDistanceMeters(
+      coords.lat, coords.lon, companyWorkZone.latitude, companyWorkZone.longitude
+    );
+    const radius = companyWorkZone.radiusMeters || settings.allowedRadiusMeters || 300;
+    if (distanceMeters > radius) {
+      return `Break Blocked: You are ${distanceMeters}m away from the company office (Allowed limit: ${radius}m). Breaks may only be taken at the office. Submit a WFH request to work from home.`;
+    }
+
+    return null;
   };
 
   const recordCheckIn = async (
@@ -2336,19 +2542,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // name/email substring tests also matched any employee with "asbin" anywhere in
     // their identity (e.g. "Jasbinder"), wrongly denying them approved WFH. The explicit
     // employeeId was already the canonical target of this OR, so behaviour for the
-    // intended employee is unchanged.
-    const isAsbin = emp.employeeId === 'KSS2407004';
-
-    const isApprovedWfh = !isAsbin && ((companyWideWfhDates || []).includes(todayStr) ||
-      (settings.companyWideWfhDates || []).includes(todayStr) ||
-      (emp.approvedWfhDates || []).includes(todayStr) ||
-      leaveRequests.some(r => 
-        r.type === 'WFH' && 
-        r.status === 'Approved' && 
-        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
-        todayStr >= r.startDate && 
-        todayStr <= r.endDate
-      ));
+    // intended employee is unchanged. Now shared with the break geofence through
+    // isApprovedWfhToday, so check-in, check-out and breaks cannot drift apart.
+    const isApprovedWfh = isApprovedWfhToday(emp, todayStr);
 
     const effectiveSettings: CompanySettings = {
       ...settings,
@@ -2502,19 +2698,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // name/email substring tests also matched any employee with "asbin" anywhere in
     // their identity (e.g. "Jasbinder"), wrongly denying them approved WFH. The explicit
     // employeeId was already the canonical target of this OR, so behaviour for the
-    // intended employee is unchanged.
-    const isAsbin = emp.employeeId === 'KSS2407004';
-
-    const isApprovedWfh = !isAsbin && ((companyWideWfhDates || []).includes(todayStr) ||
-      (settings.companyWideWfhDates || []).includes(todayStr) ||
-      (emp.approvedWfhDates || []).includes(todayStr) ||
-      leaveRequests.some(r => 
-        r.type === 'WFH' && 
-        r.status === 'Approved' && 
-        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
-        todayStr >= r.startDate && 
-        todayStr <= r.endDate
-      ));
+    // intended employee is unchanged. Now shared with the break geofence through
+    // isApprovedWfhToday, so check-in, check-out and breaks cannot drift apart.
+    const isApprovedWfh = isApprovedWfhToday(emp, todayStr);
 
     // ATOMIC IDEMPOTENT TRANSACTION
     const docRef = doc(db, 'attendance', recordId);
@@ -2643,7 +2829,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const startBreak = async (employeeId: string, breakType: BreakType) => {
+  const startBreak = async (employeeId: string, breakType: BreakType, lat?: number, lon?: number) => {
+    // Breaks are office-only, same rule as check-in. Enforced BEFORE the transaction
+    // so a rejected break never touches the attendance document.
+    const locationBlock = await verifyBreakLocation(employeeId,'start', lat, lon);
+    if (locationBlock) return { success: false, message: locationBlock };
+
     const emp = findEmployee(employeeId);
     // BUG 4 FIX: Same canonical UID as recordCheckIn/endBreak — single doc target.
     const empUid = getCanonicalEmployeeUid(emp, user?.uid);
@@ -2745,7 +2936,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const endBreak = async (employeeId: string) => {
+  const endBreak = async (employeeId: string, lat?: number, lon?: number) => {
+    // Symmetric with startBreak: a break must also be CLOSED at the office, otherwise
+    // an employee could start one on site, leave, and stop the clock from home.
+    const locationBlock = await verifyBreakLocation(employeeId,'end', lat, lon);
+    if (locationBlock) return { success: false, message: locationBlock };
+
     const emp = findEmployee(employeeId);
     // BUG 4 FIX: Same canonical UID as recordCheckIn/startBreak — single doc target.
     const empUid = getCanonicalEmployeeUid(emp, user?.uid);
@@ -2972,7 +3168,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const saveCompanyWorkZone = async (zone: Partial<WorkZone>) => {
     const updated: WorkZone = {
-      name: zone.name || companyWorkZone.name || 'Kalpanaaa Software Solutions — Main Office',
+      name: zone.name || companyWorkZone.name || 'Kalpanaaa Software Solutions HQ',
       latitude: zone.latitude !== undefined ? Number(zone.latitude) : companyWorkZone.latitude,
       longitude: zone.longitude !== undefined ? Number(zone.longitude) : companyWorkZone.longitude,
       radiusMeters: zone.radiusMeters !== undefined ? Number(zone.radiusMeters) : companyWorkZone.radiusMeters,
@@ -3242,7 +3438,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuditLogs(INITIAL_AUDIT_LOGS);
     setSettings(INITIAL_COMPANY_SETTINGS);
     const defaultZone: WorkZone = {
-      name: 'Kalpanaaa Software Solutions — Main Office',
+      name: 'Kalpanaaa Software Solutions HQ',
       latitude: 13.014333,
       longitude: 77.646000,
       radiusMeters: 100,
