@@ -810,18 +810,23 @@ service cloud.firestore {
         isSuperAdmin() || isHrAdmin() || isProjectManager()
       );
       allow update: if isRealUser() && (
-        isSuperAdmin() || isHrAdmin() || isProjectManager()
+        isSuperAdmin() || isHrAdmin() || isProjectManager() ||
+        // Allow any authenticated employee to increment responseCount upon submitting their response
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['responseCount', 'updatedAt'])
       );
       allow delete: if isRealUser() && (
         isSuperAdmin() || isHrAdmin() || isProjectManager()
       );
 
       // Responses subcollection: employee answers — immutable once written.
-      // READ restricted to scheduler roles (results are confidential).
+      // READ restricted to scheduler roles for full results, plus individual employees for their own submission.
       // CREATE open to any real user (service layer prevents double-submission).
       match /responses/{responseId} {
         allow read: if isRealUser() && (
-          isSuperAdmin() || isHrAdmin() || isProjectManager()
+          isSuperAdmin() || isHrAdmin() || isProjectManager() ||
+          resource.data.employeeId == getEmployeeDocId() ||
+          resource.data.employeeId == request.auth.uid ||
+          resource.data.employeeId == getEmployeeId()
         );
         allow create: if isRealUser();
         allow update, delete: if false;
@@ -829,3 +834,4 @@ service cloud.firestore {
     }
   }
 }
+

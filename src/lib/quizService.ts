@@ -1,4 +1,4 @@
-﻿import { FeedbackQuiz, QuizResponse, UserRole } from '../types';
+import { FeedbackQuiz, QuizResponse, UserRole } from '../types';
 import { db, cleanFirestorePayload, subscribeWithRecovery } from './firebase';
 import {
   collection, doc, setDoc, deleteDoc, getDocs,
@@ -19,7 +19,9 @@ export function canScheduleQuiz(role: UserRole | string): boolean {
 // Timing Engine
 
 function quizWindowDate(dateStr: string, timeStr: string): Date {
-  return new Date(`${dateStr}T${timeStr}:00+05:30`);
+  const cleanTime = (timeStr || '').trim();
+  const timePart = cleanTime.length === 5 ? `${cleanTime}:00` : cleanTime;
+  return new Date(`${dateStr}T${timePart}+05:30`);
 }
 
 export function getQuizLiveStatus(quiz: FeedbackQuiz): FeedbackQuiz['status'] {
@@ -133,6 +135,7 @@ export function subscribeToQuizzes(
 
 export async function hasEmployeeResponded(quizId: string, employeeId: string): Promise<boolean> {
   try {
+    if (!quizId || !employeeId) return false;
     const q = query(responsesRef(quizId), where('employeeId', '==', employeeId));
     const snap = await getDocs(q);
     return !snap.empty;
@@ -144,16 +147,23 @@ export async function hasEmployeeResponded(quizId: string, employeeId: string): 
 
 export async function submitQuizResponse(response: QuizResponse): Promise<{ success: boolean; message: string }> {
   try {
+    if (!response.quizId || !response.employeeId) {
+      return { success: false, message: 'Invalid submission: missing quiz or employee identifier.' };
+    }
     const alreadyDone = await hasEmployeeResponded(response.quizId, response.employeeId);
     if (alreadyDone) {
       return { success: false, message: 'You have already submitted this quiz.' };
     }
     const payload = cleanFirestorePayload({ ...response, submittedAt: new Date().toISOString() });
     await setDoc(responseDocRef(response.quizId, response.id), payload);
-    await updateDoc(quizRef(response.quizId), {
-      responseCount: increment(1),
-      updatedAt: new Date().toISOString()
-    });
+    try {
+      await updateDoc(quizRef(response.quizId), {
+        responseCount: increment(1),
+        updatedAt: new Date().toISOString()
+      });
+    } catch (countErr) {
+      console.warn('[quizService] Could not increment responseCount on quiz document:', countErr);
+    }
     return { success: true, message: 'Your response has been recorded. Thank you!' };
   } catch (error: any) {
     console.error('[quizService] submitQuizResponse error:', error);
@@ -161,7 +171,7 @@ export async function submitQuizResponse(response: QuizResponse): Promise<{ succ
     if (code === 'permission-denied') {
       return { success: false, message: 'Submission not permitted at this time.' };
     }
-    return { success: false, message: 'Failed to submit response. Please try again.' };
+    return { success: false, message: error?.message || 'Failed to submit response. Please try again.' };
   }
 }
 
