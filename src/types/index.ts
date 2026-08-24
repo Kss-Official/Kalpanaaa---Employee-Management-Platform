@@ -404,3 +404,44 @@ export interface PerformanceFeedback {
   updatedAt: string;
 }
 
+
+// -- Feedback Quiz Scheduling Types --
+
+export interface QuizQuestion {
+  id: string;
+  text: string;
+  options: [string, string, string, string];
+}
+
+export type QuizStatus = 'draft' | 'scheduled' | 'active' | 'closed';
+
+export type QuizTargetAudience = 'ALL_EMPLOYEES' | string;
+
+export interface FeedbackQuiz {
+  id: string;
+  title: string;
+  description: string;
+  questions: QuizQuestion[];
+  targetAudience: QuizTargetAudience;
+  scheduledDate: string;
+  openTime: string;
+  closeTime: string;
+  repeatDaily: boolean;
+  createdBy: string;
+  createdByName: string;
+  createdByRole: UserRole;
+  status: QuizStatus;
+  responseCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QuizResponse {
+  id: string;
+  quizId: string;
+  employeeId: string;
+  employeeName: string;
+  employeeRole: UserRole | string;
+  answers: { questionId: string; selectedOption: number }[];
+  submittedAt: string;
+}

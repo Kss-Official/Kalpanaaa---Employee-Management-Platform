@@ -29,7 +29,8 @@ import {
   Rocket,
   Trophy,
   Zap,
-  Bookmark
+  Bookmark,
+  ClipboardList
 } from 'lucide-react';
 import { PerformanceFeedback, FeedbackCategory, FeedbackSentiment, Employee } from '../../types';
 import {
@@ -44,6 +45,7 @@ import {
 import { FEEDBACK_TEMPLATES } from '../../lib/feedbackTemplates';
 import { canReview, tierOf } from '../../lib/hierarchy';
 import { useHaptic } from '../../hooks/useHaptic';
+import { QuizScheduler } from './QuizScheduler';
 
 const FEEDBACK_CATEGORIES: FeedbackCategory[] = [
   'Performance & Sprint Delivery',
@@ -88,6 +90,7 @@ export const FeedbackHub: React.FC = () => {
   const [activeViewTab, setActiveViewTab] = useState<'all' | 'sent_by_me' | 'received'>(
     isPm ? 'all' : 'all'
   );
+  const [mainTab, setMainTab] = useState<'feedback' | 'quiz'>('feedback');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
   const [selectedTargetRoleFilter, setSelectedTargetRoleFilter] = useState<string>('ALL');
@@ -305,14 +308,47 @@ export const FeedbackHub: React.FC = () => {
           </p>
         </div>
 
+        {mainTab === 'feedback' && (
+          <button
+            onClick={() => handleOpenCompose()}
+            className="px-5 py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-2xl flex items-center gap-2 shadow-lg shadow-blue-900/40 transition-all hover:scale-105 cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Give Performance Feedback</span>
+          </button>
+        )}
+      </div>
+
+      {/* Main Tab Switcher */}
+      <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 p-1 rounded-2xl text-xs font-bold w-fit">
         <button
-          onClick={() => handleOpenCompose()}
-          className="px-5 py-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-2xl flex items-center gap-2 shadow-lg shadow-blue-900/40 transition-all hover:scale-105 cursor-pointer shrink-0"
+          onClick={() => setMainTab('feedback')}
+          className={`px-5 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
+            mainTab === 'feedback' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+          }`}
         >
-          <Plus className="w-4 h-4" />
-          <span>Give Performance Feedback</span>
+          <MessageSquare className="w-3.5 h-3.5" />
+          Performance Feedback
+        </button>
+        <button
+          onClick={() => setMainTab('quiz')}
+          className={`px-5 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
+            mainTab === 'quiz' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <ClipboardList className="w-3.5 h-3.5" />
+          Schedule Quiz
+          {mainTab !== 'quiz' && (
+            <span className="text-[9px] font-black bg-violet-500/20 text-violet-400 border border-violet-500/30 px-1.5 py-0.5 rounded-md">NEW</span>
+          )}
         </button>
       </div>
+
+      {/* Quiz Tab Content */}
+      {mainTab === 'quiz' && <QuizScheduler />}
+
+      {/* Feedback Tab Content */}
+      {mainTab === 'feedback' && <>
 
       {/* KPI Metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -851,6 +887,8 @@ export const FeedbackHub: React.FC = () => {
         </div>
       );
     })()}
+
+      </> /* end mainTab === 'feedback' */}
 
     </div>
   );

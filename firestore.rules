@@ -791,5 +791,41 @@ service cloud.firestore {
         allow read, write: if isConfigAdmin();
       }
     }
+
+    // ── 15. Feedback Quiz Scheduling ────────────────────────────────────────
+    //
+    // Only CEO, CTO (SUPER_ADMIN), HR_ADMIN, and PROJECT_MANAGER may create or
+    // delete quizzes. All authenticated real users may read the quiz list (the
+    // service layer filters to target audience client-side; a single Firestore
+    // query cannot OR across multiple audience values). Employee responses are
+    // stored in a subcollection so they are never readable by peers -- only by
+    // scheduler roles.
+    match /feedbackQuizzes/{quizId} {
+      // All real (non-anonymous) users can read quiz documents.
+      // Client-side service layer filters by targetAudience and live status.
+      allow read: if isRealUser();
+
+      // Only scheduler roles may create / update / delete quizzes.
+      allow create: if isRealUser() && (
+        isSuperAdmin() || isHrAdmin() || isProjectManager()
+      );
+      allow update: if isRealUser() && (
+        isSuperAdmin() || isHrAdmin() || isProjectManager()
+      );
+      allow delete: if isRealUser() && (
+        isSuperAdmin() || isHrAdmin() || isProjectManager()
+      );
+
+      // Responses subcollection: employee answers — immutable once written.
+      // READ restricted to scheduler roles (results are confidential).
+      // CREATE open to any real user (service layer prevents double-submission).
+      match /responses/{responseId} {
+        allow read: if isRealUser() && (
+          isSuperAdmin() || isHrAdmin() || isProjectManager()
+        );
+        allow create: if isRealUser();
+        allow update, delete: if false;
+      }
+    }
   }
 }
