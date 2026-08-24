@@ -12,7 +12,8 @@ import {
   MessageSquare,
   Award,
   Calendar,
-  Lock
+  Lock,
+  ClipboardList
 } from 'lucide-react';
 import { PerformanceFeedback } from '../../types';
 import {
@@ -23,11 +24,13 @@ import {
 } from '../../lib/feedbackService';
 import { FEEDBACK_TEMPLATES } from '../../lib/feedbackTemplates';
 import { useHaptic } from '../../hooks/useHaptic';
+import { QuizScheduler } from '../feedback/QuizScheduler';
 
 export const EmployeeFeedbackView: React.FC = () => {
   const { activeEmployee, employees, role, isAuthenticated } = useAuth();
   const { triggerHaptic } = useHaptic();
 
+  const [mainTab, setMainTab] = useState<'feedback' | 'quiz'>('feedback');
   const [allFeedbacks, setAllFeedbacks] = useState<PerformanceFeedback[]>(() => getStoredFeedbacks());
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
 
@@ -72,43 +75,76 @@ export const EmployeeFeedbackView: React.FC = () => {
             <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20 flex items-center gap-1">
               <Lock className="w-3 h-3" /> Confidential to You
             </span>
-            <span className="text-xs text-slate-500 font-mono">Performance Reviews</span>
+            <span className="text-xs text-slate-500 font-mono">Performance &amp; Engagement</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight mt-1 flex items-center gap-2">
             <Sparkles className="w-6 h-6 text-amber-400" />
-            My Performance Feedback &amp; Reviews
+            My Feedback &amp; Growth Hub
           </h1>
           <p className="text-xs text-slate-400 mt-0.5 max-w-xl">
-            Official feedback, mentorship assessments, and sprint growth action items provided by Executive Leadership and Project Management.
+            View official performance feedback, growth milestones, and participate in scheduled feedback quizzes.
           </p>
         </div>
 
-        {/* Stats Pill */}
-        <div className="flex items-center gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800 shrink-0">
-          <div className="text-center px-3 border-r border-slate-800">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Reviews</span>
-            <span className="text-xl font-black text-white font-mono">{myFeedbacks.length}</span>
-          </div>
-          <div className="text-center px-3">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Rating</span>
-            <div className="flex items-center gap-1">
-              <span className="text-xl font-black text-amber-400 font-mono">{avgRating}</span>
-              <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+        {/* Stats Pill (shown on feedback tab) */}
+        {mainTab === 'feedback' && (
+          <div className="flex items-center gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800 shrink-0">
+            <div className="text-center px-3 border-r border-slate-800">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Reviews</span>
+              <span className="text-xl font-black text-white font-mono">{myFeedbacks.length}</span>
+            </div>
+            <div className="text-center px-3">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Rating</span>
+              <div className="flex items-center gap-1">
+                <span className="text-xl font-black text-amber-400 font-mono">{avgRating}</span>
+                <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Feedbacks List */}
-      {myFeedbacks.length === 0 ? (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-16 text-center space-y-3">
-          <MessageSquare className="w-12 h-12 text-slate-700 mx-auto" />
-          <h3 className="text-base font-bold text-white">No reviews published yet</h3>
-          <p className="text-xs text-slate-500 max-w-md mx-auto">
-            Your manager or executive leadership hasn't published a review for your profile yet. Any feedback sent to you will appear here instantly.
-          </p>
-        </div>
-      ) : (
+      {/* Main Tab Switcher */}
+      <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 p-1 rounded-2xl text-xs font-bold w-fit">
+        <button
+          onClick={() => { setMainTab('feedback'); triggerHaptic(); }}
+          className={`px-5 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
+            mainTab === 'feedback' ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          Performance Reviews
+        </button>
+        <button
+          onClick={() => { setMainTab('quiz'); triggerHaptic(); }}
+          className={`px-5 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
+            mainTab === 'quiz' ? 'bg-violet-600 text-white shadow-md shadow-violet-900/40' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <ClipboardList className="w-3.5 h-3.5" />
+          Active Quizzes
+          {mainTab !== 'quiz' && (
+            <span className="text-[9px] font-black bg-violet-500/20 text-violet-400 border border-violet-500/30 px-1.5 py-0.5 rounded-md">
+              NEW
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Quiz Tab Content */}
+      {mainTab === 'quiz' && <QuizScheduler />}
+
+      {/* Feedbacks List (Feedback Tab) */}
+      {mainTab === 'feedback' && (
+        myFeedbacks.length === 0 ? (
+          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-16 text-center space-y-3">
+            <MessageSquare className="w-12 h-12 text-slate-700 mx-auto" />
+            <h3 className="text-base font-bold text-white">No reviews published yet</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              Your manager or executive leadership hasn't published a review for your profile yet. Any feedback sent to you will appear here instantly.
+            </p>
+          </div>
+        ) : (
         <div className="space-y-4">
           {myFeedbacks.map(fb => (
             <motion.div
@@ -241,7 +277,7 @@ export const EmployeeFeedbackView: React.FC = () => {
             </motion.div>
           ))}
         </div>
-      )}
+      ))}
 
     </div>
   );
