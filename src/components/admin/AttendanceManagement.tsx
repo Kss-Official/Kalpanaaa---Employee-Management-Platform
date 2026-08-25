@@ -171,6 +171,19 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
         notes: updatedNotes,
       });
 
+      // Also clean any duplicate doc for today if present in attendance state
+      const duplicates = attendance.filter(
+        r => r.id !== record.id && r.date === record.date &&
+        (r.employeeId === emp.id || r.employeeCode === emp.employeeId || r.employeeUid === emp.uid || r.uid === emp.uid)
+      );
+      for (const dup of duplicates) {
+        updateAttendanceRecord(dup.id, {
+          checkOutAt: null as any,
+          workingMinutes: 0,
+          status: 'Present',
+        }).catch(() => {});
+      }
+
       // Explicit audit log for the force undo action
       addAuditLog(
         'ADMIN_FORCE_UNDO_CHECKOUT',

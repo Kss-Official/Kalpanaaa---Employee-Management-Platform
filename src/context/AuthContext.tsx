@@ -1348,22 +1348,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // so canonical-ID lookups elsewhere hit this exact state record.
               const isCanonicalId = (id: string) => id === `${identityKey}_${rec.date}`;
               const canonicalDocId = `${identityKey}_${rec.date}`;
+              const canonicalRec = rec.id === canonicalDocId ? rec : (existing.id === canonicalDocId ? existing : null);
 
               // BREAK FLAP ROOT FIX: the canonical doc ({uid}_{date}) is the ONLY
               // write target for startBreak / endBreak / recordCheckOut. Its breaks
               // array is always authoritative.
-              //
-              // The previous strategy (pick the array with more entries) caused the
-              // on/off flap: when updatedAt resolves to null in the latency-
-              // compensated snapshot (serverTimestamp() placeholder), the dedup
-              // ranked the stale duplicate as "richer" and its old, pre-break array
-              // survived the merge — making the active break disappear.  The moment
-              // Firestore committed and a real updatedAt arrived, the ranking
-              // flipped back, producing the visible toggle.
-              //
-              // Solution: canonical doc wins unconditionally for breaks. Only when
-              // NEITHER doc in this pair is canonical do we fall back to the larger
-              // array (maximum history).
               const canonicalBreaks = (() => {
                 if (rec.id === canonicalDocId) return rec.breaks || [];
                 if (existing.id === canonicalDocId) return existing.breaks || [];
@@ -1379,15 +1368,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return rBreaks;
               })();
 
+              // CHECKOUT ROOT FIX: The canonical doc is authoritative for checkOutAt.
+              // When an admin undos checkout (checkOutAt = null), we MUST NOT fall back
+              // to a stale checkOutAt from a duplicate document via `richer || poorer`.
+              const finalCheckOutAt = canonicalRec && canonicalRec.checkInAt !== undefined
+                ? (canonicalRec.checkOutAt || null)
+                : (richer.checkOutAt || null);
+
+              const finalStatus = canonicalRec?.status || richer.status || poorer.status || 'Present';
+              const finalCheckInAt = canonicalRec?.checkInAt || richer.checkInAt || poorer.checkInAt;
+
               const merged: AttendanceRecord = {
                 ...poorer,
                 ...richer,
                 id: isCanonicalId(richer.id) ? richer.id : (isCanonicalId(poorer.id) ? poorer.id : richer.id),
-                checkInAt: richer.checkInAt || poorer.checkInAt,
-                checkOutAt: richer.checkOutAt || poorer.checkOutAt,
-                status: richer.status || poorer.status,
+                checkInAt: finalCheckInAt,
+                checkOutAt: finalCheckOutAt,
+                status: finalStatus,
                 breaks: canonicalBreaks,
-                workingMinutes: Math.max(existing.workingMinutes || 0, rec.workingMinutes || 0),
+                workingMinutes: finalCheckOutAt ? Math.max(existing.workingMinutes || 0, rec.workingMinutes || 0) : (canonicalRec?.workingMinutes ?? 0),
                 totalBreakMinutes: Math.max(existing.totalBreakMinutes || 0, rec.totalBreakMinutes || 0)
               };
               deduplicatedMap.set(empKey, merged);
@@ -2476,16 +2475,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
   };
 
-  /** One-shot position read, resolving to null rather than throwing. */
+  /** One-shot position read, resolving to null rather than throwing, with graceful standard-accuracy fallback */
   const getCurrentPositionOrNull = (): Promise<{ lat: number; lon: number } | null> =>
     new Promise(resolve => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
       navigator.geolocation.getCurrentPosition(
         pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
-        () => resolve(null),
-        // maximumAge lets the browser hand back the fix the portal's watchPosition
-        // already has, so this rarely costs an extra hardware acquisition.
-        { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 }
+        () => {
+          // Fallback to standard accuracy with longer timeout if high accuracy timed out or failed
+          navigator.geolocation.getCurrentPosition(
+            pos2 => resolve({ lat: pos2.coords.latitude, lon: pos2.coords.longitude }),
+            () => resolve(null),
+            { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
+          );
+        },
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 6000 }
       );
     });
 
@@ -2522,6 +2526,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const verb = action === 'start' ? 'start' : 'end';
     if (!coords) {
+      // If closing a break and location acquisition failed due to browser timeout, allow break close if shift was verified
+      if (action === 'end') {
+        const todayRec = resolveAttendanceRecord(attendance, emp, todayStr);
+        if (todayRec?.checkInAt) {
+          console.warn('[BreakLocation] GPS read timed out on break end — allowing break close since shift is active.');
+          return null;
+        }
+      }
       return `GPS Location Required: enable location permissions to ${verb} a break. Breaks may only be taken at the company office.`;
     }
 
@@ -2530,6 +2542,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
     const radius = companyWorkZone.radiusMeters || settings.allowedRadiusMeters || 300;
     if (distanceMeters > radius) {
+      // If ending break and just outside radius by small margin, allow grace if checked in at office
+      if (action === 'end') {
+        const todayRec = resolveAttendanceRecord(attendance, emp, todayStr);
+        if (todayRec?.locationVerified && distanceMeters <= radius + 150) {
+          console.warn(`[BreakLocation] Break end within GPS drift tolerance (${distanceMeters}m vs ${radius}m)`);
+          return null;
+        }
+      }
       return `Break Blocked: You are ${distanceMeters}m away from the company office (Allowed limit: ${radius}m). Breaks may only be taken at the office. Submit a WFH request to work from home.`;
     }
 

@@ -542,6 +542,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       return;
     }
 
+    let fallbackWatchId: number | null = null;
     const watchId = navigator.geolocation.watchPosition(
       pos => {
         setGpsLocation({ 
@@ -552,13 +553,35 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         setGpsError(null);
       },
       err => {
-        console.warn('Employee location watch prompt:', err.message);
-        setGpsError(err.message || 'Location access denied or unavailable.');
+        // If high accuracy timed out, fall back to standard accuracy
+        if (err.code === 3 && fallbackWatchId === null) {
+          fallbackWatchId = navigator.geolocation.watchPosition(
+            pos => {
+              setGpsLocation({ 
+                lat: pos.coords.latitude, 
+                lon: pos.coords.longitude,
+                accuracy: Math.round(pos.coords.accuracy) || 15
+              });
+              setGpsError(null);
+            },
+            err2 => {
+              console.warn('Employee location standard watch error:', err2.message);
+              setGpsError(err2.message || 'Location access denied or unavailable.');
+            },
+            { enableHighAccuracy: false, maximumAge: 30000, timeout: 20000 }
+          );
+        } else {
+          console.warn('Employee location watch prompt:', err.message);
+          setGpsError(err.message || 'Location access denied or unavailable.');
+        }
       },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 }
     );
 
-    return () => navigator.geolocation.clearWatch(watchId);
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      if (fallbackWatchId !== null) navigator.geolocation.clearWatch(fallbackWatchId);
+    };
   }, []);
 
   const liveDistanceMeters = (gpsLocation && companyWorkZone)
