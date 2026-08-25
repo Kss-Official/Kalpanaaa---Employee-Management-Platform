@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Employee } from '../../types';
+import { Employee, AttendanceRecord } from '../../types';
 import { 
   Search, 
   FileDown, 
@@ -8,18 +8,21 @@ import {
   Edit3, 
   History,
   Calendar,
-  Sparkles,
   Save,
   X,
   Palmtree,
   Check,
   Building2,
-  Users
+  RotateCcw,
+  AlertTriangle,
+  ShieldAlert,
+  LogOut
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, getWorkDate } from '../../lib/attendanceEngine';
+import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface AttendanceManagementProps {
   initialDateFilter?: 'today' | 'yesterday' | 'all';
@@ -27,13 +30,14 @@ interface AttendanceManagementProps {
 }
 
 export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
-  const { employees, attendance, updateEmployee, settings, leaveRequests, role, activeEmployee } = useAuth();
+  const { employees, attendance, updateAttendanceRecord, addAuditLog, updateEmployee, settings, leaveRequests, role, activeEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const isSuperAdmin = role === 'SUPER_ADMIN' || activeEmployee?.role === 'SUPER_ADMIN';
   const isHr = role === 'HR_ADMIN' || activeEmployee?.role === 'HR_ADMIN';
   const isPm = role === 'PROJECT_MANAGER' || activeEmployee?.role === 'PROJECT_MANAGER';
   const canEditShifts = isSuperAdmin || isHr || isPm;
+  const canForceUndoCheckout = isSuperAdmin || isHr; // Only Super Admin & HR can force undo
 
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
@@ -46,7 +50,30 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
   // State for shift history modal
   const [historyEmployee, setHistoryEmployee] = useState<Employee | null>(null);
 
+  // ─── Force Undo Checkout State ─────────────────────────────────────────────
+  const [undoCheckoutTarget, setUndoCheckoutTarget] = useState<{
+    employee: Employee;
+    record: AttendanceRecord;
+  } | null>(null);
+  const [undoCheckoutReason, setUndoCheckoutReason] = useState('');
+  const [isUndoingCheckout, setIsUndoingCheckout] = useState(false);
+  const [undoFeedback, setUndoFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  const todayStr = getWorkDate(new Date());
+
   const departments = useMemo(() => Array.from(new Set(employees.map(e => e.department).filter(Boolean))), [employees]);
+
+  // Build a fast lookup map: today's attendance records keyed by employee id / employeeCode
+  const todayRecordByEmpId = useMemo(() => {
+    const map = new Map<string, AttendanceRecord>();
+    attendance.forEach(rec => {
+      if (rec.date === todayStr) {
+        if (rec.employeeId) map.set(rec.employeeId, rec);
+        if (rec.employeeCode) map.set(rec.employeeCode, rec);
+      }
+    });
+    return map;
+  }, [attendance, todayStr]);
 
   // Compute Leave Balance with rule: 1 leave credited every month on 1st date
   const computeLeaveBalance = (emp: Employee) => {
@@ -115,6 +142,53 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
     }
   };
 
+  // ─── Open Force Undo Checkout Confirm Modal ─────────────────────────────────
+  const handleOpenUndoCheckout = (emp: Employee, rec: AttendanceRecord) => {
+    triggerHaptic();
+    setUndoCheckoutTarget({ employee: emp, record: rec });
+    setUndoCheckoutReason('');
+    setUndoFeedback(null);
+  };
+
+  // ─── Execute Force Undo Checkout ────────────────────────────────────────────
+  const handleConfirmUndoCheckout = async () => {
+    if (!undoCheckoutTarget) return;
+    const { employee: emp, record } = undoCheckoutTarget;
+
+    setIsUndoingCheckout(true);
+    setUndoFeedback(null);
+
+    try {
+      const reason = undoCheckoutReason.trim() || 'Admin force-undid accidental checkout';
+      const updatedNotes = (record.notes ? record.notes + ' | ' : '') +
+        `ADMIN FORCE UNDO: ${reason} (by ${activeEmployee?.fullName || 'Admin'} at ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true })})`;
+
+      // Revert checkout: clear checkOutAt and reset workingMinutes (employee is live again)
+      updateAttendanceRecord(record.id, {
+        checkOutAt: null as any,
+        workingMinutes: 0,
+        notes: updatedNotes,
+      });
+
+      // Explicit audit log for the force undo action
+      addAuditLog(
+        'ADMIN_FORCE_UNDO_CHECKOUT',
+        `${emp.employeeId} (${emp.fullName})`,
+        `Force-undid checkout for ${record.date}. Reason: ${reason}`
+      );
+
+      setUndoFeedback({ type: 'success', msg: `✓ Checkout undone for ${emp.fullName}. Employee is now active again.` });
+      setTimeout(() => {
+        setUndoCheckoutTarget(null);
+        setUndoFeedback(null);
+      }, 1800);
+    } catch (err: any) {
+      setUndoFeedback({ type: 'error', msg: `Failed: ${err?.message || 'Unknown error'}` });
+    } finally {
+      setIsUndoingCheckout(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
       
@@ -141,6 +215,20 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
           <span>Export Ledger Statement</span>
         </button>
       </div>
+
+      {/* ── Admin Force Undo Checkout Info Banner (only visible to SA/HR) ── */}
+      {canForceUndoCheckout && (
+        <div className="flex items-start gap-3 bg-amber-500/8 border border-amber-500/20 rounded-2xl px-4 py-3">
+          <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-bold text-amber-300">Admin Override: Force Undo Checkout</p>
+            <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+              If an employee was accidentally checked out today, use the{' '}
+              <span className="text-amber-300 font-semibold">Undo Checkout</span> button on their row to revert the checkout and restore their active session. This action is audit-logged.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Filters & Search Bar */}
       <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-3">
@@ -198,6 +286,19 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                 filteredEmployees.map(emp => {
                   const leaveInfo = computeLeaveBalance(emp);
                   const shiftDisplay = emp.shift || emp.preferredShift || 'General Shift (09:00 - 18:00)';
+
+                  // Today's attendance record for this employee
+                  const todayRec =
+                    todayRecordByEmpId.get(emp.id) ||
+                    todayRecordByEmpId.get(emp.employeeId || '') ||
+                    null;
+
+                  // Show Undo Checkout only if employee checked in AND already checked out today
+                  const hasUndoableCheckout =
+                    canForceUndoCheckout &&
+                    todayRec &&
+                    !!todayRec.checkInAt &&
+                    !!todayRec.checkOutAt;
 
                   return (
                     <tr key={emp.id} className="hover:bg-slate-800/40 transition-colors group align-middle">
@@ -265,6 +366,19 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                       {/* 6. Shift Log / Live Sync Options */}
                       <td className="py-3.5 px-5 text-right">
                         <div className="flex items-center justify-end gap-2">
+
+                          {/* ── Force Undo Checkout Button ── */}
+                          {hasUndoableCheckout && todayRec && (
+                            <button
+                              onClick={() => handleOpenUndoCheckout(emp, todayRec)}
+                              className="group/undo px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 hover:border-amber-400/60 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                              title={`Undo today's checkout for ${emp.fullName}`}
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 group-hover/undo:-rotate-45 transition-transform duration-200" />
+                              <span>Undo Checkout</span>
+                            </button>
+                          )}
+
                           <button
                             onClick={() => setHistoryEmployee(emp)}
                             className="px-3.5 py-1.5 bg-blue-600/15 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
@@ -355,6 +469,130 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>{isSavingShift ? 'Saving...' : 'Save & Live Sync'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Force Undo Checkout Confirmation Modal ─────────────────────────────── */}
+      {undoCheckoutTarget && (
+        <div className="fixed inset-0 z-[200] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl max-w-lg w-full space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <RotateCcw className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">Force Undo Checkout</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Admin Override — Audit Logged</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setUndoCheckoutTarget(null); setUndoFeedback(null); }}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer shrink-0 mt-0.5"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Employee Info Card */}
+            <div className="bg-slate-950 rounded-2xl border border-slate-800 p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <img
+                  src={undoCheckoutTarget.employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(undoCheckoutTarget.employee.fullName)}&background=0f172a&color=fff`}
+                  alt={undoCheckoutTarget.employee.fullName}
+                  className="w-11 h-11 rounded-xl object-cover border border-amber-500/30"
+                />
+                <div>
+                  <div className="font-bold text-white text-sm">{undoCheckoutTarget.employee.fullName}</div>
+                  <div className="text-[10px] text-slate-400">{undoCheckoutTarget.employee.employeeId} · {undoCheckoutTarget.employee.department}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="bg-slate-900 rounded-xl p-2.5 border border-slate-800">
+                  <div className="text-slate-500 font-medium mb-0.5">Checked In At</div>
+                  <div className="text-emerald-400 font-bold font-mono">
+                    {undoCheckoutTarget.record.checkInAt ? toISTTimeString(undoCheckoutTarget.record.checkInAt) : '—'}
+                  </div>
+                </div>
+                <div className="bg-slate-900 rounded-xl p-2.5 border border-amber-500/20">
+                  <div className="text-slate-500 font-medium mb-0.5">Checked Out At</div>
+                  <div className="text-amber-400 font-bold font-mono">
+                    {undoCheckoutTarget.record.checkOutAt ? toISTTimeString(undoCheckoutTarget.record.checkOutAt) : '—'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-400 bg-slate-900/60 border border-slate-800/60 rounded-xl px-3 py-2">
+                <Calendar className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+                <span>Date: <span className="text-white font-semibold">{undoCheckoutTarget.record.date}</span></span>
+                <span className="text-slate-700 mx-1">·</span>
+                <LogOut className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                <span>Duration logged: <span className="text-white font-semibold">{Math.floor((undoCheckoutTarget.record.workingMinutes || 0) / 60)}h {(undoCheckoutTarget.record.workingMinutes || 0) % 60}m</span></span>
+              </div>
+            </div>
+
+            {/* Warning Banner */}
+            <div className="flex items-start gap-2.5 bg-amber-500/8 border border-amber-500/20 rounded-xl px-3.5 py-3">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                This will <strong className="text-amber-300">revert the checkout</strong> and restore the employee's session to{' '}
+                <strong className="text-emerald-300">Active / Checked In</strong>. The checkout timestamp and duration will be cleared. This action is{' '}
+                <span className="text-white font-semibold">permanently audit-logged</span> under your name.
+              </p>
+            </div>
+
+            {/* Reason Input */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-300">
+                Reason for Override <span className="text-slate-500 font-normal">(optional)</span>
+              </label>
+              <textarea
+                rows={2}
+                value={undoCheckoutReason}
+                onChange={e => setUndoCheckoutReason(e.target.value)}
+                placeholder="e.g. Employee was accidentally checked out by system / incorrect QR scan..."
+                className="w-full px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 focus:border-amber-500/60 rounded-xl text-white placeholder-slate-600 font-medium focus:outline-none resize-none transition-colors"
+              />
+            </div>
+
+            {/* Feedback */}
+            {undoFeedback && (
+              <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold border ${
+                undoFeedback.type === 'success'
+                  ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                  : 'bg-red-500/10 text-red-300 border-red-500/30'
+              }`}>
+                {undoFeedback.type === 'success'
+                  ? <Check className="w-3.5 h-3.5" />
+                  : <AlertTriangle className="w-3.5 h-3.5" />}
+                {undoFeedback.msg}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setUndoCheckoutTarget(null); setUndoFeedback(null); }}
+                disabled={isUndoingCheckout}
+                className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUndoCheckout}
+                disabled={isUndoingCheckout || !!undoFeedback}
+                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 text-xs font-black rounded-xl flex items-center gap-2 cursor-pointer shadow-md shadow-amber-900/30 transition-all"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${isUndoingCheckout ? 'animate-spin' : ''}`} />
+                <span>{isUndoingCheckout ? 'Reverting...' : 'Confirm Undo Checkout'}</span>
               </button>
             </div>
           </div>
