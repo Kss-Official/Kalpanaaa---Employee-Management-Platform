@@ -164,9 +164,10 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
         `ADMIN FORCE UNDO: ${reason} (by ${activeEmployee?.fullName || 'Admin'} at ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true })})`;
 
       // Revert checkout: clear checkOutAt and reset workingMinutes (employee is live again)
-      updateAttendanceRecord(record.id, {
+      await updateAttendanceRecord(record.id, {
         checkOutAt: null as any,
         workingMinutes: 0,
+        status: 'Present',
         notes: updatedNotes,
       });
 

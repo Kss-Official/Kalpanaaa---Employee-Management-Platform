@@ -231,7 +231,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
       if (activePmBreak) {
         await endBreak(activeEmployee.id);
       } else {
-        await startBreak(activeEmployee.id, 'Tea / Lunch Break');
+        await startBreak(activeEmployee.id, 'Meal Break');
       }
     } catch (e) {
       console.error('Break action error:', e);

@@ -29,13 +29,33 @@ service cloud.firestore {
 
     // ── Role predicates ──────────────────────────────────────────────────────
     function isSuperAdmin() {
-      return isSignedIn() && (getRole() == 'SUPER_ADMIN' || claimRole() == 'superadmin');
+      return isSignedIn() && (
+        getRole() == 'SUPER_ADMIN' ||
+        claimRole() == 'superadmin' ||
+        (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('role', '') == 'SUPER_ADMIN')
+      );
     }
     function isHrAdmin() {
-      return isSignedIn() && (getRole() == 'HR_ADMIN' || isSuperAdmin() || claimRole() == 'hr_admin' || claimRole() == 'hr');
+      return isSignedIn() && (
+        getRole() == 'HR_ADMIN' ||
+        isSuperAdmin() ||
+        claimRole() == 'hr_admin' ||
+        claimRole() == 'hr' ||
+        (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('role', '') == 'HR_ADMIN' ||
+          get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('role', '') == 'SUPER_ADMIN'))
+      );
     }
     function isProjectManager() {
-      return isSignedIn() && (getRole() == 'PROJECT_MANAGER' || isSuperAdmin() || claimRole() == 'project_manager' || claimRole() == 'pm');
+      return isSignedIn() && (
+        getRole() == 'PROJECT_MANAGER' ||
+        isSuperAdmin() ||
+        claimRole() == 'project_manager' ||
+        claimRole() == 'pm' ||
+        (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('role', '') == 'PROJECT_MANAGER')
+      );
     }
     function isConfigAdmin() { return isHrAdmin() || isSuperAdmin(); }
     function isSelf(uid) { return isSignedIn() && request.auth.uid == uid; }
@@ -47,10 +67,12 @@ service cloud.firestore {
     function ownsEmployeeRecord(employeeId) {
       return isRealUser() && (
         request.auth.uid == employeeId ||
+        (getEmployeeDocId() != null && employeeId == getEmployeeDocId()) ||
+        (getEmployeeId() != null && employeeId == getEmployeeId()) ||
         (resource != null && (
           resource.data.get('uid', '~') == request.auth.uid ||
-          resource.data.get('email', '~') == request.auth.token.get('email', '~~') ||
-          resource.data.get('employeeId', '~') == getEmployeeId()
+          resource.data.get('employeeId', '~') == getEmployeeId() ||
+          (request.auth.token.get('email', null) != null && resource.data.get('email', '~') == request.auth.token.email)
         ))
       );
     }
@@ -62,14 +84,14 @@ service cloud.firestore {
         d.get('uid', '~') == request.auth.uid ||
         d.get('employeeUid', '~') == request.auth.uid ||
         d.get('authUid', '~') == request.auth.uid ||
-        d.get('employeeCode', '~') == getEmployeeId() ||
-        d.get('employeeId', '~') == getEmployeeDocId() ||
+        (getEmployeeId() != null && (d.get('employeeCode', '~') == getEmployeeId() || d.get('employeeId', '~') == getEmployeeId())) ||
+        (getEmployeeDocId() != null && (d.get('employeeId', '~') == getEmployeeDocId() || d.get('employeeDocId', '~') == getEmployeeDocId())) ||
         (
           d.get('employeeId', '') != '' &&
           exists(/databases/$(database)/documents/employees/$(d.employeeId)) &&
           (
-            employeeRecord(d.employeeId).get('email', '~') == request.auth.token.get('email', '~~') ||
-            employeeRecord(d.employeeId).get('uid', '~') == request.auth.uid
+            employeeRecord(d.employeeId).get('uid', '~') == request.auth.uid ||
+            (request.auth.token.get('email', null) != null && employeeRecord(d.employeeId).get('email', '~') == request.auth.token.email)
           )
         )
       );
@@ -102,16 +124,17 @@ service cloud.firestore {
         request.resource.data.get('employeeDocId', '') != '' &&
         exists(/databases/$(database)/documents/employees/$(request.resource.data.employeeDocId)) &&
         employeeRecord(request.resource.data.employeeDocId).get('role', '~') == request.resource.data.get('role', '~~') &&
-        employeeRecord(request.resource.data.employeeDocId).get('email', '~') == request.auth.token.get('email', '~~');
+        (
+          employeeRecord(request.resource.data.employeeDocId).get('uid', '~') == request.auth.uid ||
+          (request.auth.token.get('email', null) != null && employeeRecord(request.resource.data.employeeDocId).get('email', '~') == request.auth.token.email)
+        );
     }
 
     // ── Shape validators ─────────────────────────────────────────────────────
     function validAttendanceShape() {
       let d = request.resource.data;
-      return d.keys().hasAll(['date', 'employeeId', 'status']) &&
-             d.get('status', '') is string &&
-             d.get('date', '') is string &&
-             d.get('date', '').size() == 10;
+      return d.get('status', '') is string &&
+             (!('date' in d) || (d.date is string && d.date.size() == 10));
     }
     function validLeaveShape() {
       let d = request.resource.data;
@@ -138,18 +161,17 @@ service cloud.firestore {
     // ── 1. Users (role-mapping) ──────────────────────────────────────────────
     match /users/{userId} {
       allow read: if isSelf(userId) || isHrAdmin();
-      allow create: if isConfigAdmin() || (
+      allow create, update: if isConfigAdmin() || (
         isRealUser() && isSelf(userId) && (
           request.resource.data.role == 'EMPLOYEE' ||
           mirrorsEmployeeRole() ||
           (
             exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
             get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.role == request.resource.data.role
-          )
+          ) ||
+          unchanged('role')
         )
       );
-      allow update: if isSuperAdmin() || isConfigAdmin() ||
-        (isRealUser() && isSelf(userId) && (unchanged('role') || mirrorsEmployeeRole()));
       allow delete: if isSuperAdmin();
     }
 
@@ -203,13 +225,13 @@ service cloud.firestore {
       allow read: if isRealUser();
       allow create: if isRealUser() && (
         isHrAdmin() || isSuperAdmin() || isProjectManager() ||
-        recordId.split('_')[0] == request.auth.uid ||
-        ownsAttendanceData(request.resource.data)
-      ) && validAttendanceShape();
+        ((recordId.split('_')[0] == request.auth.uid || ownsAttendanceData(request.resource.data)) && validAttendanceShape())
+      );
       allow update: if isRealUser() && (
         isHrAdmin() || isSuperAdmin() || isProjectManager() ||
         recordId.split('_')[0] == request.auth.uid ||
-        ownsAttendanceData(resource.data)
+        ownsAttendanceData(resource.data) ||
+        ownsAttendanceData(request.resource.data)
       );
       allow delete: if isSuperAdmin();
     }

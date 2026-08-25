@@ -17,7 +17,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType, firebaseConfig, cleanFirestorePayload, subscribeWithRecovery, signInAnonymously } from '../lib/firebase';
-import { Employee, EmployeeStatus, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod, BreakType } from '../types';
+import { Employee, EmployeeStatus, AttendanceRecord, AuditLog, CompanySettings, UserRole, AttendanceStatus, WorkZone, LeaveRequest, AttendanceMethod, BreakType, normalizeBreakType } from '../types';
 import {
   INITIAL_EMPLOYEES,
   generateInitialAttendance,
@@ -172,7 +172,7 @@ interface AuthContextType {
   checkOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   startBreak: (employeeId: string, breakType?: string, lat?: number, lon?: number) => Promise<{ success: boolean; message: string }>;
   endBreak: (employeeId: string, lat?: number, lon?: number) => Promise<{ success: boolean; message: string }>;
-  updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => void;
+  updateAttendanceRecord: (recordId: string, updates: Partial<AttendanceRecord>) => Promise<void>;
   applyAttendanceCorrection: (
     record: AttendanceRecord & { isSynthetic?: boolean },
     updates: Partial<AttendanceRecord>
@@ -1347,6 +1347,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // Keep the canonical doc ID ({uid}_{date}) when one of the dups has it,
               // so canonical-ID lookups elsewhere hit this exact state record.
               const isCanonicalId = (id: string) => id === `${identityKey}_${rec.date}`;
+              const canonicalDocId = `${identityKey}_${rec.date}`;
+
+              // BREAK FLAP ROOT FIX: the canonical doc ({uid}_{date}) is the ONLY
+              // write target for startBreak / endBreak / recordCheckOut. Its breaks
+              // array is always authoritative.
+              //
+              // The previous strategy (pick the array with more entries) caused the
+              // on/off flap: when updatedAt resolves to null in the latency-
+              // compensated snapshot (serverTimestamp() placeholder), the dedup
+              // ranked the stale duplicate as "richer" and its old, pre-break array
+              // survived the merge — making the active break disappear.  The moment
+              // Firestore committed and a real updatedAt arrived, the ranking
+              // flipped back, producing the visible toggle.
+              //
+              // Solution: canonical doc wins unconditionally for breaks. Only when
+              // NEITHER doc in this pair is canonical do we fall back to the larger
+              // array (maximum history).
+              const canonicalBreaks = (() => {
+                if (rec.id === canonicalDocId) return rec.breaks || [];
+                if (existing.id === canonicalDocId) return existing.breaks || [];
+                // No canonical in this pair — prefer more entries, then prefer
+                // the set that contains an open (in-progress) break.
+                const rBreaks = richer.breaks || [];
+                const pBreaks = poorer.breaks || [];
+                if (rBreaks.length !== pBreaks.length) return rBreaks.length > pBreaks.length ? rBreaks : pBreaks;
+                const rHasOpen = rBreaks.some((b: any) => !b.endAt && !(b as any).endTime);
+                const pHasOpen = pBreaks.some((b: any) => !b.endAt && !(b as any).endTime);
+                if (rHasOpen && !pHasOpen) return rBreaks;
+                if (pHasOpen && !rHasOpen) return pBreaks;
+                return rBreaks;
+              })();
+
               const merged: AttendanceRecord = {
                 ...poorer,
                 ...richer,
@@ -1354,7 +1386,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 checkInAt: richer.checkInAt || poorer.checkInAt,
                 checkOutAt: richer.checkOutAt || poorer.checkOutAt,
                 status: richer.status || poorer.status,
-                breaks: (richer.breaks && richer.breaks.length > 0 ? richer.breaks : poorer.breaks) || [],
+                breaks: canonicalBreaks,
                 workingMinutes: Math.max(existing.workingMinutes || 0, rec.workingMinutes || 0),
                 totalBreakMinutes: Math.max(existing.totalBreakMinutes || 0, rec.totalBreakMinutes || 0)
               };
@@ -2550,8 +2582,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // isApprovedWfhToday, so check-in, check-out and breaks cannot drift apart.
     const isApprovedWfh = isApprovedWfhToday(emp, todayStr);
 
+    const isSelfCheckIn = !!emp && !!activeEmployee && (
+      emp.id === activeEmployee.id ||
+      emp.employeeId === activeEmployee.employeeId ||
+      emp.uid === activeEmployee.uid
+    );
+    const isAdminCheckIn = !isSelfCheckIn && (
+      role === 'SUPER_ADMIN' || role === 'HR_ADMIN' ||
+      activeEmployee?.role === 'SUPER_ADMIN' || activeEmployee?.role === 'HR_ADMIN'
+    );
+
     let coords = (lat !== undefined && lon !== undefined) ? { lat, lon } : null;
-    if (!coords && !isApprovedWfh && settings.gpsRequired !== false) {
+    if (!coords && !isApprovedWfh && !isAdminCheckIn && settings.gpsRequired !== false) {
       coords = await getCurrentPositionOrNull();
     }
     const finalLat = coords?.lat ?? lat;
@@ -2562,12 +2604,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       officeLatitude: companyWorkZone.latitude,
       officeLongitude: companyWorkZone.longitude,
       allowedRadiusMeters: companyWorkZone.radiusMeters,
-      gpsRequired: settings.gpsRequired !== false
+      gpsRequired: !isAdminCheckIn && settings.gpsRequired !== false
     };
 
-    const evalResult = evaluateAttendanceScan(emp, existingRec, effectiveSettings, finalLat, finalLon, isApprovedWfh);
+    const evalResult = evaluateAttendanceScan(emp, existingRec, effectiveSettings, finalLat, finalLon, isApprovedWfh || isAdminCheckIn);
 
-    if (!evalResult.allowed && evalResult.action === 'CHECK_IN') {
+    if (!evalResult.allowed && evalResult.action === 'CHECK_IN' && !isAdminCheckIn) {
       return { success: false, message: evalResult.message };
     }
 
@@ -2874,11 +2916,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const startBreak = async (employeeId: string, breakType: BreakType, lat?: number, lon?: number) => {
+  const startBreak = async (employeeId: string, breakType: BreakType | string, lat?: number, lon?: number) => {
     // Breaks are office-only, same rule as check-in. Enforced BEFORE the transaction
     // so a rejected break never touches the attendance document.
     const locationBlock = await verifyBreakLocation(employeeId,'start', lat, lon);
     if (locationBlock) return { success: false, message: locationBlock };
+
+    const canonicalBreakType = (normalizeBreakType(breakType) || 'Meal Break') as BreakType;
 
     const emp = findEmployee(employeeId);
     // BUG 4 FIX: Same canonical UID as recordCheckIn/endBreak — single doc target.
@@ -2932,7 +2976,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return b;
         });
 
-        const newBreak = { type: breakType, startAt: nowISO, startTime: nowISO, endAt: null, durationMinutes: 0 };
+        const newBreak = { type: canonicalBreakType, startAt: nowISO, startTime: nowISO, endAt: null, durationMinutes: 0 };
         const updatedBreaks = [...sanitizedBreaks, newBreak];
         const totalBreakMins = calculateTotalBreakMinutes(updatedBreaks);
 
@@ -3107,21 +3151,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const updateAttendanceRecord = (recordId: string, updates: Partial<AttendanceRecord>) => {
+  const updateAttendanceRecord = async (recordId: string, updates: Partial<AttendanceRecord>): Promise<void> => {
     // Write directly to Firestore with serverTimestamp — real-time onSnapshot updates UI seamlessly
     const cleanUpdates = cleanFirestorePayload({ ...updates, updatedAt: serverTimestamp() });
-    // B26 FIX: only record the audit entry once the write is actually accepted. The
-    // audit log previously fired unconditionally alongside a fire-and-forget setDoc, so a
-    // permission-denied correction still left an ATTENDANCE_CORRECTION trail claiming a
-    // change that never persisted. (Under offline persistence the promise resolves on the
-    // local-cache write, which is the correct "accepted" signal.)
-    setDoc(doc(db, 'attendance', recordId), cleanUpdates, { merge: true })
-      .then(() => {
-        addAuditLog('ATTENDANCE_CORRECTION', `Record ${recordId}`, `Updated fields: ${Object.keys(updates).join(', ')}`);
-      })
-      .catch(err => {
-        handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
-      });
+    try {
+      await setDoc(doc(db, 'attendance', recordId), cleanUpdates, { merge: true });
+      addAuditLog('ATTENDANCE_CORRECTION', `Record ${recordId}`, `Updated fields: ${Object.keys(updates).join(', ')}`);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.UPDATE, `attendance/${recordId}`);
+      throw err;
+    }
   };
 
   /**

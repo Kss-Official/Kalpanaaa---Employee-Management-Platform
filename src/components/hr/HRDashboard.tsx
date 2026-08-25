@@ -178,8 +178,8 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
         const res = await endBreak(targetEmployee.id);
         setHrStatusMessage({ type: 'success', text: res.message || 'Break ended. Welcome back to work!' });
       } else {
-        const res = await startBreak(targetEmployee.id, 'Tea / Lunch Break');
-        setHrStatusMessage({ type: 'success', text: res.message || 'Tea / Lunch Break started.' });
+        const res = await startBreak(targetEmployee.id, 'Meal Break');
+        setHrStatusMessage({ type: 'success', text: res.message || 'Meal Break started.' });
       }
     } catch (err: any) {
       setHrStatusMessage({ type: 'error', text: err?.message || 'Break action failed.' });

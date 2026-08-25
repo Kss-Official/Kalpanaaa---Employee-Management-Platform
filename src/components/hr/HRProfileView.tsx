@@ -201,8 +201,8 @@ export const HRProfileView: React.FC = () => {
         const res = await endBreak(targetEmployee.id);
         toast.success(res.message || 'Break ended. Welcome back!');
       } else {
-        const res = await startBreak(targetEmployee.id, 'Tea / Lunch Break');
-        toast.success(res.message || 'Tea / Lunch Break started.');
+        const res = await startBreak(targetEmployee.id, 'Meal Break');
+        toast.success(res.message || 'Meal Break started.');
       }
     } catch (err: any) {
       toast.error(err?.message || 'Break action failed.');
