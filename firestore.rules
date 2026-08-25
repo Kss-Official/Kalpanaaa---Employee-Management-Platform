@@ -143,8 +143,9 @@ service cloud.firestore {
     }
     function validAuditShape() {
       return request.resource.data.keys().hasOnly([
-        'action','performedBy','performedByUid','targetEmployee','targetEmployeeUid',
-        'details','timestamp','role','ipAddress','userAgent','sessionId'
+        'id','actorId','actorName','actorRole','action','target','details','timestamp',
+        'performedBy','performedByUid','targetEmployee','targetEmployeeUid',
+        'role','ipAddress','userAgent','sessionId'
       ]) &&
       request.resource.data.get('action','') is string &&
       request.resource.data.get('action','').size() <= 80 &&
@@ -175,7 +176,7 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // ── 2. Employees Directory (PII + biometrics) ────────────────────────────
+    // ── 2. Employees Directory (PII + biometrics) ───────────────────────────
     match /employees/{employeeId} {
       allow read: if isRealUser();
       allow create: if isConfigAdmin() || (
