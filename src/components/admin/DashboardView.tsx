@@ -61,17 +61,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   const { employees, attendance, settings, activeEmployee, auditLogs, companyWideWfhDates, addAuditLog, leaveRequests, updateAttendanceRecord } = useAuth();
   const { triggerHaptic } = useHaptic();
 
-  // Override: admin manually removes WFH flag from an attendance record
+  // Track which record IDs are currently being overridden (to show loading state)
+  const [wfhOverrideLoading, setWfhOverrideLoading] = React.useState<Record<string, boolean>>({});
+  const [wfhOverrideSuccess, setWfhOverrideSuccess] = React.useState<Record<string, boolean>>({});
+
+  // Override: admin manually removes WFH flag from an attendance record via the proper updateAttendanceRecord path
   const removeWfhOverride = async (rec: AttendanceRecord, emp: Employee, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!rec?.id) return;
+    if (!rec?.id) {
+      alert('Cannot override: attendance record has no ID. Please refresh the page.');
+      return;
+    }
+    setWfhOverrideLoading(prev => ({ ...prev, [rec.id]: true }));
     try {
-      let realStatus: string = 'Present';
+      // Calculate real status from check-in timestamp in IST
+      let realStatus = 'Present';
       if (rec.checkInAt) {
         try {
           const iso = typeof rec.checkInAt === 'string'
             ? rec.checkInAt
-            : (rec.checkInAt as any)?.toDate?.()?.toISOString?.() || new Date((rec.checkInAt as any)?.seconds * 1000).toISOString();
+            : (rec.checkInAt as any)?.toDate?.()?.toISOString?.()
+              || new Date((rec.checkInAt as any)?.seconds * 1000).toISOString();
           const d = new Date(iso);
           const istMins = (d.getUTCHours() * 60 + d.getUTCMinutes() + 330) % (24 * 60);
           const h = Math.floor(istMins / 60);
@@ -79,16 +89,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           realStatus = (h > 10 || (h === 10 && m > 15)) ? 'Late' : 'Present';
         } catch { realStatus = 'Present'; }
       }
-      await setDoc(doc(db, 'attendance', rec.id), {
+      // Use the auth-aware updateAttendanceRecord — this goes through Firestore rules correctly
+      await updateAttendanceRecord(rec.id, {
         isWfh: false,
-        status: realStatus,
-        updatedAt: serverTimestamp(),
+        status: realStatus as any,
         notes: ((rec.notes || '') + ' [Admin override: WFH removed]').trim()
-      }, { merge: true });
-      addAuditLog('ADMIN_WFH_OVERRIDE', emp.employeeId, `Removed WFH flag for ${emp.fullName} on ${rec.date}. Status set to ${realStatus}`);
+      });
+      addAuditLog('ADMIN_WFH_OVERRIDE', emp.employeeId,
+        `Admin removed WFH for ${emp.fullName} on ${rec.date}. Status corrected to ${realStatus}.`);
       triggerHaptic('success');
-    } catch (err) {
+      setWfhOverrideSuccess(prev => ({ ...prev, [rec.id]: true }));
+      setTimeout(() => setWfhOverrideSuccess(prev => ({ ...prev, [rec.id]: false })), 3000);
+    } catch (err: any) {
       console.error('[WFH Override] Failed:', err);
+      alert(`Failed to remove WFH: ${err?.message || 'Unknown error'}. Check Firestore permissions.`);
+    } finally {
+      setWfhOverrideLoading(prev => ({ ...prev, [rec.id]: false }));
     }
   };
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month'>('today');
@@ -895,20 +911,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                                 {item.status === 'Work From Home' && item.record?.checkInAt && (
                                   <button
                                     onClick={(e) => removeWfhOverride(item.record!, item.employee, e)}
+                                    disabled={wfhOverrideLoading[item.record?.id || '']}
                                     title="Remove WFH — mark as Present/Late based on check-in time"
-                                    className="ml-1 px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 font-bold text-[10px] rounded-lg inline-flex items-center gap-1 transition-all"
+                                    className="ml-1 px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/25 disabled:opacity-50 text-rose-300 border border-rose-500/30 font-bold text-[10px] rounded-lg inline-flex items-center gap-1 transition-all"
                                   >
-                                    <X className="w-2.5 h-2.5" /> Remove WFH
+                                    {wfhOverrideLoading[item.record?.id || ''] ? (
+                                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                    ) : wfhOverrideSuccess[item.record?.id || ''] ? (
+                                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                                    ) : (
+                                      <X className="w-2.5 h-2.5" />
+                                    )}
+                                    {wfhOverrideSuccess[item.record?.id || ''] ? 'Fixed!' : 'Remove WFH'}
                                   </button>
                                 )}
                                 {/* Fix DB button — record has isWfh=true but display already shows correct status */}
                                 {item.record?.isWfh && item.status !== 'Work From Home' && (
                                   <button
                                     onClick={(e) => removeWfhOverride(item.record!, item.employee, e)}
+                                    disabled={wfhOverrideLoading[item.record?.id || '']}
                                     title="Fix WFH flag in database"
-                                    className="ml-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[10px] rounded-lg inline-flex items-center gap-1 transition-all"
+                                    className="ml-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/25 disabled:opacity-50 text-amber-300 border border-amber-500/30 font-bold text-[10px] rounded-lg inline-flex items-center gap-1 transition-all"
                                   >
-                                    <ShieldCheck className="w-2.5 h-2.5" /> Fix DB
+                                    {wfhOverrideLoading[item.record?.id || ''] ? (
+                                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                    ) : (
+                                      <ShieldCheck className="w-2.5 h-2.5" />
+                                    )}
+                                    Fix DB
                                   </button>
                                 )}
                               </div>
