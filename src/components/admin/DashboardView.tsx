@@ -49,7 +49,7 @@ import { db } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete, safeGetTimestampMillis, isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete, safeGetTimestampMillis, isExecutiveOrLeadership, isLateCheckIn } from '../../lib/attendanceEngine';
 import { Employee, AttendanceRecord } from '../../types';
 
 interface DashboardViewProps {
@@ -104,34 +104,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
 
       // Check if employee has approved leave or WFH today
       const leaveReq = leaveRequests.find(l => 
-        (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeName === emp.fullName) &&
+        (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeUid === emp.uid || l.employeeUid === emp.id ||
+         (l.employeeName && emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
         l.status === 'Approved' &&
-        todayStr >= l.startDate && 
-        todayStr <= l.endDate
+        todayStr >= (l.startDate || (l as any).fromDate) && 
+        todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
 
       const isCompanyWfh = (companyWideWfhDates || []).includes(todayStr) || (settings?.companyWideWfhDates || []).includes(todayStr);
+      const isWfh = isCompanyWfh || (!!leaveReq && leaveReq.type === 'WFH') || rec?.isWfh === true || rec?.status === 'Work From Home';
 
       // Active break detection
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
       const isComplete = isShiftComplete(rec);
       const isCheckedIn = !!rec?.checkInAt && !isComplete;
+      const isLate = rec?.status === 'Late' || (!!rec?.checkInAt && isLateCheckIn(rec.checkInAt));
 
       // Determine accurate real-time status:
-      // 'On Break' (live), 'Present', 'Late', 'Work From Home', 'On Leave', 'LOP', 'Absent'
-      let computedStatus: 'Present' | 'Late' | 'Work From Home' | 'On Leave' | 'LOP' | 'On Break' | 'Absent' = 'Absent';
+      // Differentiate Work From Home clearly from in-office Present and Absent
+      let computedStatus: 'Present' | 'Work From Home' | 'On Leave' | 'LOP' | 'On Break' | 'Absent' = 'Absent';
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
+      } else if (isWfh) {
+        computedStatus = 'Work From Home';
       } else if (rec) {
-        if (rec.status === 'Late') computedStatus = 'Late';
-        else if (rec.isWfh || rec.status === 'Work From Home' || isCompanyWfh) computedStatus = 'Work From Home';
-        else if (rec.status === 'Present' || rec.checkInAt) computedStatus = 'Present';
-        else if (rec.status === 'On Leave' || rec.status === 'Half Day') computedStatus = 'On Leave';
-        else if (rec.status === 'Absent') computedStatus = 'Absent';
+        if (rec.status === 'Present' || rec.status === 'Late' || rec.checkInAt) {
+          computedStatus = 'Present';
+        } else if (rec.status === 'On Leave' || rec.status === 'Half Day') {
+          computedStatus = 'On Leave';
+        } else if (rec.status === 'Absent') {
+          computedStatus = 'Absent';
+        }
       } else if (leaveReq) {
-        if (leaveReq.type === 'WFH') computedStatus = 'Work From Home';
-        else computedStatus = 'On Leave';
+        computedStatus = 'On Leave';
       } else if (emp.status === 'On Leave') {
         computedStatus = 'On Leave';
       }
@@ -147,6 +153,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         status: computedStatus,
         isCheckedIn,
         activeBreak,
+        isLate,
+        isWfh,
         isShiftComplete: isComplete,
         leaveReq
       };
@@ -154,9 +162,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   }, [activeEmployees, todayRecords, leaveRequests, companyWideWfhDates, settings, todayStr]);
 
   // Counts based on the daily roster
-  const presentTodayCount = dailyRoster.filter(r => r.status === 'Present' || r.status === 'Late' || r.status === 'On Break').length;
+  const presentTodayCount = dailyRoster.filter(r => r.status === 'Present' || r.status === 'On Break').length;
   const onBreakCount = dailyRoster.filter(r => r.status === 'On Break').length;
-  const lateTodayCount = dailyRoster.filter(r => r.status === 'Late').length;
+  const lateTodayCount = dailyRoster.filter(r => r.isLate).length;
   const wfhTodayCount = dailyRoster.filter(r => r.status === 'Work From Home').length;
   const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
   const lopCount = dailyRoster.filter(r => r.status === 'LOP').length;
@@ -175,7 +183,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       if (rosterFilter === 'ALL') return true;
       if (rosterFilter === 'Present') return item.status === 'Present' || item.status === 'On Break';
       if (rosterFilter === 'On Break') return item.status === 'On Break';
-      if (rosterFilter === 'Late') return item.status === 'Late';
+      if (rosterFilter === 'Late') return item.isLate;
       if (rosterFilter === 'Work From Home') return item.status === 'Work From Home';
       if (rosterFilter === 'On Leave') return item.status === 'On Leave';
       if (rosterFilter === 'LOP') return item.status === 'LOP';
@@ -645,6 +653,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           ) : (
             recentCheckIns.map((rec, i) => {
               const emp = employees.find(e => e.employeeId === rec.employeeCode || e.id === rec.employeeId);
+              const isWfhRec = rec.isWfh === true || rec.status === 'Work From Home';
               return (
                 <div 
                   key={rec.id || i}
@@ -658,11 +667,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                         alt={rec.employeeName}
                         className="w-10 h-10 rounded-xl object-cover border border-slate-700/60 group-hover:border-blue-500/60 transition-all"
                       />
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 absolute -bottom-0.5 -right-0.5 border-2 border-slate-900" />
+                      <span className={`w-2.5 h-2.5 rounded-full ${isWfhRec ? 'bg-sky-400' : 'bg-emerald-500'} absolute -bottom-0.5 -right-0.5 border-2 border-slate-900`} />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate group-hover:text-blue-300 transition-colors">{rec.employeeName}</div>
-                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{rec.employeeCode} • {rec.department}</div>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-xs font-bold text-white truncate group-hover:text-blue-300 transition-colors">{rec.employeeName}</span>
+                        {isWfhRec && (
+                          <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-0.5">
+                            <Home className="w-2.5 h-2.5" /> WFH
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">{rec.employeeCode} • {rec.department}</div>
                     </div>
                   </div>
 
@@ -825,6 +841,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                               <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold border ${getStatusBadgeClass(item.status)}`}>
                                 {item.status === 'On Break' && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
                                 {item.status === 'Present' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                                {item.status === 'Work From Home' && <Home className="w-3 h-3 text-sky-400" />}
+                                {item.status === 'On Leave' && <Palmtree className="w-3 h-3 text-purple-400" />}
+                                {item.status === 'Absent' && <UserX className="w-3 h-3 text-rose-400" />}
                                 <span>{item.status}</span>
                                 {item.activeBreak && (
                                   <span className="font-mono text-amber-300 ml-1">({item.activeBreak.type})</span>
@@ -835,11 +854,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                             {/* Check In / Out */}
                             <td className="py-3 px-4 font-mono text-xs">
                               {rec?.checkInAt ? (
-                                <div className="space-y-0.5">
-                                  <div className="text-emerald-400 font-bold">In: {toISTTimeString(rec.checkInAt)}</div>
+                                <div className="space-y-1">
+                                  <div className={`font-bold flex items-center gap-1.5 ${item.isLate ? 'text-orange-500 font-black' : item.isWfh ? 'text-sky-400' : 'text-emerald-400'}`}>
+                                    <span className={`w-2 h-2 rounded-full ${item.isLate ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.9)] animate-pulse' : item.isWfh ? 'bg-sky-400' : 'bg-emerald-400'}`} />
+                                    <span className={item.isLate ? 'text-orange-500 font-black tracking-wide' : ''}>In: {toISTTimeString(rec.checkInAt)}</span>
+                                    {item.isLate && (
+                                      <span className="text-[9px] font-sans font-bold text-orange-400 bg-orange-500/15 border border-orange-500/30 px-1 py-0.2 rounded ml-1">
+                                        LATE
+                                      </span>
+                                    )}
+                                    {item.isWfh && <span className="text-[9px] text-sky-300 font-sans font-extrabold bg-sky-500/20 px-1.5 py-0.2 rounded border border-sky-500/30">WFH</span>}
+                                  </div>
                                   <div className="text-slate-400 text-[10px]">
                                     Out: {rec.checkOutAt ? toISTTimeString(rec.checkOutAt) : item.isCheckedIn ? 'Active Now' : '--:--'}
                                   </div>
+                                </div>
+                              ) : item.status === 'Work From Home' ? (
+                                <div className="space-y-0.5">
+                                  <span className="text-sky-400 font-bold flex items-center gap-1">
+                                    <Home className="w-3 h-3 text-sky-400" />
+                                    <span>WFH (Remote Duty)</span>
+                                  </span>
+                                  <div className="text-[10px] text-slate-500 font-sans">Pending Check-In</div>
                                 </div>
                               ) : (
                                 <span className="text-slate-600 font-bold">Not Checked In</span>

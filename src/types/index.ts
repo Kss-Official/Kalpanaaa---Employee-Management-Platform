@@ -133,7 +133,7 @@ export interface Employee {
   executiveRole?: 'CEO' | 'CTO';
   workLocation: string;
   status: EmployeeStatus;
-  shift: string; // e.g., 'Day Shift (09:00 - 18:00)'
+  shift: string; // e.g., 'Day Shift (10:00 AM – 7:00 PM)'
 
   // Personal & Profile
   permanentAddress: string;

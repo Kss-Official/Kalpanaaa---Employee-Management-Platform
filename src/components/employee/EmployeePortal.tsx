@@ -30,6 +30,7 @@ import {
   Calendar,
   Globe,
   ShieldCheck,
+  Palmtree,
   Zap,
   Save,
   RotateCcw,
@@ -54,7 +55,8 @@ import {
   GraduationCap,
   Filter,
   MessageSquare,
-  Star
+  Star,
+  PieChart as PieChartIcon
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
@@ -84,7 +86,9 @@ import {
   getDayName,
   getHolidayInfo,
   SHIFT_LABEL,
-  SHIFT_TOTAL_MINUTES
+  SHIFT_TOTAL_MINUTES,
+  formatShiftTiming,
+  validateCheckInEligibility
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
@@ -94,6 +98,7 @@ import { EmployeePayslips } from './EmployeePayslips';
 import { EmployeeFeedbackView } from './EmployeeFeedbackView';
 import { ConsentModal } from '../shared/ConsentModal';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
+import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { getEmployeeDescriptor } from '../../lib/faceDescriptorStore';
 import { BreakEntry, BreakType, normalizeBreakType } from '../../types';
 
@@ -198,7 +203,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [bio, setBio] = useState(activeEmployee?.bio || 'Dedicated software & operations engineering professional at Kalpanaaa HRMS.');
   const [skills, setSkills] = useState<string[]>(activeEmployee?.skills || ['React', 'TypeScript', 'HR Management', 'Project Coordination']);
   const [newSkillInput, setNewSkillInput] = useState('');
-  const [preferredShift, setPreferredShift] = useState(activeEmployee?.preferredShift || activeEmployee?.shift || 'General Shift (10:00 - 19:00)');
+  const [preferredShift, setPreferredShift] = useState(activeEmployee?.preferredShift || activeEmployee?.shift || 'Day Shift (10:00 AM – 7:00 PM)');
   const [linkedinUrl, setLinkedinUrl] = useState(activeEmployee?.linkedinUrl || 'https://linkedin.com/in/employee');
 
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -207,6 +212,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Late' | 'Absent' | 'Leave'>('All');
+  const [isMonthlyAnalyticsOpen, setIsMonthlyAnalyticsOpen] = useState(false);
 
   const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
     (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
@@ -347,6 +353,15 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // now come from the same source of truth.
   const liveWorkSec = liveShift.workSecs;
   const breakElapsedSec = liveShift.activeBreakSecs;
+
+  // Root-Level Check-In Eligibility (Strictly blocks check-in on leaves, holidays, Sundays)
+  const checkInEligibility = React.useMemo(() => {
+    if (!activeEmployee) return { allowed: false, reason: 'NONE' as const, message: 'No active employee' };
+    return validateCheckInEligibility(activeEmployee, todayStr, {
+      leaveRequests,
+      settings
+    });
+  }, [activeEmployee, todayStr, leaveRequests, settings]);
 
   const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list' | 'calendar'>('calendar');
   const [editingProfileField, setEditingProfileField] = useState<string | null>(null);
@@ -634,6 +649,16 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       isFaceModalOpen ||
       isEnrollFaceModalOpen
     ) return;
+
+    // Strict Root Rule Check: Approved Leaves, Official Holidays & Sunday Weekly Offs
+    if (!checkInEligibility.allowed) {
+      triggerHaptic('error');
+      setActionFeedback({
+        success: false,
+        message: checkInEligibility.message
+      });
+      return;
+    }
 
     // Strict GPS Geofence Pre-Check on normal office days
     const isGpsEnforced = settings.gpsRequired !== false;
@@ -1121,30 +1146,77 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       </span>
                     </div>
                   ) : !todayRecord?.checkInAt ? (
-                    <button 
-                      onClick={handleSelfCheckIn} 
-                      disabled={isCheckingIn || isCheckingOut}
-                      className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] transition-all cursor-pointer outline-none ${
-                        isCheckingIn 
-                          ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
-                          : 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-glow-blue)]'
-                      } ${!isCheckingIn && animations.tap}`}
-                    >
-                      <div className="absolute inset-1 rounded-full border border-[var(--border-subtle)] opacity-50 pointer-events-none" />
-                      
-                      {isCheckingIn ? (
-                        <>
-                          <Loader2 className="w-10 h-10 mb-2 animate-spin text-[var(--accent-blue)]" />
-                          <span className="font-semibold text-sm">Verifying...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Fingerprint className="w-12 h-12 mb-3 text-[var(--accent-blue)]" strokeWidth={1.5} />
-                          <span className="font-bold text-sm tracking-wide">Tap to Check In</span>
-                          <span className="text-[10px] text-[var(--text-tertiary)] mt-1">Ready</span>
-                        </>
-                      )}
-                    </button>
+                    !checkInEligibility.allowed ? (
+                      <div className="flex flex-col items-center justify-center gap-3 text-center">
+                        <div className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] shadow-xl text-center p-4 ${
+                          checkInEligibility.reason === 'ON_LEAVE'
+                            ? 'border-purple-500/60 bg-gradient-to-b from-purple-950/40 to-slate-900 text-purple-300 shadow-purple-950/50'
+                            : checkInEligibility.reason === 'OFFICIAL_HOLIDAY'
+                              ? 'border-amber-500/60 bg-gradient-to-b from-amber-950/40 to-slate-900 text-amber-300 shadow-amber-950/50'
+                              : 'border-blue-500/60 bg-gradient-to-b from-blue-950/40 to-slate-900 text-blue-300 shadow-blue-950/50'
+                        }`}>
+                          {checkInEligibility.reason === 'ON_LEAVE' ? (
+                            <>
+                              <Palmtree className="w-10 h-10 mb-1.5 text-purple-400" />
+                              <span className="font-extrabold text-sm tracking-wide text-white">On Approved Leave</span>
+                              <span className="text-[10px] font-bold text-purple-300 mt-1 bg-purple-500/20 px-2.5 py-0.5 rounded-full border border-purple-500/30 truncate max-w-[150px]">
+                                {checkInEligibility.leaveType || 'Paid Leave'}
+                              </span>
+                            </>
+                          ) : checkInEligibility.reason === 'OFFICIAL_HOLIDAY' ? (
+                            <>
+                              <Calendar className="w-10 h-10 mb-1.5 text-amber-400" />
+                              <span className="font-extrabold text-sm tracking-wide text-white">Company Holiday</span>
+                              <span className="text-[10px] font-bold text-amber-300 mt-1 bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-500/30 truncate max-w-[150px]">
+                                {checkInEligibility.holidayName || 'Official Holiday'}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Calendar className="w-10 h-10 mb-1.5 text-blue-400" />
+                              <span className="font-extrabold text-sm tracking-wide text-white">Weekly Off</span>
+                              <span className="text-[10px] font-bold text-blue-300 mt-1 bg-blue-500/20 px-2.5 py-0.5 rounded-full border border-blue-500/30">
+                                Sunday Off
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className={`text-xs font-semibold px-4 py-2 rounded-xl border max-w-[320px] ${
+                          checkInEligibility.reason === 'ON_LEAVE'
+                            ? 'bg-purple-500/10 border-purple-500/30 text-purple-300'
+                            : checkInEligibility.reason === 'OFFICIAL_HOLIDAY'
+                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                              : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                        }`}>
+                          {checkInEligibility.message}
+                        </div>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={handleSelfCheckIn} 
+                        disabled={isCheckingIn || isCheckingOut}
+                        className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] transition-all cursor-pointer outline-none ${
+                          isCheckingIn 
+                            ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
+                            : 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-glow-blue)]'
+                        } ${!isCheckingIn && animations.tap}`}
+                      >
+                        <div className="absolute inset-1 rounded-full border border-[var(--border-subtle)] opacity-50 pointer-events-none" />
+                        
+                        {isCheckingIn ? (
+                          <>
+                            <Loader2 className="w-10 h-10 mb-2 animate-spin text-[var(--accent-blue)]" />
+                            <span className="font-semibold text-sm">Verifying...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Fingerprint className="w-12 h-12 mb-3 text-[var(--accent-blue)]" strokeWidth={1.5} />
+                            <span className="font-bold text-sm tracking-wide">Tap to Check In</span>
+                            <span className="text-[10px] text-[var(--text-tertiary)] mt-1">Ready</span>
+                          </>
+                        )}
+                      </button>
+                    )
                   ) : !shiftComplete ? (
                     <div className="flex flex-col items-center justify-center gap-4 w-full">
                       <div className="flex items-center justify-center gap-4 sm:gap-6 flex-wrap">
@@ -1875,12 +1947,26 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       {/* 2. ATTENDANCE HISTORY TAB */}
       {activeTab === 'emp_attendance' && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 min-h-[500px] flex flex-col space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-blue-400" />
-              Attendance History
-            </h2>
-            <span className="text-xs text-slate-400 font-mono">{empHistory.length} Records</span>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-blue-400" />
+                Attendance History &amp; Monthly Analytics
+              </h2>
+              <span className="text-xs text-slate-400 font-mono">({empHistory.length} Records)</span>
+            </div>
+
+            <button
+              onClick={() => {
+                triggerHaptic();
+                setIsMonthlyAnalyticsOpen(true);
+              }}
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-black text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-purple-950/50 active:scale-95"
+            >
+              <Calendar className="w-4 h-4 text-purple-200" />
+              <PieChartIcon className="w-4 h-4 text-blue-200" />
+              <span>Full Monthly Work Analytics &amp; Day Pie</span>
+            </button>
           </div>
 
           {/* ── Item #6: month navigator + month-wise present list summary ────── */}
@@ -2490,6 +2576,19 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 <div className="flex flex-wrap items-center gap-3 pt-1">
                   <button
                     type="button"
+                    onClick={() => {
+                      triggerHaptic();
+                      setIsMonthlyAnalyticsOpen(true);
+                    }}
+                    className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-purple-900/40 active:scale-95"
+                  >
+                    <Calendar className="w-4 h-4 text-purple-200" />
+                    <PieChartIcon className="w-4 h-4 text-blue-200" />
+                    <span>View Work Analytics &amp; Monthly Calendar</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setIsEnrollFaceModalOpen(true)}
                     className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-blue-900/40"
                   >
@@ -2547,7 +2646,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
                   <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800/80 sm:col-span-2 md:col-span-3">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Assigned Shift Schedule</span>
-                    <span className="text-xs font-bold text-slate-200">{preferredShift || activeEmployee.shift || 'General Shift (09:00 - 18:00)'}</span>
+                    <span className="text-xs font-bold text-slate-200">{formatShiftTiming(preferredShift || activeEmployee.shift)}</span>
                   </div>
                 </div>
               </div>
@@ -3116,6 +3215,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         cloudDescriptor={activeEmployee.faceDescriptor}
         isEnrollmentMode={true}
       />
+
+      {/* Employee Monthly Attendance & Work Analytics Modal */}
+      {isMonthlyAnalyticsOpen && activeEmployee && (
+        <EmployeeMonthlyAttendanceModal
+          employee={activeEmployee}
+          onClose={() => setIsMonthlyAnalyticsOpen(false)}
+        />
+      )}
 
     </div>
   );

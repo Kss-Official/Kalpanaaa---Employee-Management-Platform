@@ -16,12 +16,14 @@ import {
   RotateCcw,
   AlertTriangle,
   ShieldAlert,
-  LogOut
+  LogOut,
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { isExecutiveOrLeadership, getWorkDate } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeEmployeeLeaveBalance } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface AttendanceManagementProps {
@@ -75,30 +77,42 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
     return map;
   }, [attendance, todayStr]);
 
-  // Compute Leave Balance with rule: 1 leave credited every month on 1st date
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  // Compute Leave Balance with strict rule: Zero base, 1 leave credited every month on 1st date
   const computeLeaveBalance = (emp: Employee) => {
-    // Determine joining date
-    const joinDate = emp.joiningDate ? new Date(emp.joiningDate) : new Date(2026, 0, 1);
-    const now = new Date();
+    return computeEmployeeLeaveBalance(emp, leaveRequests);
+  };
 
-    // Months since joining
-    let monthsElapsed = (now.getFullYear() - joinDate.getFullYear()) * 12 + (now.getMonth() - joinDate.getMonth()) + 1;
-    monthsElapsed = Math.max(1, Math.min(24, monthsElapsed)); // Minimum 1 leave credited
-
-    // Total leaves taken by this employee
-    const approvedLeavesTaken = leaveRequests.filter(l => 
-      (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeName === emp.fullName) &&
-      l.status === 'Approved' && 
-      l.type === 'Leave'
-    ).length;
-
-    // Remaining balance
-    const balance = Math.max(0, monthsElapsed - approvedLeavesTaken);
-    return {
-      credited: monthsElapsed,
-      taken: approvedLeavesTaken,
-      balance
-    };
+  const handleSyncAllEmployeeShifts = async () => {
+    if (!canEditShifts) return;
+    triggerHaptic();
+    if (!window.confirm('Update all active employees to standard shift (10:00 AM – 7:00 PM) and verify zero-base leave credit policy?')) return;
+    
+    setIsSyncingAll(true);
+    setSyncFeedback(null);
+    try {
+      let updatedCount = 0;
+      const standardShift = 'Day Shift (10:00 AM – 7:00 PM)';
+      for (const emp of employees) {
+        if (emp.shift !== standardShift || emp.preferredShift !== standardShift) {
+          await updateEmployee(emp.id, {
+            shift: standardShift,
+            preferredShift: standardShift
+          });
+          updatedCount++;
+        }
+      }
+      addAuditLog?.('EMPLOYEE_UPDATED', 'Bulk Shift & Policy Sync', `Updated ${updatedCount} employees to 10:00 AM – 7:00 PM shift and verified zero-base leave credit rule.`);
+      setSyncFeedback(`Successfully updated ${updatedCount} employees to 10:00 AM – 7:00 PM!`);
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } catch (err: any) {
+      console.error('Error syncing employee shifts:', err);
+      setSyncFeedback('Failed to sync shifts: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsSyncingAll(false);
+    }
   };
 
   // Filtered Employees for the Attendance Ledger (excluding Executive Leadership & Founders)
@@ -123,7 +137,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
   const handleOpenShiftEdit = (emp: Employee) => {
     triggerHaptic();
     setEditingShiftEmployee(emp);
-    setShiftTimingValue(emp.shift || emp.preferredShift || 'General Shift (09:00 - 18:00)');
+    setShiftTimingValue(formatShiftTiming(emp.shift || emp.preferredShift));
   };
 
   const handleSaveShift = async () => {
@@ -217,18 +231,38 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
           </div>
           <h1 className="text-xl sm:text-3xl font-black text-white tracking-tight mt-1">Attendance Ledger Master</h1>
           <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-            Manage assigned shift schedules, monthly leave balance accrual (1 leave/month), and shift logs for all personnel ({filteredEmployees.length} records).
+            Manage assigned shift schedules (10:00 AM – 7:00 PM), monthly leave balance accrual (Zero-base, 1 leave credited on 1st of month), and shift logs for all personnel ({filteredEmployees.length} records).
           </p>
         </div>
 
-        <button
-          onClick={() => generateAttendanceReportPdf(attendance, settings, 'Attendance Master Roster Statement')}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40 w-full sm:w-auto shrink-0"
-        >
-          <FileDown className="w-4 h-4" />
-          <span>Export Ledger Statement</span>
-        </button>
+        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          {canEditShifts && (
+            <button
+              onClick={handleSyncAllEmployeeShifts}
+              disabled={isSyncingAll}
+              className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md w-full sm:w-auto shrink-0 disabled:opacity-50"
+              title="Update all employees to 10:00 AM – 7:00 PM shift"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>{isSyncingAll ? 'Updating All...' : 'Sync All Shifts (10am–7pm)'}</span>
+            </button>
+          )}
+          <button
+            onClick={() => generateAttendanceReportPdf(attendance, settings, 'Attendance Master Roster Statement')}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40 w-full sm:w-auto shrink-0"
+          >
+            <FileDown className="w-4 h-4" />
+            <span>Export Ledger Statement</span>
+          </button>
+        </div>
       </div>
+
+      {syncFeedback && (
+        <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl px-4 py-3 text-xs font-bold">
+          <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+          <span>{syncFeedback}</span>
+        </div>
+      )}
 
       {/* ── Admin Force Undo Checkout Info Banner (only visible to SA/HR) ── */}
       {canForceUndoCheckout && (
@@ -299,7 +333,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
               ) : (
                 filteredEmployees.map(emp => {
                   const leaveInfo = computeLeaveBalance(emp);
-                  const shiftDisplay = emp.shift || emp.preferredShift || 'General Shift (09:00 - 18:00)';
+                  const shiftDisplay = formatShiftTiming(emp.shift || emp.preferredShift);
 
                   // Today's attendance record for this employee
                   const todayRec =
@@ -351,7 +385,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                         <div className="flex items-center gap-2">
                           <div className="bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-slate-200 font-semibold flex items-center gap-1.5">
                             <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            <span className="truncate max-w-[200px]">{shiftDisplay}</span>
+                            <span className="truncate max-w-[200px] text-slate-100 font-bold">{shiftDisplay}</span>
                           </div>
                           
                           {canEditShifts && (
@@ -372,7 +406,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                           <Palmtree className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                           <div>
                             <span className="text-xs font-black text-purple-300 font-mono">{leaveInfo.balance} Leaves Left</span>
-                            <span className="text-[9px] text-slate-500 block font-medium">1 credited/mo (1st date)</span>
+                            <span className="text-[9px] text-slate-400 block font-medium">1 credited on 1st • 0 base</span>
                           </div>
                         </div>
                       </td>
@@ -433,11 +467,11 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
               
               <div className="grid grid-cols-1 gap-2">
                 {[
-                  'General Shift (09:00 - 18:00)',
-                  'Morning Shift (07:00 - 16:00)',
-                  'Evening Shift (14:00 - 23:00)',
-                  'Night Shift (22:00 - 07:00)',
-                  'Flexible Shift (09:30 - 18:30)'
+                  'Day Shift (10:00 AM – 7:00 PM)',
+                  'Morning Shift (07:00 AM – 04:00 PM)',
+                  'Evening Shift (02:00 PM – 11:00 PM)',
+                  'Night Shift (10:00 PM – 07:00 AM)',
+                  'Flexible Shift (10:00 AM – 07:00 PM)'
                 ].map(preset => (
                   <button
                     key={preset}
@@ -461,7 +495,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                   type="text"
                   value={shiftTimingValue}
                   onChange={e => setShiftTimingValue(e.target.value)}
-                  placeholder="e.g. Custom Shift (10:00 - 19:00)"
+                  placeholder="e.g. Day Shift (10:00 AM – 7:00 PM)"
                   className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white font-medium focus:outline-hidden focus:border-blue-500"
                 />
               </div>

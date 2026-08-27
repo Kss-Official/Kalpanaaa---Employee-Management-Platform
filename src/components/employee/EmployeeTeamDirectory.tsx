@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Mail, Phone, Building2, Search, Users, ChevronDown, Star, Crown, Shield } from 'lucide-react';
+import { Mail, Phone, Building2, Search, Users, ChevronDown, Star, Crown, Shield, Calendar } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
+import { Employee } from '../../types';
 
 /**
  * Whole-word title test. `includes()` cannot be used against `designation`:
@@ -26,6 +28,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDept, setSelectedDept] = useState<string>('ALL');
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [selectedMonthlyEmp, setSelectedMonthlyEmp] = useState<Employee | null>(null);
 
   // Extract unique departments
   const rawDepts = Array.from(new Set(employees.map(e => e.department).filter(Boolean)));
@@ -232,6 +235,19 @@ export const EmployeeTeamDirectory: React.FC = () => {
                       </a>
                     </div>
                   </div>
+
+                  <div className="pt-2 border-t border-slate-800/60">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedMonthlyEmp(member);
+                      }}
+                      className="w-full py-1.5 px-2.5 bg-gradient-to-r from-purple-600/15 to-blue-600/15 hover:from-purple-600/30 hover:to-blue-600/30 text-purple-300 hover:text-purple-200 border border-purple-500/30 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
+                    >
+                      <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Work Analytics &amp; Calendar</span>
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             );
@@ -320,6 +336,14 @@ export const EmployeeTeamDirectory: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Employee Monthly Attendance & Work Analytics Modal */}
+      {selectedMonthlyEmp && (
+        <EmployeeMonthlyAttendanceModal
+          employee={selectedMonthlyEmp}
+          onClose={() => setSelectedMonthlyEmp(null)}
+        />
+      )}
 
     </div>
   );

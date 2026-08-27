@@ -28,6 +28,8 @@ import {
 import { initializeApp } from 'firebase/app';
 import { 
   evaluateAttendanceScan, 
+  validateCheckInEligibility,
+  OFFICIAL_HOLIDAY_DATES_2026,
   calculateGpsDistanceMeters,
   getWorkDate,
   getEmployeeWorkDate,
@@ -1165,7 +1167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 postalCode: '560001',
                 emergencyContact: '+91 98765 00000',
                 emergencyRelationship: 'Management',
-                shift: 'General Shift (09:00 - 18:00)',
+                shift: 'Day Shift (10:00 AM – 7:00 PM)',
                 workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
                 reportingManager: 'Board of Directors',
                 qrToken: 'QR-TOKEN-KSS2407003-PM',
@@ -2067,7 +2069,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             postalCode: '560102',
             emergencyContact: '',
             emergencyRelationship: '',
-            shift: 'General Shift (09:00 - 18:00)',
+            shift: 'Day Shift (10:00 AM – 7:00 PM)',
             workLocation: 'Kalpanaaa Main Office HQ, Bengaluru',
             reportingManager: 'D. Koushik',
             qrToken: empCode,
@@ -2458,20 +2460,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * Is today an approved work-from-home day for this employee? Company-wide dates,
    * the employee's own approved list, and an approved WFH leave request all count.
-   * The KSS2407004 carve-out is preserved verbatim from the check-in path (B27).
    */
   const isApprovedWfhToday = (emp: Employee | undefined, todayStr: string): boolean => {
     if (!emp) return false;
-    if (emp.employeeId === 'KSS2407004') return false;
     return (companyWideWfhDates || []).includes(todayStr) ||
       (settings.companyWideWfhDates || []).includes(todayStr) ||
       (emp.approvedWfhDates || []).includes(todayStr) ||
       leaveRequests.some(r =>
         r.type === 'WFH' &&
         r.status === 'Approved' &&
-        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeName === emp.fullName) &&
-        todayStr >= r.startDate &&
-        todayStr <= r.endDate
+        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeUid === emp.uid || r.employeeUid === emp.id || (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        todayStr >= (r.startDate || (r as any).fromDate) &&
+        todayStr <= (r.endDate || (r as any).toDate || r.startDate)
       );
   };
 
@@ -2594,14 +2594,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // would reject with "Already checked in for today."
     const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
 
-    // B27 FIX: gate the WFH carve-out strictly on the stable employee code. The former
-    // name/email substring tests also matched any employee with "asbin" anywhere in
-    // their identity (e.g. "Jasbinder"), wrongly denying them approved WFH. The explicit
-    // employeeId was already the canonical target of this OR, so behaviour for the
-    // intended employee is unchanged. Now shared with the break geofence through
-    // isApprovedWfhToday, so check-in, check-out and breaks cannot drift apart.
-    const isApprovedWfh = isApprovedWfhToday(emp, todayStr);
-
     const isSelfCheckIn = !!emp && !!activeEmployee && (
       emp.id === activeEmployee.id ||
       emp.employeeId === activeEmployee.employeeId ||
@@ -2611,6 +2603,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role === 'SUPER_ADMIN' || role === 'HR_ADMIN' ||
       activeEmployee?.role === 'SUPER_ADMIN' || activeEmployee?.role === 'HR_ADMIN'
     );
+
+    // ROOT-CAUSE ENFORCEMENT: Strictly block check-in on approved leaves, holidays & Sundays
+    const eligibility = validateCheckInEligibility(emp, todayStr, {
+      leaveRequests,
+      holidayDates: (settings as any).customHolidays || OFFICIAL_HOLIDAY_DATES_2026,
+      settings
+    });
+
+    if (!eligibility.allowed && !isAdminCheckIn) {
+      return { success: false, message: eligibility.message };
+    }
+
+    // B27 FIX: gate the WFH carve-out strictly on the stable employee code. The former
+    // name/email substring tests also matched any employee with "asbin" anywhere in
+    // their identity (e.g. "Jasbinder"), wrongly denying them approved WFH. The explicit
+    // employeeId was already the canonical target of this OR, so behaviour for the
+    // intended employee is unchanged. Now shared with the break geofence through
+    // isApprovedWfhToday, so check-in, check-out and breaks cannot drift apart.
+    const isApprovedWfh = isApprovedWfhToday(emp, todayStr);
 
     let coords = (lat !== undefined && lon !== undefined) ? { lat, lon } : null;
     if (!coords && !isApprovedWfh && !isAdminCheckIn && settings.gpsRequired !== false) {
@@ -2627,7 +2638,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       gpsRequired: !isAdminCheckIn && settings.gpsRequired !== false
     };
 
-    const evalResult = evaluateAttendanceScan(emp, existingRec, effectiveSettings, finalLat, finalLon, isApprovedWfh || isAdminCheckIn);
+    const evalResult = evaluateAttendanceScan(
+      emp, 
+      existingRec, 
+      effectiveSettings, 
+      finalLat, 
+      finalLon, 
+      isApprovedWfh || isAdminCheckIn,
+      { leaveRequests, holidayDates: (settings as any).customHolidays || OFFICIAL_HOLIDAY_DATES_2026 }
+    );
 
     if (!evalResult.allowed && evalResult.action === 'CHECK_IN' && !isAdminCheckIn) {
       return { success: false, message: evalResult.message };

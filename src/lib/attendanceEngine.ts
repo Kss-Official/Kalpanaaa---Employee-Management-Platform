@@ -40,6 +40,99 @@ export const SHIFT_TOTAL_MINUTES =
 /** Human-readable shift label for UI headers, e.g. "10:00 AM – 7:00 PM IST". */
 export const SHIFT_LABEL = '10:00 AM – 7:00 PM IST';
 
+/**
+ * Normalizes any legacy or arbitrary shift string to the standard display format.
+ * Maps unassigned, 9-6, 10-6, 10-19, or day shift variations to "10:00 AM – 7:00 PM".
+ */
+export function formatShiftTiming(shift?: string | null): string {
+  if (!shift || typeof shift !== 'string' || shift.trim() === '') {
+    return '10:00 AM – 7:00 PM';
+  }
+  const s = shift.toLowerCase().trim();
+  if (
+    s.includes('09:00 - 18:00') ||
+    s.includes('09:00-18:00') ||
+    s.includes('10:00 - 18:00') ||
+    s.includes('10:00-18:00') ||
+    s.includes('10 to 6') ||
+    s.includes('10-6') ||
+    s.includes('9 to 6') ||
+    s.includes('9-6') ||
+    s.includes('10:00 - 19:00') ||
+    s.includes('10:00-19:00') ||
+    s === 'day shift' ||
+    s === 'general shift'
+  ) {
+    return '10:00 AM – 7:00 PM';
+  }
+  return shift;
+}
+
+/**
+ * Computes an employee's paid leave balance according to strict zero-base policy:
+ * - Base paid leaves start strictly at ZERO (0) for all employees (no legacy historical accrual).
+ * - 1 paid leave is credited on the 1st date of each month.
+ * - If an employee joins in the current month AFTER the 1st date, they have 0 credited leaves
+ *   until the 1st of the next month.
+ * - Approved leaves of type 'Leave' taken during the active month/period deduct from this balance.
+ */
+export function computeEmployeeLeaveBalance(
+  emp: Employee, 
+  leaveRequests: any[] = [], 
+  refDate: Date = new Date()
+): { credited: number; taken: number; balance: number } {
+  if (!emp) return { credited: 0, taken: 0, balance: 0 };
+
+  const joinDate = emp.joiningDate ? new Date(emp.joiningDate) : null;
+  const currentYear = refDate.getFullYear();
+  const currentMonth = refDate.getMonth(); // 0-indexed (0=Jan, 7=Aug)
+  const currentDay = refDate.getDate();
+
+  // Determine if the employee is eligible for the current month's credit (credited on the 1st).
+  let isCreditedForCurrentMonth = false;
+  if (currentDay >= 1) {
+    if (!joinDate || isNaN(joinDate.getTime())) {
+      isCreditedForCurrentMonth = true;
+    } else {
+      const joinYear = joinDate.getFullYear();
+      const joinMonth = joinDate.getMonth();
+      const joinDay = joinDate.getDate();
+
+      // If joined before current month OR joined on or before 1st of current month
+      if (
+        joinYear < currentYear ||
+        (joinYear === currentYear && joinMonth < currentMonth) ||
+        (joinYear === currentYear && joinMonth === currentMonth && joinDay <= 1)
+      ) {
+        isCreditedForCurrentMonth = true;
+      }
+    }
+  }
+
+  const credited = isCreditedForCurrentMonth ? 1 : 0;
+
+  // Filter approved leaves taken in the current month
+  const currentMonthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+  const approvedLeavesTaken = leaveRequests.filter(l => {
+    const isEmp = 
+      l.employeeId === emp.id || 
+      l.employeeId === emp.employeeId || 
+      (l.employeeName && emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+    const isApproved = l.status === 'Approved';
+    const isLeave = l.type === 'Leave';
+    const isInMonth = l.startDate ? l.startDate.startsWith(currentMonthPrefix) : true;
+    return isEmp && isApproved && isLeave && isInMonth;
+  }).length;
+
+  const balance = Math.max(0, credited - approvedLeavesTaken);
+
+  return {
+    credited,
+    taken: approvedLeavesTaken,
+    balance
+  };
+}
+
 export interface CompanyHolidayItem {
   date: string; // YYYY-MM-DD
   name: string;
@@ -763,8 +856,82 @@ export function isLateCheckIn(checkInAt: any): boolean {
   return hh * 60 + mm > SHIFT_START_HOUR * 60 + SHIFT_START_MINUTE + SHIFT_LATE_GRACE_MINUTES;
 }
 
+export interface CheckInEligibility {
+  allowed: boolean;
+  reason: 'ON_LEAVE' | 'WEEKLY_OFF' | 'OFFICIAL_HOLIDAY' | 'WINDOW_CLOSED' | 'BEFORE_OPEN' | 'NONE';
+  message: string;
+  leaveType?: string;
+  holidayName?: string;
+}
+
 /**
- * Evaluates whether check-in / check-out is valid based on settings, time, location
+ * Validates whether an employee is eligible to check in on a specific date.
+ * Strictly blocks check-in on:
+ * 1. Approved leaves (PTO, Casual, Sick, Maternity, etc. - excluding WFH)
+ * 2. Official declared company holidays (17 state/festival/national holidays or custom holidays)
+ * 3. Official weekly offs (Sundays)
+ */
+export function validateCheckInEligibility(
+  employee: any,
+  dateStr: string,
+  opts: {
+    leaveRequests?: any[];
+    holidayDates?: string[];
+    settings?: CompanySettings;
+  } = {}
+): CheckInEligibility {
+  if (!employee || !dateStr) {
+    return { allowed: false, reason: 'NONE', message: 'Employee or date information is missing.' };
+  }
+
+  // 1. Check if employee is on Approved Leave (excluding approved WFH)
+  const isApprovedLeave = hasApprovedLeaveOn(opts.leaveRequests, employee, dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]);
+  if (isApprovedLeave) {
+    const leaveReq = (opts.leaveRequests || []).find(r => 
+      r.status === 'Approved' && 
+      r.type !== 'WFH' &&
+      (r.employeeId === employee.id || r.employeeId === employee.employeeId || r.employeeUid === employee.uid || r.employeeUid === employee.id || (r.employeeName && employee.fullName && r.employeeName.trim().toLowerCase() === employee.fullName.trim().toLowerCase())) &&
+      dateStr >= (r.startDate || r.fromDate) && dateStr <= (r.endDate || r.toDate || r.startDate)
+    );
+    const leaveType = leaveReq?.type || 'Approved Leave';
+    return {
+      allowed: false,
+      reason: 'ON_LEAVE',
+      leaveType,
+      message: `Check-In Disabled: You have an approved ${leaveType} today. Attendance check-in is not permitted during approved leaves.`
+    };
+  }
+
+  // 2. Check if today is an Official Declared Company Holiday
+  const holidayInfo = getHolidayInfo(dateStr);
+  const holidays = (Array.isArray(opts.holidayDates) && opts.holidayDates.length > 0)
+    ? opts.holidayDates
+    : OFFICIAL_HOLIDAY_DATES_2026;
+  if (holidayInfo || holidays.includes(dateStr)) {
+    const holidayName = holidayInfo?.name || 'Declared Company Holiday';
+    return {
+      allowed: false,
+      reason: 'OFFICIAL_HOLIDAY',
+      holidayName,
+      message: `Check-In Disabled: Today is an official declared company holiday (${holidayName}). The office is closed.`
+    };
+  }
+
+  // 3. Check if today is a Sunday (Official Weekly Off)
+  const day = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  if (day === 0) {
+    return {
+      allowed: false,
+      reason: 'WEEKLY_OFF',
+      message: 'Check-In Disabled: Sunday is an official weekly off for all personnel.'
+    };
+  }
+
+  return { allowed: true, reason: 'NONE', message: 'Eligible for check-in' };
+}
+
+/**
+ * Evaluates whether check-in / check-out is valid based on settings, time, location, leaves, holidays, and weekly offs
  */
 export function evaluateAttendanceScan(
   employee: Employee,
@@ -772,9 +939,29 @@ export function evaluateAttendanceScan(
   settings: CompanySettings,
   userLat?: number,
   userLon?: number,
-  isApprovedWfh?: boolean
+  isApprovedWfh?: boolean,
+  extraOpts: { leaveRequests?: any[]; holidayDates?: string[]; nowMs?: number } = {}
 ): CheckInEvaluation {
   const isGpsEnforced = settings.gpsRequired !== false;
+
+  // 0. Pre-Flight Root Rule Check: Approved Leaves, Official Holidays & Sunday Weekly Offs
+  const todayStr = getWorkDate(new Date(extraOpts.nowMs || Date.now()));
+  const eligibility = validateCheckInEligibility(employee, todayStr, {
+    leaveRequests: extraOpts.leaveRequests,
+    holidayDates: extraOpts.holidayDates,
+    settings
+  });
+
+  if (!eligibility.allowed && (!todayRecord || !todayRecord.checkInAt)) {
+    return {
+      allowed: false,
+      action: 'CHECK_IN',
+      status: eligibility.reason === 'ON_LEAVE' ? 'On Leave' : 'Holiday',
+      locationVerified: false,
+      distanceMeters: 0,
+      message: eligibility.message
+    };
+  }
 
   // 1. Check GPS Location
   let locationVerified = true;
@@ -1044,7 +1231,8 @@ export function hasApprovedLeaveOn(
       r.employeeId === emp.employeeId ||
       r.employeeId === emp.id ||
       r.employeeUid === emp.uid ||
-      (!!r.employeeName && !!emp.fullName && r.employeeName === emp.fullName);
+      r.employeeUid === emp.id ||
+      (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
     if (!matchesEmployee) return false;
     const start = r.startDate || r.fromDate;
     const end = r.endDate || r.toDate || start;
@@ -1095,9 +1283,19 @@ export function buildDailyRoster(
       continue;
     }
 
+    const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']);
+
     const existing = resolveAttendanceRecord(records, emp, dateStr);
     if (existing) {
-      roster.push(existing);
+      if (isWfhApproved && !existing.isWfh && existing.status !== 'On Leave') {
+        roster.push({
+          ...existing,
+          isWfh: true,
+          status: (existing.status === 'Present' || existing.status === 'Late') ? 'Work From Home' : existing.status
+        });
+      } else {
+        roster.push(existing);
+      }
       continue;
     }
 
@@ -1105,10 +1303,9 @@ export function buildDailyRoster(
     if (nonWorking) status = 'Holiday';
     else if (hasApprovedLeaveOn(leaveRequests, emp, dateStr, EXCUSED_LEAVE_TYPES as unknown as string[])) status = 'On Leave';
     else if (emp.status === 'On Leave') status = 'On Leave';
+    else if (isWfhApproved) status = 'Work From Home';
     else if (isFuture || !shiftStartElapsed) continue; // not yet knowable
     else status = 'Absent';
-
-    const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']);
 
     roster.push({
       id: `synthetic_${emp.id}_${dateStr}`,
@@ -1962,27 +2159,108 @@ export function buildWeekWorkRow(
 
 export interface PayrollAttendanceBasis {
   monthKey: string;
-  /** Elapsed rostered days, holidays and weekly offs excluded. */
+  cycleLabel: string;
+  startDate: string;
+  endDate: string;
+  /** Elapsed rostered days in the 27th-26th cycle, holidays and weekly offs excluded. */
   workingDays: number;
-  /** Rostered days in the WHOLE month -- the pro-rata denominator. */
+  /** Total rostered working days in the entire 27th-26th cycle window. */
   rosteredDays: number;
   presentDays: number;      // inclusive of Late and WFH, as everywhere else
   lateDays: number;
   wfhDays: number;
   halfDays: number;
   leaveDays: number;        // approved leave
-  /** Elapsed non-working days (weekly offs + declared holidays), not the month total. */
+  /** Elapsed non-working days (weekly offs + declared holidays) in the cycle. */
   holidayDays: number;
   absentDays: number;       // elapsed working days with no record
-  /** Attended days for pay, counting a half day as 0.5 and paid leave as 1. */
+  /** Attended days for pay in the 27th-26th cycle (half day = 0.5, paid leave = 1). */
   payableDays: number;
-  /** Unpaid days: absences only. Leave and holidays are not deducted here. */
+  /** Unpaid days: absences only within the 27th-26th cycle. */
   lossOfPayDays: number;
   totalWorkedMinutes: number;
-  /** True while the month is still running -- pay is provisional. */
+  /** True while the cycle is still running. */
   isPartialMonth: boolean;
-  /** True when the employee has no attendance document in this month at all. */
+  /** True when the employee has no attendance document in this cycle at all. */
   hasNoData: boolean;
+}
+
+/**
+ * Returns the exact start and end date (YYYY-MM-DD) for a given payroll month cycle.
+ * The company salary cycle runs from the 27th of the previous month to the 26th of the target month.
+ * Example for '2026-08': Start = '2026-07-27', End = '2026-08-26'.
+ */
+export function getPayrollCycleDates(monthKey: string): {
+  startDate: string;
+  endDate: string;
+  cycleLabel: string;
+  days: string[];
+} {
+  const [yStr, mStr] = String(monthKey || '').split('-');
+  const year = parseInt(yStr) || new Date().getFullYear();
+  const month = parseInt(mStr) || (new Date().getMonth() + 1);
+
+  // Previous month for start date (27th)
+  let prevYear = year;
+  let prevMonth = month - 1;
+  if (prevMonth < 1) {
+    prevMonth = 12;
+    prevYear -= 1;
+  }
+
+  const startDate = `${prevYear}-${String(prevMonth).padStart(2, '0')}-27`;
+  const endDate = `${year}-${String(month).padStart(2, '0')}-26`;
+
+  // Generate all consecutive dates in [startDate, endDate]
+  const days: string[] = [];
+  const current = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+
+  while (current <= end) {
+    days.push(current.toISOString().split('T')[0]);
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  const startMonthName = new Date(Date.UTC(prevYear, prevMonth - 1, 1)).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  const endMonthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+  const cycleLabel = `27 ${startMonthName} – 26 ${endMonthName}`;
+
+  return {
+    startDate,
+    endDate,
+    cycleLabel,
+    days
+  };
+}
+
+/**
+ * Returns the current active payroll cycle month key based on today's date.
+ * If today is on or after the 27th, the active cycle is for the NEXT month.
+ * If today is on or before the 26th, the active cycle is for THIS month.
+ * E.g., On 2026-08-26 -> '2026-08' (27 Jul – 26 Aug)
+ *       On 2026-08-27 -> '2026-09' (27 Aug – 26 Sep)
+ */
+/**
+ * Returns the current active payroll cycle month key based on today's date.
+ * The company cut-off is on the 26th of the month.
+ * On or after the 26th, the upcoming new cycle starting 27th (tomorrow) becomes the active payroll cycle.
+ * E.g., On 2026-08-26 / 2026-08-27 -> '2026-09' (27 Aug 2026 – 26 Sep 2026)
+ *       On 2026-08-25 -> '2026-08' (27 Jul 2026 – 26 Aug 2026)
+ */
+export function getCurrentPayrollCycleMonth(nowMs: number = Date.now()): string {
+  const todayStr = getWorkDate(new Date(nowMs));
+  const [y, m, d] = todayStr.split('-').map(Number);
+  if (d >= 26) {
+    let nextMonth = m + 1;
+    let nextYear = y;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    return `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+  }
+  return `${y}-${String(m).padStart(2, '0')}`;
 }
 
 export function buildPayrollAttendanceBasis(
@@ -1992,66 +2270,112 @@ export function buildPayrollAttendanceBasis(
   opts: { leaveRequests?: any[]; holidayDates?: string[]; nowMs?: number } = {}
 ): PayrollAttendanceBasis {
   const nowMs = opts.nowMs ?? Date.now();
-  const roster = buildEmployeeMonthRoster(employee, attendance, monthKey, {
-    leaveRequests: opts.leaveRequests,
-    holidayDates: opts.holidayDates,
-    nowMs
-  });
-  const s = summarizeMonthRoster(roster, monthKey, { nowMs });
-
-  const allDates = listDatesInMonth(monthKey);
+  const { startDate, endDate, cycleLabel, days: cycleDates } = getPayrollCycleDates(monthKey);
   const holidays = opts.holidayDates || [];
-  const rosteredDays = allDates.filter(d => !isNonWorkingDay(d, holidays)).length;
-
-  // `summarizeMonthRoster().holiday` spans the WHOLE month, because the roster
-  // emits a Holiday row for future weekly offs too. Every other counter here is
-  // elapsed-only, so reporting that number alongside them would mix two
-  // windows -- mid-August it claimed 6 holidays against 15 working days. Count
-  // the elapsed ones instead so the whole basis describes one period.
   const todayStr = getWorkDate(new Date(nowMs));
-  const holidayDays = allDates.filter(d => d <= todayStr && isNonWorkingDay(d, holidays)).length;
 
-  // `present` already counts a half day as one attended day, so the half is
-  // subtracted back out rather than added on top.
-  const payableDays = Math.max(0, s.present - s.halfDay * 0.5 + s.onLeave);
-  // No check-in anywhere in the month: HR must be told the basis is empty rather
-  // than shown a plausible-looking day count derived from nothing.
+  // Build daily roster records for each day in the 27th-to-26th salary cycle window
+  const roster: RosterRecord[] = [];
+  const single = [employee];
+  for (const dateStr of cycleDates) {
+    const dayRows = buildDailyRoster(single, attendance, dateStr, {
+      leaveRequests: opts.leaveRequests,
+      holidayDates: opts.holidayDates,
+      nowMs
+    });
+    for (const r of dayRows) roster.push(r);
+  }
+
+  // Calculate roster metrics for the 27th-26th cycle
+  const rosteredDays = cycleDates.filter(d => !isNonWorkingDay(d, holidays)).length;
+  const elapsedDates = cycleDates.filter(d => d <= todayStr);
+  const elapsedWorkingDates = elapsedDates.filter(d => !isNonWorkingDay(d, holidays));
+  const workingDays = elapsedWorkingDates.length;
+
+  let present = 0;
+  let late = 0;
+  let wfh = 0;
+  let halfDay = 0;
+  let onLeave = 0;
+  let absent = 0;
+  let totalWorkedMinutes = 0;
+
+  for (const r of roster) {
+    if (r.date > todayStr) continue; // ignore future dates
+    if (r.status === 'Holiday') continue;
+
+    const isLateRec = (r as any).isLate === true || r.status === 'Late' || (typeof (r as any).lateMinutes === 'number' && (r as any).lateMinutes > 0);
+    const isWfhRec = r.status === 'Work From Home' || (r as any).isWfh === true;
+
+    if (r.status === 'Present') {
+      present++;
+      if (isLateRec) late++;
+    } else if (r.status === 'Late') {
+      present++;
+      late++;
+    } else if (isWfhRec) {
+      present++;
+      wfh++;
+    } else if (r.status === 'Half Day') {
+      present++;
+      halfDay++;
+    } else if (r.status === 'On Leave') {
+      onLeave++;
+    } else if (r.status === 'Absent' || (r.status as string) === 'LOP') {
+      absent++;
+    }
+
+    if (r.workingMinutes) {
+      totalWorkedMinutes += r.workingMinutes;
+    }
+  }
+
+  const holidayDays = elapsedDates.filter(d => isNonWorkingDay(d, holidays)).length;
+  const payableDays = Math.max(0, present - halfDay * 0.5 + onLeave);
+  const lossOfPayDays = workingDays > 0 ? absent : 0;
   const hasNoData = roster.every(r => !(r as any).checkInAt);
 
   return {
     monthKey,
-    workingDays: s.workingDays,
+    cycleLabel,
+    startDate,
+    endDate,
+    workingDays,
     rosteredDays,
-    presentDays: s.present,
-    lateDays: s.late,
-    wfhDays: s.wfh,
-    halfDays: s.halfDay,
-    leaveDays: s.onLeave,
+    presentDays: present,
+    lateDays: late,
+    wfhDays: wfh,
+    halfDays: halfDay,
+    leaveDays: onLeave,
     holidayDays,
-    absentDays: s.absent,
+    absentDays: absent,
     payableDays: Math.round(payableDays * 2) / 2,
-    lossOfPayDays: s.absent,
-    totalWorkedMinutes: s.totalWorkedMinutes,
-    isPartialMonth: monthKey >= getMonthKey(new Date(nowMs)),
+    lossOfPayDays,
+    totalWorkedMinutes,
+    isPartialMonth: endDate >= todayStr,
     hasNoData
   };
 }
 
 /**
- * Selectable payroll months, newest first, starting from the month containing
- * `nowMs`. The HR selector previously hardcoded two `<option>` literals for
- * August and July 2026, so from September onward it could not open the month it
- * was actually in.
+ * Selectable payroll months, newest first, starting from the current active salary cycle.
+ * Each option represents the exact 27th-to-26th company payroll cycle.
  */
 export function listPayrollMonths(
   count: number = 12,
   nowMs: number = Date.now()
-): Array<{ key: string; label: string }> {
-  const current = getMonthKey(new Date(nowMs));
-  const out: Array<{ key: string; label: string }> = [];
+): Array<{ key: string; label: string; cycleLabel: string; isCurrent: boolean }> {
+  const currentKey = getCurrentPayrollCycleMonth(nowMs);
+  const out: Array<{ key: string; label: string; cycleLabel: string; isCurrent: boolean }> = [];
   for (let i = 0; i < Math.max(1, count); i++) {
-    const key = shiftMonthKey(current, -i);
-    out.push({ key, label: formatMonthKey(key) });
+    const key = shiftMonthKey(currentKey, -i);
+    const { cycleLabel } = getPayrollCycleDates(key);
+    out.push({
+      key,
+      label: `${formatMonthKey(key)} (${cycleLabel})`,
+      cycleLabel,
+      isCurrent: key === currentKey
+    });
   }
   return out;
 }

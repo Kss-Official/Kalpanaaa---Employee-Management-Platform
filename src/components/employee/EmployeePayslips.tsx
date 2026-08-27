@@ -15,46 +15,26 @@ import {
   Receipt
 } from 'lucide-react';
 import { generatePayslipPdf } from '../../lib/pdfGenerator';
+import {
+  buildPayrollAttendanceBasis,
+  getPayrollCycleDates,
+  listPayrollMonths,
+  formatMonthKey
+} from '../../lib/attendanceEngine';
 
 interface PayslipRow {
   month: string;          // 'YYYY-MM'
   monthLabel: string;     // 'August 2026'
-  issueDate: string;      // last day of month
+  cycleLabel: string;     // '27 Jul – 26 Aug'
+  issueDate: string;      // 26th of month
   baseSalary: number;
   allowances: number;
   deductions: number;
   daysWorked: number;
+  totalCycleDays: number;
   netPay: number;
   status: 'Draft' | 'Approved' | 'Paid';
 }
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
-
-/** Format YYYY-MM → 'August 2026' */
-const fmtMonth = (ym: string) => {
-  const [y, m] = ym.split('-');
-  return `${MONTH_NAMES[parseInt(m, 10) - 1] || ''} ${y}`;
-};
-
-/** Last calendar day of a given YYYY-MM */
-const lastDay = (ym: string) => {
-  const [y, m] = ym.split('-');
-  return new Date(parseInt(y), parseInt(m), 0).toISOString().split('T')[0];
-};
-
-/** Generate the list of YYYY-MM strings covering the last N months up to today */
-const recentMonths = (n: number): string[] => {
-  const months: string[] = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  }
-  return months;
-};
 
 const INR = (amount: number) =>
   '₹' + amount.toLocaleString('en-IN', { maximumFractionDigits: 0 });
@@ -72,17 +52,22 @@ const statusIcon: Record<string, React.ReactNode> = {
 };
 
 export const EmployeePayslips: React.FC = () => {
-  const { activeEmployee, attendance, settings } = useAuth();
+  const { activeEmployee, attendance, settings, leaveRequests } = useAuth();
+  const holidayDates = useMemo<string[]>(
+    () => (((settings as any)?.holidayDates) || []) as string[],
+    [settings]
+  );
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
-  /** Build payslip rows — mirrors HRPayrollView disbursement logic exactly */
+  /** Build payslip rows — mirrors HRPayrollView 27th-to-26th disbursement logic exactly */
   const payslips: PayslipRow[] = useMemo(() => {
     if (!activeEmployee) return [];
 
-    const months = recentMonths(12); // scan last 12 months
+    const cycleList = listPayrollMonths(12);
     const rows: PayslipRow[] = [];
 
-    months.forEach((ym, loopIdx) => {
+    cycleList.forEach((cycle, loopIdx) => {
+      const ym = cycle.key;
       const raw = localStorage.getItem(`kss_payroll_adjustments_${ym}`);
       let adjustments: Record<string, any> = {};
       if (raw) {
@@ -94,57 +79,37 @@ export const EmployeePayslips: React.FC = () => {
       const savedStatus = localStorage.getItem(`kss_payroll_status_${ym}`);
       const monthStatus = (savedStatus as any) || 'Draft';
 
-      // --- Replicate HRPayrollView formula exactly ---
-      // Days worked: prefer HR override, else count from attendance
-      const empMonthAttendance = attendance.filter(
-        (a) =>
-          (a.employeeId === activeEmployee.id ||
-            a.employeeCode === activeEmployee.employeeId) &&
-          a.date?.startsWith(ym)
-      );
-      const autoDaysWorked =
-        empMonthAttendance.length > 0
-          ? empMonthAttendance.filter(
-              (a) =>
-                a.status === 'Present' ||
-                a.status === 'Work From Home' ||
-                a.status === 'Late'
-            ).length
-          : 22 - (loopIdx % 2);
+      const basis = buildPayrollAttendanceBasis(activeEmployee, attendance, ym, {
+        leaveRequests,
+        holidayDates,
+        nowMs: Date.now()
+      });
 
-      const daysWorked =
-        custom?.daysWorked !== undefined ? custom.daysWorked : autoDaysWorked;
-
-      // Salary components — employee index used as fallback same as HR view
-      const empIndex = 0; // For this employee's own view, idx offset is 0
-      const baseSalary =
-        custom?.baseSalary !== undefined
-          ? custom.baseSalary
-          : 45000 + empIndex * 5000;
-      const allowances =
-        custom?.allowances !== undefined ? custom.allowances : 2000;
-      const autoDeductions = (22 - daysWorked) * 1500;
-      const totalDeductions =
-        custom?.deduction !== undefined ? custom.deduction : autoDeductions;
+      const daysWorked = custom?.daysWorked !== undefined ? custom.daysWorked : basis.payableDays;
+      const baseSalary = custom?.baseSalary !== undefined ? custom.baseSalary : 0;
+      const allowances = custom?.allowances !== undefined ? custom.allowances : 0;
+      const perDay = basis.rosteredDays > 0 ? (baseSalary + allowances) / basis.rosteredDays : 0;
+      const autoDeductions = Math.round(perDay * basis.lossOfPayDays);
+      const totalDeductions = custom?.deduction !== undefined ? custom.deduction : autoDeductions;
 
       const netPay = Math.max(0, baseSalary + allowances - totalDeductions);
-      const status: 'Draft' | 'Approved' | 'Paid' =
-        custom?.status || monthStatus;
+      const status: 'Draft' | 'Approved' | 'Paid' = custom?.status || monthStatus;
 
-      // Only include months where HR has actually generated / approved salary
-      // Always include current & last month; include others only if HR has touched them
+      // Only include cycles where salary is assigned or HR has approved/paid
+      const hrHasTouched = !!custom || status === 'Approved' || status === 'Paid';
       const isCurrentOrRecent = loopIdx <= 1;
-      const hrHasTouched = !!custom;
 
       if (isCurrentOrRecent || hrHasTouched) {
         rows.push({
           month: ym,
-          monthLabel: fmtMonth(ym),
-          issueDate: lastDay(ym),
+          monthLabel: formatMonthKey(ym),
+          cycleLabel: basis.cycleLabel,
+          issueDate: basis.endDate,
           baseSalary,
           allowances,
           deductions: totalDeductions,
           daysWorked,
+          totalCycleDays: basis.workingDays,
           netPay,
           status,
         });
@@ -152,7 +117,7 @@ export const EmployeePayslips: React.FC = () => {
     });
 
     return rows;
-  }, [activeEmployee, attendance]);
+  }, [activeEmployee, attendance, leaveRequests, holidayDates]);
 
   // Current month's data for the summary card
   const current = payslips[0];

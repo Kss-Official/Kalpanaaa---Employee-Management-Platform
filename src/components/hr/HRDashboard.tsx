@@ -17,10 +17,20 @@ import {
   LogOut,
   Coffee,
   Banknote,
-  ShieldCheck
+  ShieldCheck,
+  Home
 } from 'lucide-react';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isShiftComplete, resolveAttendanceRecord, isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { 
+  getEmployeeWorkDate, 
+  getAttendanceDocId, 
+  getCanonicalEmployeeUid, 
+  isShiftComplete, 
+  resolveAttendanceRecord, 
+  isExecutiveOrLeadership,
+  buildPayrollAttendanceBasis,
+  getCurrentPayrollCycleMonth
+} from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface HRDashboardProps {
@@ -62,15 +72,59 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     .filter((rec): rec is NonNullable<typeof rec> => !!rec && !!rec.checkInAt);
 
   const totalEmployees = operationalEmployees.length;
-  const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave').length;
-  const onDutyCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec)).length;
-  const lateCount = employeeTodayRecords.filter(({ rec }) => rec?.status === 'Late').length;
-  const wfhCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && (rec.isWfh || rec.status === 'Work From Home')).length;
+  const wfhCount = employeeTodayRecords.filter(({ emp, rec }) => 
+    rec?.isWfh || rec?.status === 'Work From Home' ||
+    leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === emp.id || r.employeeId === emp.employeeId || r.employeeUid === emp.uid || r.employeeUid === emp.id || (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate))
+  ).length;
+
   const onLeaveCount = employeeTodayRecords.filter(({ emp, rec }) => 
     rec?.status === 'On Leave' || rec?.status === 'Leave' ||
-    leaveRequests.some(r => r.status === 'Approved' && (r.employeeId === emp.id || r.employeeId === emp.employeeId) && todayStr >= r.startDate && todayStr <= r.endDate)
+    leaveRequests.some(r => r.type !== 'WFH' && r.status === 'Approved' && (r.employeeId === emp.id || r.employeeId === emp.employeeId || r.employeeUid === emp.uid || r.employeeUid === emp.id || (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate))
   ).length;
-  const absentCount = Math.max(0, totalEmployees - presentCount - onLeaveCount);
+
+  const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave' && !rec.isWfh && rec.status !== 'Work From Home').length;
+  const onDutyCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec)).length;
+  const lateCount = employeeTodayRecords.filter(({ rec }) => rec?.status === 'Late').length;
+  const absentCount = Math.max(0, totalEmployees - presentCount - wfhCount - onLeaveCount);
+
+  // Dynamic Real-time Salary Run calculation for current 27th-to-26th cycle
+  const totalMonthlySalaryRun = React.useMemo(() => {
+    const currentCycleKey = getCurrentPayrollCycleMonth();
+    let adjustments: Record<string, any> = {};
+    try {
+      const raw = localStorage.getItem(`kss_payroll_adjustments_${currentCycleKey}`);
+      if (raw) adjustments = JSON.parse(raw);
+    } catch (e) {}
+
+    const getBenchmark = (emp: any): number => {
+      if (emp.baseSalary && Number(emp.baseSalary) > 0) return Number(emp.baseSalary);
+      if (emp.salary && Number(emp.salary) > 0) return Number(emp.salary);
+      const desig = (emp.designation || '').toLowerCase();
+      if (desig.includes('manager') || desig.includes('lead')) return 65000;
+      if (desig.includes('senior') || desig.includes('architect')) return 60000;
+      if (desig.includes('backend') || desig.includes('full stack')) return 48000;
+      if (desig.includes('frontend') || desig.includes('engineer')) return 45000;
+      if (desig.includes('designer') || desig.includes('ui')) return 42000;
+      if (desig.includes('intern')) return 20000;
+      return 45000;
+    };
+
+    return operationalEmployees.reduce((sum, emp) => {
+      const custom = adjustments[emp.id];
+      const basis = buildPayrollAttendanceBasis(emp, attendance, currentCycleKey, {
+        leaveRequests,
+        nowMs: Date.now()
+      });
+
+      const baseSalary = custom?.baseSalary !== undefined ? Number(custom.baseSalary) : getBenchmark(emp);
+      const allowances = custom?.allowances !== undefined ? Number(custom.allowances) : 2000;
+      const perDay = basis.rosteredDays > 0 ? (baseSalary + allowances) / basis.rosteredDays : 0;
+      const autoDeductions = Math.round(perDay * basis.lossOfPayDays);
+      const totalDeductions = custom?.deduction !== undefined ? Number(custom.deduction) : autoDeductions;
+      const netPay = Math.max(0, (baseSalary + allowances) - totalDeductions);
+      return sum + netPay;
+    }, 0);
+  }, [operationalEmployees, attendance, leaveRequests]);
 
   const hrPendingRequests = leaveRequests.filter(r => 
     r.status === 'Pending' && 
@@ -332,7 +386,9 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
             </span>
           </div>
           <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-black text-white tabular-nums">₹22.5L</span>
+            <span className="text-3xl font-black text-white tabular-nums">
+              ₹{(totalMonthlySalaryRun / 100000).toFixed(1)}L
+            </span>
             <Banknote className="w-8 h-8 text-purple-400 opacity-80 group-hover:scale-110 transition-transform" />
           </div>
         </div>
@@ -417,20 +473,30 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
                 <p className="text-xs font-semibold">No check-in records for today yet.</p>
               </div>
             ) : (
-              todayAttendance.slice(0, 6).map(rec => (
-                <div key={rec.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/60">
-                  <div className="flex items-center gap-3">
-                    <span className={`w-2 h-2 rounded-full ${rec.status === 'Present' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                    <div>
-                      <p className="text-xs font-bold text-white mb-0.5">{rec.employeeName}</p>
-                      <span className="text-[10px] text-slate-500 font-mono">{rec.department}</span>
+              todayAttendance.slice(0, 6).map(rec => {
+                const isWfhRec = rec.isWfh || rec.status === 'Work From Home';
+                return (
+                  <div key={rec.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/60">
+                    <div className="flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full ${isWfhRec ? 'bg-sky-400' : rec.status === 'Present' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <p className="text-xs font-bold text-white">{rec.employeeName}</p>
+                          {isWfhRec && (
+                            <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-0.5">
+                              <Home className="w-2.5 h-2.5" /> WFH
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono">{rec.department}</span>
+                      </div>
                     </div>
+                    <span className="text-xs font-mono font-bold text-slate-300">
+                      {rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--'}
+                    </span>
                   </div>
-                  <span className="text-xs font-mono font-bold text-slate-300">
-                    {rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--'}
-                  </span>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

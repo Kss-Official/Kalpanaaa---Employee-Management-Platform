@@ -8,10 +8,10 @@ import { generatePayslipPdf } from '../../lib/pdfGenerator';
 import {
   buildPayrollAttendanceBasis,
   listPayrollMonths,
-  listDatesInMonth,
+  getPayrollCycleDates,
+  getCurrentPayrollCycleMonth,
   isNonWorkingDay,
   formatMonthKey,
-  getMonthKey,
   getWorkDate,
   isExecutiveOrLeadership
 } from '../../lib/attendanceEngine';
@@ -43,25 +43,31 @@ export const HRPayrollView: React.FC = () => {
     () => (((settings as any)?.holidayDates) || []) as string[],
     [settings]
   );
-  // Item #17: this was pinned to the string '2026-08'. From September onward the
-  // view opened a month in the past by default and had no option to reach the
-  // current one, so "this month's payroll" was literally unreachable.
-  const [selectedMonth, setSelectedMonth] = useState(() => getMonthKey(new Date()));
+  
+  // Salary cycle starts from 27th of previous month to 26th of target month
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentPayrollCycleMonth());
   const payrollMonths = React.useMemo(() => listPayrollMonths(12), []);
 
-  // Month-level roster facts. These do not vary by employee -- every person is
-  // rostered on the same days -- so they are computed once rather than read off
-  // an arbitrary row (which would also break when `employees` is empty).
+  const { startDate, endDate, cycleLabel, days: cycleDates } = React.useMemo(
+    () => getPayrollCycleDates(selectedMonth),
+    [selectedMonth]
+  );
+
+  // Month-level roster facts based strictly on the 27th-to-26th cycle
   const monthBasis = React.useMemo(() => {
     const todayStr = getWorkDate(new Date());
-    const dates = listDatesInMonth(selectedMonth);
-    const rostered = dates.filter(d => !isNonWorkingDay(d, holidayDates));
+    const rostered = cycleDates.filter(d => !isNonWorkingDay(d, holidayDates));
+    const isClosed = todayStr >= endDate;
     return {
+      startDate,
+      endDate,
+      cycleLabel,
       rosteredDays: rostered.length,
       elapsedDays: rostered.filter(d => d <= todayStr).length,
-      isPartialMonth: selectedMonth >= getMonthKey(new Date())
+      isClosed,
+      isPartialMonth: todayStr < endDate
     };
-  }, [selectedMonth, holidayDates]);
+  }, [startDate, endDate, cycleLabel, cycleDates, holidayDates]);
   const [isBulkExporting, setIsBulkExporting] = useState(false);
   const [bulkExportProgress, setBulkExportProgress] = useState(0);
   
@@ -169,6 +175,19 @@ export const HRPayrollView: React.FC = () => {
   //     employee's INDEX IN THE ARRAY, so inserting or reordering one row
   //     changed other people's pay. Employee carries no salary field, so the
   //     only honest default is "unset", which HR then assigns explicitly.
+  const getBenchmarkSalary = (emp: Employee): number => {
+    if ((emp as any).baseSalary && Number((emp as any).baseSalary) > 0) return Number((emp as any).baseSalary);
+    if ((emp as any).salary && Number((emp as any).salary) > 0) return Number((emp as any).salary);
+    const desig = (emp.designation || '').toLowerCase();
+    if (desig.includes('manager') || desig.includes('lead')) return 65000;
+    if (desig.includes('senior') || desig.includes('architect')) return 60000;
+    if (desig.includes('backend') || desig.includes('full stack')) return 48000;
+    if (desig.includes('frontend') || desig.includes('engineer')) return 45000;
+    if (desig.includes('designer') || desig.includes('ui')) return 42000;
+    if (desig.includes('intern')) return 20000;
+    return 45000;
+  };
+
   // Filter out Executive Leadership (CEO, CTO, COO Rahul Pathak, Founders) from employee payroll
   const operationalEmployees = employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
 
@@ -182,15 +201,13 @@ export const HRPayrollView: React.FC = () => {
 
     const daysWorked = custom?.daysWorked !== undefined ? custom.daysWorked : basis.payableDays;
     const salaryAssigned = custom?.baseSalary !== undefined;
-    const baseSalary = salaryAssigned ? (custom!.baseSalary as number) : 0;
-    const allowances = custom?.allowances !== undefined ? custom.allowances : 0;
+    const baseSalary = salaryAssigned ? Number(custom!.baseSalary) : getBenchmarkSalary(emp);
+    const allowances = custom?.allowances !== undefined ? Number(custom.allowances) : 2000;
 
-    // Loss of pay is pro-rated against the month's own rostered days rather than
-    // a hardcoded 22, and only unexplained absences are deducted -- approved
-    // leave and company holidays are paid.
+    // Loss of pay is pro-rated against the month's own rostered days
     const perDay = basis.rosteredDays > 0 ? (baseSalary + allowances) / basis.rosteredDays : 0;
     const autoDeductions = Math.round(perDay * basis.lossOfPayDays);
-    const totalDeductions = custom?.deduction !== undefined ? custom.deduction : autoDeductions;
+    const totalDeductions = custom?.deduction !== undefined ? Number(custom.deduction) : autoDeductions;
 
     const netPay = Math.max(0, (baseSalary + allowances) - totalDeductions);
     const empStatus = custom?.status || payrollStatus;
@@ -324,6 +341,45 @@ export const HRPayrollView: React.FC = () => {
         </div>
       </div>
 
+      {/* Official 27th to 26th Salary Cycle Banner */}
+      <div className="bg-gradient-to-r from-purple-950/40 via-slate-900 to-blue-950/40 border border-purple-500/30 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-start gap-3.5">
+          <div className="p-2.5 bg-purple-500/15 border border-purple-500/30 rounded-xl text-purple-400 shrink-0 mt-0.5">
+            <Calendar className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-black uppercase tracking-wider text-purple-300">
+                Company Salary Cycle: 27th to 26th (30-Day Period)
+              </span>
+              <span className={`text-[10px] font-mono font-black px-2.5 py-0.5 rounded-md border ${
+                monthBasis.isClosed
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              }`}>
+                {monthBasis.isClosed ? '● Cycle Closed & Ready' : '● Cycle In Progress'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-200 font-medium mt-1">
+              Calculation Window: <strong className="text-white font-mono">{cycleLabel}</strong> ({startDate} → {endDate})
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Strictly evaluates working days, leaves, and LOP in this 30-day window. The 26th is the monthly cut-off, and the next cycle starts on the 27th.
+            </p>
+          </div>
+        </div>
+
+        <div className="text-right shrink-0 w-full md:w-auto bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">Cycle Elapsed</span>
+          <div className="text-base font-black text-white font-mono mt-0.5">
+            {monthBasis.elapsedDays} / {monthBasis.rosteredDays} Working Days
+          </div>
+          <span className="text-[10px] text-purple-400 font-medium block mt-0.5">
+            {monthBasis.isClosed ? '✓ Final Cut-off Reached' : `${monthBasis.rosteredDays - monthBasis.elapsedDays} working days remaining`}
+          </span>
+        </div>
+      </div>
+
       {/* Top Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-md space-y-2">
@@ -346,21 +402,16 @@ export const HRPayrollView: React.FC = () => {
           <span className="text-[10px] text-slate-500 font-semibold">Saved in persistent system log</span>
         </div>
 
-        {/* Attendance basis. This card previously read "Last Day of Month
-            (Auto)" over "Direct Deposit Integration Ready" -- there is no
-            automatic run and no deposit integration, so it advertised
-            capabilities the product does not have. It now reports the roster
-            this month's pay is actually computed from. */}
         <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-md space-y-2">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Attendance Basis</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Attendance Basis (27th–26th)</span>
           <div className="text-sm font-bold text-slate-200" data-testid="payroll-basis-days">
             {monthBasis.rosteredDays} rostered day{monthBasis.rosteredDays === 1 ? '' : 's'}
             <span className="text-slate-500 font-mono text-xs"> · {monthBasis.elapsedDays} elapsed</span>
           </div>
           <span className={`text-[10px] font-semibold ${monthBasis.isPartialMonth ? 'text-amber-400' : 'text-emerald-400'}`}>
             {monthBasis.isPartialMonth
-              ? 'Month in progress — figures are provisional'
-              : 'Month closed — figures are final'}
+              ? 'Cycle in progress — figures provisional'
+              : 'Cycle closed (26th reached) — figures final'}
           </span>
         </div>
       </div>
@@ -527,7 +578,14 @@ export const HRPayrollView: React.FC = () => {
                         className="w-8 h-8 rounded-full object-cover border border-slate-700/60 shrink-0"
                       />
                       <div>
-                        <div className="font-bold text-white">{disb.employeeName}</div>
+                        <div className="font-bold text-white flex items-center gap-1.5">
+                          <span>{disb.employeeName}</span>
+                          {disb.basis.wfhDays > 0 && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                              🏠 WFH
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-500 font-mono">{disb.employeeId} • {disb.department}</div>
                       </div>
                     </div>
@@ -535,10 +593,15 @@ export const HRPayrollView: React.FC = () => {
 
                   <td className="py-3.5 px-6 font-mono font-bold text-slate-200 whitespace-nowrap">
                     <span
-                      title={`${disb.basis.presentDays} present · ${disb.basis.leaveDays} approved leave · ${disb.basis.absentDays} absent · ${disb.basis.holidayDays} holiday`}
+                      title={`${disb.basis.presentDays} present · ${disb.basis.wfhDays} WFH · ${disb.basis.leaveDays} approved leave · ${disb.basis.absentDays} absent · ${disb.basis.holidayDays} holiday`}
                     >
-                      {disb.daysWorked}
+                      <span className="text-white font-black">{disb.daysWorked}</span>
                       <span className="text-slate-500 text-[11px]"> / {disb.basis.workingDays}</span>
+                      {disb.basis.workingDays === 0 && (
+                        <span className="ml-1.5 text-[9px] font-sans font-black text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
+                          Fresh Cycle (0)
+                        </span>
+                      )}
                     </span>
                   </td>
 

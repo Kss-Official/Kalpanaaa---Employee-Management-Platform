@@ -47,7 +47,9 @@ import {
   SHIFT_TOTAL_MINUTES,
   WORK_WEEK_DAYS,
   isExecutiveOrLeadership,
-  getWorkDate
+  getWorkDate,
+  formatShiftTiming,
+  isLateCheckIn
 } from '../../lib/attendanceEngine';
 import type { DayWorkSummary, WorkWeekDay } from '../../lib/attendanceEngine';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
@@ -135,29 +137,36 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
       );
 
       const leaveReq = leaveRequests.find(l => 
-        (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeName === emp.fullName) &&
+        (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeUid === emp.uid || l.employeeUid === emp.id ||
+         (l.employeeName && emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
         l.status === 'Approved' &&
-        todayStr >= l.startDate && 
-        todayStr <= l.endDate
+        todayStr >= (l.startDate || (l as any).fromDate) && 
+        todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
+
+      const isWfh = (!!leaveReq && leaveReq.type === 'WFH') || rec?.isWfh === true || rec?.status === 'Work From Home';
 
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
       const isComplete = isShiftComplete(rec);
       const isCheckedIn = !!rec?.checkInAt && !isComplete;
+      const isLate = rec?.status === 'Late' || (!!rec?.checkInAt && isLateCheckIn(rec.checkInAt));
 
-      let computedStatus: 'Present' | 'Late' | 'Work From Home' | 'On Leave' | 'LOP' | 'On Break' | 'Absent' = 'Absent';
+      let computedStatus: 'Present' | 'Work From Home' | 'On Leave' | 'LOP' | 'On Break' | 'Absent' = 'Absent';
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
+      } else if (isWfh) {
+        computedStatus = 'Work From Home';
       } else if (rec) {
-        if (rec.status === 'Late') computedStatus = 'Late';
-        else if (rec.isWfh || rec.status === 'Work From Home') computedStatus = 'Work From Home';
-        else if (rec.status === 'Present' || rec.checkInAt) computedStatus = 'Present';
-        else if (rec.status === 'On Leave' || rec.status === 'Half Day') computedStatus = 'On Leave';
-        else if (rec.status === 'Absent') computedStatus = 'Absent';
+        if (rec.status === 'Present' || rec.status === 'Late' || rec.checkInAt) {
+          computedStatus = 'Present';
+        } else if (rec.status === 'On Leave' || rec.status === 'Half Day') {
+          computedStatus = 'On Leave';
+        } else if (rec.status === 'Absent') {
+          computedStatus = 'Absent';
+        }
       } else if (leaveReq) {
-        if (leaveReq.type === 'WFH') computedStatus = 'Work From Home';
-        else computedStatus = 'On Leave';
+        computedStatus = 'On Leave';
       } else if (emp.status === 'On Leave') {
         computedStatus = 'On Leave';
       }
@@ -172,6 +181,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         status: computedStatus,
         isCheckedIn,
         activeBreak,
+        isLate,
+        isWfh,
         isShiftComplete: isComplete,
         leaveReq
       };
@@ -179,28 +190,30 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   }, [operationalEmployees, todayRecords, leaveRequests, todayStr]);
 
   // Turnout KPI Counts
-  const presentCount = dailyRoster.filter(r => r.status === 'Present').length;
+  const presentCount = dailyRoster.filter(r => (r.status === 'Present' || r.status === 'On Break') && !r.isWfh).length;
+  const onTimePresentCount = dailyRoster.filter(r => r.status === 'Present' && !r.isLate && !r.isWfh).length;
   const onBreakCount = dailyRoster.filter(r => r.status === 'On Break').length;
-  const lateCount = dailyRoster.filter(r => r.status === 'Late').length;
+  const lateCount = dailyRoster.filter(r => r.isLate && !r.isWfh).length;
   const wfhCount = dailyRoster.filter(r => r.status === 'Work From Home').length;
   const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
   const lopCount = dailyRoster.filter(r => r.status === 'LOP').length;
   const absentCount = dailyRoster.filter(r => r.status === 'Absent').length;
 
-  const totalActiveWorkingToday = presentCount + onBreakCount + lateCount + wfhCount;
+  // Real unique active working employees today (strictly 1 per person)
+  const totalActiveWorkingToday = dailyRoster.filter(r => r.status === 'Present' || r.status === 'On Break' || r.status === 'Work From Home').length;
 
-  // Donut Pie Data
+  // Donut Pie Data - Mutually exclusive slices whose sum matches totalWorkforceCount exactly
   const statusDistributionData = useMemo(() => {
     return [
-      { name: 'Present', value: presentCount, color: '#10b981' },
-      { name: 'On Break', value: onBreakCount, color: '#f59e0b' },
-      { name: 'Late', value: lateCount, color: '#eab308' },
+      { name: 'Present (On-Time)', value: onTimePresentCount, color: '#10b981' },
+      { name: 'Late Check-In', value: lateCount, color: '#f59e0b' },
+      { name: 'On Break', value: onBreakCount, color: '#06b6d4' },
       { name: 'Work From Home', value: wfhCount, color: '#0ea5e9' },
       { name: 'On Leave', value: onLeaveCount, color: '#a855f7' },
       { name: 'LOP', value: lopCount, color: '#ec4899' },
       { name: 'Absent', value: absentCount, color: '#f43f5e' },
     ].filter(d => d.value > 0);
-  }, [presentCount, onBreakCount, lateCount, wfhCount, onLeaveCount, lopCount, absentCount]);
+  }, [onTimePresentCount, lateCount, onBreakCount, wfhCount, onLeaveCount, lopCount, absentCount]);
 
   // Modals
   const [isRosterModalOpen, setIsRosterModalOpen] = useState(false);
@@ -333,7 +346,26 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   // Filtered Roster for Modal Table
   const filteredRosterModal = useMemo(() => {
     return dailyRoster.filter(r => {
-      if (rosterFilter !== 'ALL' && r.status !== rosterFilter) return false;
+      if (rosterFilter === 'ALL') {
+        // match all
+      } else if (rosterFilter === 'Late') {
+        if (!r.isLate) return false;
+      } else if (rosterFilter === 'Present') {
+        if (r.status !== 'Present' && r.status !== 'On Break') return false;
+      } else if (rosterFilter === 'On Break') {
+        if (r.status !== 'On Break') return false;
+      } else if (rosterFilter === 'Work From Home') {
+        if (r.status !== 'Work From Home') return false;
+      } else if (rosterFilter === 'On Leave') {
+        if (r.status !== 'On Leave') return false;
+      } else if (rosterFilter === 'LOP') {
+        if (r.status !== 'LOP') return false;
+      } else if (rosterFilter === 'Absent') {
+        if (r.status !== 'Absent') return false;
+      } else if (r.status !== rosterFilter) {
+        return false;
+      }
+
       if (rosterSearch.trim() !== '') {
         const q = rosterSearch.toLowerCase();
         const matchesName = (r.employee.fullName || '').toLowerCase().includes(q);
@@ -653,25 +685,29 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                       const isApprovedLeave = hasApprovedLeaveOn(
                         leaveRequests, emp, d.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]
                       );
+                      const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, d.dateStr, ['WFH']);
 
                       let status = daySummary?.status || rec?.status || 'Absent';
                       if (d.isFuture) status = 'Upcoming';
                       else if (d.isNonWorking) status = 'Holiday';
                       else if (isApprovedLeave) status = 'On Leave';
+                      else if (isWfhApproved) status = 'Work From Home';
 
                       const isCheckedIn = !!(daySummary?.checkInMs || rec?.checkInAt);
                       const workedMins = daySummary?.workedMinutes || (rec?.workingMinutes ? Number(rec.workingMinutes) : 0);
+
+                      const isWfhDay = isWfhApproved || status === 'Work From Home' || rec?.isWfh === true || daySummary?.isWfh === true;
 
                       let cellColor = 'bg-slate-950 text-slate-600 border-slate-800';
 
                       if (daySummary?.isOnBreak) {
                         cellColor = 'bg-amber-500/15 text-amber-300 border-amber-500/40 font-bold animate-pulse';
+                      } else if (isWfhDay) {
+                        cellColor = 'bg-sky-500/15 text-sky-300 border-sky-500/40 font-bold';
+                      } else if (status === 'Late') {
+                        cellColor = 'bg-orange-500/15 text-orange-400 border-orange-500/30 font-bold';
                       } else if (isCheckedIn || status === 'Present') {
                         cellColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-bold';
-                      } else if (status === 'Late') {
-                        cellColor = 'bg-amber-500/10 text-amber-400 border-amber-500/30 font-bold';
-                      } else if (status === 'Work From Home' || rec?.isWfh) {
-                        cellColor = 'bg-sky-500/10 text-sky-400 border-sky-500/30 font-bold';
                       } else if (status === 'On Leave') {
                         cellColor = 'bg-purple-500/10 text-purple-400 border-purple-500/30';
                       } else if (status === 'Holiday') {
@@ -685,6 +721,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                           <div className={`p-1.5 rounded-xl border text-[10px] font-mono ${cellColor}`}>
                             {d.isFuture ? (
                               '—'
+                            ) : isWfhDay ? (
+                              isCheckedIn && workedMins > 0 ? `🏠 ${Math.floor(workedMins / 60)}h ${workedMins % 60}m` : '🏠 WFH'
                             ) : isCheckedIn && workedMins > 0 ? (
                               `${Math.floor(workedMins / 60)}h ${workedMins % 60}m`
                             ) : isCheckedIn ? (
@@ -746,19 +784,36 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
             {/* Filter Tabs & Search */}
             <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3">
               <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
-                {['ALL', 'Present', 'On Break', 'Late', 'Work From Home', 'On Leave', 'LOP', 'Absent'].map(st => (
-                  <button
-                    key={st}
-                    onClick={() => setRosterFilter(st)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
-                      rosterFilter === st
-                        ? 'bg-blue-600 text-white border-blue-500 shadow-md'
-                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
-                    }`}
-                  >
-                    {st === 'Work From Home' ? 'WFH' : st}
-                  </button>
-                ))}
+                {['ALL', 'Present', 'On Break', 'Late', 'Work From Home', 'On Leave', 'LOP', 'Absent'].map(st => {
+                  let count = 0;
+                  if (st === 'ALL') count = dailyRoster.length;
+                  else if (st === 'Present') count = presentCount;
+                  else if (st === 'On Break') count = onBreakCount;
+                  else if (st === 'Late') count = lateCount;
+                  else if (st === 'Work From Home') count = wfhCount;
+                  else if (st === 'On Leave') count = onLeaveCount;
+                  else if (st === 'LOP') count = lopCount;
+                  else if (st === 'Absent') count = absentCount;
+
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setRosterFilter(st)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                        rosterFilter === st
+                          ? 'bg-blue-600 text-white border-blue-500 shadow-md'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <span>{st === 'Work From Home' ? 'WFH' : st}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                        rosterFilter === st ? 'bg-white/20 text-white' : st === 'Late' && lateCount > 0 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-slate-800 text-slate-500'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="relative w-full md:w-72">
@@ -828,11 +883,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                                   <span>Present</span>
                                 </span>
-                              ) : r.status === 'Late' ? (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                                  <span>Late</span>
-                                </span>
                               ) : r.status === 'Work From Home' ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-sky-500/15 text-sky-300 border border-sky-500/30">
                                   <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
@@ -852,8 +902,20 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                             </td>
 
                             {/* Check-In */}
-                            <td className="py-3.5 px-4 font-mono font-bold text-slate-300">
-                              {r.record?.checkInAt ? toISTTimeString(r.record.checkInAt) : '—'}
+                            <td className="py-3.5 px-4 font-mono font-bold">
+                              {r.record?.checkInAt ? (
+                                <span className={`inline-flex items-center gap-1.5 ${r.isLate ? 'text-orange-500 font-black' : 'text-slate-200'}`}>
+                                  <span className={`w-2 h-2 rounded-full ${r.isLate ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.9)] animate-pulse' : 'bg-emerald-400'}`} />
+                                  <span className={r.isLate ? 'text-orange-500 font-black tracking-wide' : ''}>{toISTTimeString(r.record.checkInAt)}</span>
+                                  {r.isLate && (
+                                    <span className="text-[9px] font-sans font-bold text-orange-400 bg-orange-500/15 border border-orange-500/30 px-1 py-0.2 rounded ml-1">
+                                      LATE
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-slate-600 font-bold">—</span>
+                              )}
                             </td>
 
                             {/* Check-Out */}
@@ -867,8 +929,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                             </td>
 
                             {/* Shift */}
-                            <td className="py-3.5 px-4 text-slate-400 text-xs">
-                              {r.employee.shift || 'General Shift (09:00 - 18:00)'}
+                            <td className="py-3.5 px-4 text-slate-300 font-medium text-xs">
+                              {formatShiftTiming(r.employee.shift || r.employee.preferredShift)}
                             </td>
 
                             {/* Actions */}

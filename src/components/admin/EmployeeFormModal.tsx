@@ -55,7 +55,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     reportingManager: employeeToEdit?.reportingManager || 'Rahul Sharma',
     workLocation: employeeToEdit?.workLocation || 'Kalpanaaa Headquarters',
     status: employeeToEdit?.status || ('Active' as EmployeeStatus),
-    shift: employeeToEdit?.shift || 'General Shift (09:00 - 18:00)',
+    shift: employeeToEdit?.shift || 'Day Shift (10:00 AM – 7:00 PM)',
     permanentAddress: employeeToEdit?.permanentAddress || 'Hitech City Road',
     currentAddress: employeeToEdit?.currentAddress || 'Hitech City Road',
     city: employeeToEdit?.city || 'Hyderabad',
@@ -429,7 +429,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                       name="shift"
                       value={formData.shift}
                       onChange={handleChange}
-                      placeholder="General Shift (09:00 - 18:00)"
+                      placeholder="Day Shift (10:00 AM – 7:00 PM)"
                       className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                     />
                   </div>
