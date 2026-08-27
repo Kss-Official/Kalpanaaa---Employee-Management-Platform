@@ -137,14 +137,17 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
       );
 
       const leaveReq = leaveRequests.find(l => 
-        (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeUid === emp.uid || l.employeeUid === emp.id ||
-         (l.employeeName && emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
+         (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
+         (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
         l.status === 'Approved' &&
         todayStr >= (l.startDate || (l as any).fromDate) && 
         todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
 
-      const isWfh = (!!leaveReq && leaveReq.type === 'WFH') || rec?.isWfh === true || rec?.status === 'Work From Home';
+      const isCompanyWfh = ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
+      const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
+      const isWfh = isCompanyWfh || isApprovedEmpWfh;
 
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
       const isComplete = isShiftComplete(rec);
@@ -685,18 +688,21 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                       const isApprovedLeave = hasApprovedLeaveOn(
                         leaveRequests, emp, d.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]
                       );
-                      const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, d.dateStr, ['WFH']);
+                      const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, d.dateStr, ['WFH']) || (emp.approvedWfhDates || []).includes(d.dateStr);
 
                       let status = daySummary?.status || rec?.status || 'Absent';
                       if (d.isFuture) status = 'Upcoming';
                       else if (d.isNonWorking) status = 'Holiday';
                       else if (isApprovedLeave) status = 'On Leave';
                       else if (isWfhApproved) status = 'Work From Home';
+                      else if (status === 'Work From Home') {
+                        status = (daySummary?.checkInMs || rec?.checkInAt) ? (isLateCheckIn(rec?.checkInAt) ? 'Late' : 'Present') : 'Absent';
+                      }
 
                       const isCheckedIn = !!(daySummary?.checkInMs || rec?.checkInAt);
                       const workedMins = daySummary?.workedMinutes || (rec?.workingMinutes ? Number(rec.workingMinutes) : 0);
 
-                      const isWfhDay = isWfhApproved || status === 'Work From Home' || rec?.isWfh === true || daySummary?.isWfh === true;
+                      const isWfhDay = isWfhApproved;
 
                       let cellColor = 'bg-slate-950 text-slate-600 border-slate-800';
 

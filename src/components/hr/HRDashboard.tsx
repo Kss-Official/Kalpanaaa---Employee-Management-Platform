@@ -72,17 +72,42 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     .filter((rec): rec is NonNullable<typeof rec> => !!rec && !!rec.checkInAt);
 
   const totalEmployees = operationalEmployees.length;
-  const wfhCount = employeeTodayRecords.filter(({ emp, rec }) => 
-    rec?.isWfh || rec?.status === 'Work From Home' ||
-    leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === emp.id || r.employeeId === emp.employeeId || r.employeeUid === emp.uid || r.employeeUid === emp.id || (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate))
+  const wfhCount = employeeTodayRecords.filter(({ emp }) => 
+    (emp.approvedWfhDates || []).includes(todayStr) ||
+    leaveRequests.some(r => 
+      r.type === 'WFH' && 
+      r.status === 'Approved' && 
+      ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+       (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+       (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
+      todayStr >= (r.startDate || (r as any).fromDate) && 
+      todayStr <= (r.endDate || (r as any).toDate || r.startDate)
+    )
   ).length;
 
   const onLeaveCount = employeeTodayRecords.filter(({ emp, rec }) => 
     rec?.status === 'On Leave' || rec?.status === 'Leave' ||
-    leaveRequests.some(r => r.type !== 'WFH' && r.status === 'Approved' && (r.employeeId === emp.id || r.employeeId === emp.employeeId || r.employeeUid === emp.uid || r.employeeUid === emp.id || (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate))
+    leaveRequests.some(r => 
+      r.type !== 'WFH' && 
+      r.status === 'Approved' && 
+      ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+       (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+       (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
+      todayStr >= (r.startDate || (r as any).fromDate) && 
+      todayStr <= (r.endDate || (r as any).toDate || r.startDate)
+    )
   ).length;
 
-  const presentCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave' && !rec.isWfh && rec.status !== 'Work From Home').length;
+  const presentCount = employeeTodayRecords.filter(({ emp, rec }) => {
+    const isWfhApproved = (emp.approvedWfhDates || []).includes(todayStr) ||
+      leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' &&
+        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate)
+      );
+    return !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave' && !isWfhApproved;
+  }).length;
   const onDutyCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec)).length;
   const lateCount = employeeTodayRecords.filter(({ rec }) => rec?.status === 'Late').length;
   const absentCount = Math.max(0, totalEmployees - presentCount - wfhCount - onLeaveCount);

@@ -1112,9 +1112,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       leaveRequests.some(r =>
                         r.type === 'WFH' &&
                         r.status === 'Approved' &&
-                        (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id || r.employeeName === activeEmployee.fullName) &&
-                        todayStr >= r.startDate &&
-                        todayStr <= r.endDate
+                        ((!!r.employeeId && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id)) ||
+                         (!!r.employeeUid && (r.employeeUid === activeEmployee.uid || r.employeeUid === activeEmployee.id)) ||
+                         (!!r.employeeName && !!activeEmployee.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())) &&
+                        todayStr >= (r.startDate || (r as any).fromDate) &&
+                        todayStr <= (r.endDate || (r as any).toDate || r.startDate)
                       );
 
                     return isApprovedWfhToday ? (
@@ -1340,7 +1342,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     className={`w-full max-w-[240px] py-2 rounded-xl text-xs font-semibold transition-all border ${
                       !(companyWideWfhDates.includes(todayStr) ||
                         (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
-                        leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id) && todayStr >= r.startDate && todayStr <= r.endDate))
+                        leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && ((!!r.employeeId && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id)) || (!!r.employeeUid && (r.employeeUid === activeEmployee.uid || r.employeeUid === activeEmployee.id)) || (!!r.employeeName && !!activeEmployee.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate)))
                         ? 'bg-transparent border-[var(--border-subtle)] text-[var(--text-muted)] cursor-not-allowed'
                         : isWfh
                           ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
@@ -1349,7 +1351,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   >
                     {!(companyWideWfhDates.includes(todayStr) ||
                        (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
-                       leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id) && todayStr >= r.startDate && todayStr <= r.endDate))
+                       leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && ((!!r.employeeId && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id)) || (!!r.employeeUid && (r.employeeUid === activeEmployee.uid || r.employeeUid === activeEmployee.id)) || (!!r.employeeName && !!activeEmployee.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate)))
                       ? '🔒 WFH Locked (Requires Approval)'
                       : companyWideWfhDates.includes(todayStr)
                         ? '🏢 Office-Wide WFH Active'

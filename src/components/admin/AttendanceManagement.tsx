@@ -188,7 +188,10 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
       // Also clean any duplicate doc for today if present in attendance state
       const duplicates = attendance.filter(
         r => r.id !== record.id && r.date === record.date &&
-        (r.employeeId === emp.id || r.employeeCode === emp.employeeId || r.employeeUid === emp.uid || r.uid === emp.uid)
+        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+         (!!r.employeeCode && r.employeeCode === emp.employeeId) ||
+         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+         (!!r.uid && (r.uid === emp.uid || r.uid === emp.id)))
       );
       for (const dup of duplicates) {
         updateAttendanceRecord(dup.id, {

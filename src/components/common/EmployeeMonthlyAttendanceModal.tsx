@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
-import { isNonWorkingDay, getHolidayInfo } from '../../lib/attendanceEngine';
+import { isNonWorkingDay, getHolidayInfo, isLateCheckIn } from '../../lib/attendanceEngine';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { useHaptic } from '../../hooks/useHaptic';
 
@@ -101,9 +101,12 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   // Filter approved leave/WFH requests for this employee for this month
   const empLeaveRequests = useMemo(() => {
     return leaveRequests.filter(req => {
-      const isEmpMatch = req.employeeId === employee.employeeId || req.employeeName === employee.fullName || req.employeeId === employee.id;
+      const isEmpMatch = 
+        (!!req.employeeId && (req.employeeId === employee.employeeId || req.employeeId === employee.id)) ||
+        (!!req.employeeUid && (req.employeeUid === employee.uid || req.employeeUid === employee.id)) ||
+        (!!req.employeeName && !!employee.fullName && req.employeeName.trim().toLowerCase() === employee.fullName.trim().toLowerCase());
       const isApproved = req.status === 'Approved';
-      const isMonthMatch = req.startDate.startsWith(selectedYearMonth) || req.endDate.startsWith(selectedYearMonth);
+      const isMonthMatch = (req.startDate && req.startDate.startsWith(selectedYearMonth)) || (req.endDate && req.endDate.startsWith(selectedYearMonth));
       return isEmpMatch && isApproved && isMonthMatch;
     });
   }, [leaveRequests, employee, selectedYearMonth]);
@@ -278,17 +281,28 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     const nonWorking = isNonWorkingDay(dateFormatted, holidayDates);
     const isFuture = dateFormatted > todayStr;
 
+    const wfhReq = empLeaveRequests.find(l => l.type === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+    const hasLeave = empLeaveRequests.some(l => l.type !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+    const isApprovedWfh = !!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted);
+
     if (rec) {
-      if (rec.isWfh || rec.status === 'Work From Home') wfhDays++;
-      else if (rec.status === 'Late') lateDays++;
-      else if (rec.status === 'Present' || rec.checkInAt) presentDays++;
-      else if (rec.status === 'On Leave') leaveDays++;
-      else if (rec.status === 'Holiday') holidayDays++;
-      else if (rec.status === 'Absent') absentDays++;
+      if ((rec.isWfh || rec.status === 'Work From Home') && isApprovedWfh) {
+        wfhDays++;
+      } else if (rec.status === 'Late' || (rec.checkInAt && isLateCheckIn(rec.checkInAt))) {
+        lateDays++;
+      } else if (rec.status === 'Present' || rec.checkInAt) {
+        presentDays++;
+      } else if (rec.status === 'On Leave' || hasLeave) {
+        leaveDays++;
+      } else if (rec.status === 'Holiday' || nonWorking) {
+        holidayDays++;
+      } else if (rec.status === 'Absent') {
+        absentDays++;
+      } else if (!isFuture) {
+        absentDays++;
+      }
     } else {
-      const wfhReq = empLeaveRequests.find(l => l.type === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-      const hasLeave = empLeaveRequests.some(l => l.type !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-      if (wfhReq) {
+      if (isApprovedWfh) {
         wfhDays++;
       } else if (hasLeave) {
         leaveDays++;
@@ -669,7 +683,8 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   const dayNum = i + 1;
                   const dateFormatted = `${selectedYearMonth}-${String(dayNum).padStart(2, '0')}`;
                   const rec = recordsByDate.get(dateFormatted);
-                  const isApprovedWfh = empLeaveRequests.some(l => l.type === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+                  const wfhReq = empLeaveRequests.find(l => l.type === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+                  const isApprovedWfh = !!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted);
                   const isApprovedLeave = empLeaveRequests.some(l => l.type !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
                   const isNonWorking = isNonWorkingDay(dateFormatted, holidayDates);
                   const holidayInfo = getHolidayInfo(dateFormatted);
@@ -680,23 +695,23 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   let statusDot = 'bg-rose-500';
 
                   if (rec) {
-                    if (rec.isWfh || rec.status === 'Work From Home') {
+                    if ((rec.isWfh || rec.status === 'Work From Home') && isApprovedWfh) {
                       statusBg = 'bg-sky-500/10 border-sky-500/30 text-sky-300';
                       statusLabel = 'WFH';
                       statusDot = 'bg-sky-400';
-                    } else if (rec.status === 'Present') {
-                      statusBg = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300';
-                      statusLabel = 'Present';
-                      statusDot = 'bg-emerald-400';
-                    } else if (rec.status === 'Late') {
+                    } else if (rec.status === 'Late' || (rec.checkInAt && isLateCheckIn(rec.checkInAt))) {
                       statusBg = 'bg-amber-500/10 border-amber-500/30 text-amber-300';
                       statusLabel = 'Late';
                       statusDot = 'bg-amber-400';
-                    } else if (rec.status === 'On Leave') {
+                    } else if (rec.status === 'Present' || rec.checkInAt) {
+                      statusBg = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300';
+                      statusLabel = 'Present';
+                      statusDot = 'bg-emerald-400';
+                    } else if (rec.status === 'On Leave' || isApprovedLeave) {
                       statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
                       statusLabel = 'Leave';
                       statusDot = 'bg-purple-400';
-                    } else if (rec.status === 'Holiday') {
+                    } else if (rec.status === 'Holiday' || isNonWorking) {
                       statusBg = 'bg-slate-800/40 border-slate-800 text-slate-400';
                       statusLabel = holidayInfo ? holidayInfo.name : 'Holiday';
                       statusDot = 'bg-slate-500';

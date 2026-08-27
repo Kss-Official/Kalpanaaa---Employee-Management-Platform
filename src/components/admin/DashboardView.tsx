@@ -104,15 +104,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
 
       // Check if employee has approved leave or WFH today
       const leaveReq = leaveRequests.find(l => 
-        (l.employeeId === emp.id || l.employeeId === emp.employeeId || l.employeeUid === emp.uid || l.employeeUid === emp.id ||
-         (l.employeeName && emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
+         (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
+         (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
         l.status === 'Approved' &&
         todayStr >= (l.startDate || (l as any).fromDate) && 
         todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
 
-      const isCompanyWfh = (companyWideWfhDates || []).includes(todayStr) || (settings?.companyWideWfhDates || []).includes(todayStr);
-      const isWfh = isCompanyWfh || (!!leaveReq && leaveReq.type === 'WFH') || rec?.isWfh === true || rec?.status === 'Work From Home';
+      const isCompanyWfh = (companyWideWfhDates || []).includes(todayStr) || ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
+      const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
+      const isWfh = isCompanyWfh || isApprovedEmpWfh;
 
       // Active break detection
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);

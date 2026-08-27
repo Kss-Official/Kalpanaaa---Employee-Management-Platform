@@ -115,9 +115,9 @@ export function computeEmployeeLeaveBalance(
   const currentMonthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
   const approvedLeavesTaken = leaveRequests.filter(l => {
     const isEmp = 
-      l.employeeId === emp.id || 
-      l.employeeId === emp.employeeId || 
-      (l.employeeName && emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+      (!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
+      (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
+      (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
     const isApproved = l.status === 'Approved';
     const isLeave = l.type === 'Leave';
     const isInMonth = l.startDate ? l.startDate.startsWith(currentMonthPrefix) : true;
@@ -835,7 +835,7 @@ export function parseAndValidateQrCode(qrText: string): QrParseResult {
 export interface CheckInEvaluation {
   allowed: boolean;
   action: 'CHECK_IN' | 'CHECK_OUT' | 'ALREADY_CHECKED_OUT';
-  status: 'Present' | 'Late' | 'Half Day';
+  status: AttendanceStatus;
   locationVerified: boolean;
   distanceMeters?: number;
   message: string;
@@ -890,7 +890,9 @@ export function validateCheckInEligibility(
     const leaveReq = (opts.leaveRequests || []).find(r => 
       r.status === 'Approved' && 
       r.type !== 'WFH' &&
-      (r.employeeId === employee.id || r.employeeId === employee.employeeId || r.employeeUid === employee.uid || r.employeeUid === employee.id || (r.employeeName && employee.fullName && r.employeeName.trim().toLowerCase() === employee.fullName.trim().toLowerCase())) &&
+      ((!!r.employeeId && (r.employeeId === employee.id || r.employeeId === employee.employeeId)) ||
+       (!!r.employeeUid && (r.employeeUid === employee.uid || r.employeeUid === employee.id)) ||
+       (!!r.employeeName && !!employee.fullName && r.employeeName.trim().toLowerCase() === employee.fullName.trim().toLowerCase())) &&
       dateStr >= (r.startDate || r.fromDate) && dateStr <= (r.endDate || r.toDate || r.startDate)
     );
     const leaveType = leaveReq?.type || 'Approved Leave';
@@ -971,12 +973,16 @@ export function evaluateAttendanceScan(
     // Approved WFH: Bypass office GPS radius check completely so employee can check in from home
     locationVerified = true;
     distanceMeters = 0;
-  } else if (isGpsEnforced) {
-    // Normal Office Days: Employee MUST be near the company office location (set by CEO/CTO)
+  } else if (!isGpsEnforced) {
+    // GPS not enforced: allow web check-in regardless of location
+    locationVerified = true;
+    distanceMeters = 0;
+  } else {
+    // Geofencing rule: User must be within allowedRadiusMeters from office
     if (userLat === undefined || userLon === undefined) {
       locationVerified = false;
     } else {
-      const officeLat = settings.officeLatitude || 13.014333;
+      const officeLat = settings.officeLatitude || 12.915000;
       const officeLon = settings.officeLongitude || 77.646000;
       distanceMeters = calculateGpsDistanceMeters(userLat, userLon, officeLat, officeLon);
       const allowedRadius = settings.allowedRadiusMeters || 300;
@@ -1021,7 +1027,7 @@ export function evaluateAttendanceScan(
 
     // Grace period: On-time up to 10:15 AM (15 mins past 10:00 AM)
     const isLateArrival = currentHourIST > 10 || (currentHourIST === 10 && currentMinIST > 15);
-    let status: 'Present' | 'Late' = isLateArrival ? 'Late' : 'Present';
+    let status: AttendanceStatus = isLateArrival ? 'Late' : 'Present';
 
     // ── Strict GPS enforcement on normal office days (RESTORED) ───────────────
     // Commit e61335b ("Allow web check-in for Kuruva Mahesh and fix geofence
@@ -1091,7 +1097,7 @@ export function evaluateAttendanceScan(
         return {
           allowed: false,
           action: 'CHECK_OUT',
-          status: todayRecord.status as 'Present' | 'Late' | 'Half Day',
+          status: todayRecord.status as AttendanceStatus,
           locationVerified: false,
           distanceMeters: 0,
           message: 'GPS Location Required for Check-Out.'
@@ -1176,6 +1182,7 @@ export function evaluateAttendanceScan(
 export interface DailyRosterOptions {
   leaveRequests?: any[];
   holidayDates?: string[];
+  companyWideWfhDates?: string[];
   weeklyOffDays?: number[]; // 0 = Sunday … 6 = Saturday
   nowMs?: number;
   /** Minutes past shift start after which a no-show counts as absent. */
@@ -1281,7 +1288,9 @@ export function buildDailyRoster(
       continue;
     }
 
-    const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']);
+    const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']) ||
+      (emp.approvedWfhDates || []).includes(dateStr) ||
+      (opts.companyWideWfhDates || []).includes(dateStr);
 
     const existing = resolveAttendanceRecord(records, emp, dateStr);
     if (existing) {
@@ -1290,6 +1299,16 @@ export function buildDailyRoster(
           ...existing,
           isWfh: true,
           status: (existing.status === 'Present' || existing.status === 'Late') ? 'Work From Home' : existing.status
+        });
+      } else if (!isWfhApproved && (existing.isWfh || existing.status === 'Work From Home')) {
+        // Heal accidental or unapproved WFH record to its genuine punctuality status
+        const realStatus = existing.checkInAt
+          ? (isLateCheckIn(existing.checkInAt) ? 'Late' : 'Present')
+          : (existing.status === 'Work From Home' ? 'Absent' : existing.status);
+        roster.push({
+          ...existing,
+          isWfh: false,
+          status: realStatus
         });
       } else {
         roster.push(existing);

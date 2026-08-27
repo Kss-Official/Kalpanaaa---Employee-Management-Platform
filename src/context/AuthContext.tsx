@@ -479,7 +479,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const isHrEmployee = (r.department || '').toLowerCase().includes('hr') ||
         (r.employeeRole || '').toLowerCase().includes('hr') ||
         (() => {
-          const emp = employees.find(e => e.employeeId === r.employeeId || e.id === r.employeeId || e.fullName === r.employeeName);
+          const emp = employees.find(e => 
+            (!!r.employeeId && (e.employeeId === r.employeeId || e.id === r.employeeId)) ||
+            (!!r.employeeName && !!e.fullName && e.fullName.trim().toLowerCase() === r.employeeName.trim().toLowerCase())
+          );
           return emp?.department?.toLowerCase().includes('hr') || emp?.role === 'HR_ADMIN';
         })();
 
@@ -2469,7 +2472,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       leaveRequests.some(r =>
         r.type === 'WFH' &&
         r.status === 'Approved' &&
-        (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeUid === emp.uid || r.employeeUid === emp.id || (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        ((!!r.employeeId && (r.employeeId === emp.employeeId || r.employeeId === emp.id)) ||
+         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
         todayStr >= (r.startDate || (r as any).fromDate) &&
         todayStr <= (r.endDate || (r as any).toDate || r.startDate)
       );
@@ -3487,7 +3492,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // If final CTO or Executive approval and WFH, add to approvedWfhDates
     if (stage === 'CTO' && decision === 'Approved' && targetReq?.type === 'WFH') {
-      const targetEmp = employees.find(e => e.employeeId === targetReq.employeeId || e.id === targetReq.employeeId);
+      const targetEmp = employees.find(e => 
+        (!!targetReq.employeeId && (e.employeeId === targetReq.employeeId || e.id === targetReq.employeeId)) ||
+        (!!targetReq.employeeName && !!e.fullName && e.fullName.trim().toLowerCase() === targetReq.employeeName.trim().toLowerCase())
+      );
       if (targetEmp) {
         const dates = new Set<string>(targetEmp.approvedWfhDates || []);
         let curr = new Date(sDate);
