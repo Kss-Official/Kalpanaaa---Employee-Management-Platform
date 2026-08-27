@@ -1228,10 +1228,8 @@ export function hasApprovedLeaveOn(
     if (!r || r.status !== 'Approved') return false;
     if (types && !types.includes(r.type)) return false;
     const matchesEmployee =
-      r.employeeId === emp.employeeId ||
-      r.employeeId === emp.id ||
-      r.employeeUid === emp.uid ||
-      r.employeeUid === emp.id ||
+      (!!r.employeeId && (r.employeeId === emp.employeeId || r.employeeId === emp.id)) ||
+      (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
       (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
     if (!matchesEmployee) return false;
     const start = r.startDate || r.fromDate;
