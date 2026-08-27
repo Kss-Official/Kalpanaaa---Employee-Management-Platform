@@ -58,7 +58,7 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onOpenAddEmployee }) => {
-  const { employees, attendance, settings, activeEmployee, auditLogs, companyWideWfhDates, addAuditLog, leaveRequests, updateAttendanceRecord } = useAuth();
+  const { employees, attendance, settings, activeEmployee, auditLogs, companyWideWfhDates, addAuditLog, leaveRequests, updateAttendanceRecord, updateEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   // Track which record IDs are currently being overridden (to show loading state)
@@ -68,15 +68,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   // Override: admin manually removes WFH flag from an attendance record via the proper updateAttendanceRecord path
   const removeWfhOverride = async (rec: AttendanceRecord, emp: Employee, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!rec?.id) {
-      alert('Cannot override: attendance record has no ID. Please refresh the page.');
+    if (!rec?.id && !emp?.id) {
+      alert('Cannot override: employee information is missing.');
       return;
     }
-    setWfhOverrideLoading(prev => ({ ...prev, [rec.id]: true }));
+    const recId = rec?.id || `att-${emp.id}-${rec?.date || getWorkDate(new Date())}`;
+    setWfhOverrideLoading(prev => ({ ...prev, [recId]: true }));
     try {
       // Calculate real status from check-in timestamp in IST
       let realStatus = 'Present';
-      if (rec.checkInAt) {
+      if (rec?.checkInAt) {
         try {
           const iso = typeof rec.checkInAt === 'string'
             ? rec.checkInAt
@@ -89,22 +90,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           realStatus = (h > 10 || (h === 10 && m > 15)) ? 'Late' : 'Present';
         } catch { realStatus = 'Present'; }
       }
-      // Use the auth-aware updateAttendanceRecord — this goes through Firestore rules correctly
-      await updateAttendanceRecord(rec.id, {
-        isWfh: false,
-        status: realStatus as any,
-        notes: ((rec.notes || '') + ' [Admin override: WFH removed]').trim()
-      });
+
+      const dateStr = rec?.date || getWorkDate(new Date());
+
+      // 1. Update Attendance Record in Firestore & local state
+      if (rec?.id) {
+        await updateAttendanceRecord(rec.id, {
+          isWfh: false,
+          status: realStatus as any,
+          notes: ((rec.notes || '') + ' [Admin override: WFH removed]').trim()
+        });
+      }
+
+      // 2. Clear date from employee approvedWfhDates in Firestore
+      if (emp?.approvedWfhDates && emp.approvedWfhDates.length > 0) {
+        const cleanedDates = emp.approvedWfhDates.filter(d => d !== dateStr);
+        if (updateEmployee) {
+          updateEmployee(emp.id, { approvedWfhDates: cleanedDates });
+        }
+        try {
+          await setDoc(doc(db, 'employees', emp.id), { approvedWfhDates: cleanedDates, updatedAt: serverTimestamp() }, { merge: true });
+        } catch {}
+      }
+
+      // 3. Cancel any approved WFH leave request for this employee covering this date
+      const wfhReqs = (leaveRequests || []).filter(r =>
+        r.type === 'WFH' &&
+        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        dateStr >= (r.startDate || (r as any).fromDate) &&
+        dateStr <= (r.endDate || (r as any).toDate || r.startDate)
+      );
+      for (const req of wfhReqs) {
+        try {
+          await setDoc(doc(db, 'leaveRequests', req.id), { status: 'Cancelled', updatedAt: serverTimestamp() }, { merge: true });
+        } catch {}
+      }
+
       addAuditLog('ADMIN_WFH_OVERRIDE', emp.employeeId,
-        `Admin removed WFH for ${emp.fullName} on ${rec.date}. Status corrected to ${realStatus}.`);
+        `Admin removed WFH for ${emp.fullName} on ${dateStr}. Status corrected to ${realStatus}.`);
       triggerHaptic('success');
-      setWfhOverrideSuccess(prev => ({ ...prev, [rec.id]: true }));
-      setTimeout(() => setWfhOverrideSuccess(prev => ({ ...prev, [rec.id]: false })), 3000);
+      setWfhOverrideSuccess(prev => ({ ...prev, [recId]: true }));
+      setTimeout(() => setWfhOverrideSuccess(prev => ({ ...prev, [recId]: false })), 3000);
     } catch (err: any) {
       console.error('[WFH Override] Failed:', err);
-      alert(`Failed to remove WFH: ${err?.message || 'Unknown error'}. Check Firestore permissions.`);
+      alert(`Failed to remove WFH: ${err?.message || 'Unknown error'}.`);
     } finally {
-      setWfhOverrideLoading(prev => ({ ...prev, [rec.id]: false }));
+      setWfhOverrideLoading(prev => ({ ...prev, [recId]: false }));
     }
   };
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month'>('today');
@@ -162,11 +195,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       const isCompanyWfh = (companyWideWfhDates || []).includes(todayStr) || ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
       // Individual WFH approval: must have an explicit approved WFH leave request or entry in approvedWfhDates
       const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
-      // True WFH = individual approval OR company-wide WFH (but NOT overriding an actual office check-in)
-      // If the employee has a real attendance record with a check-in and NO individual WFH approval,
-      // they physically came to office (or checked in genuinely) — treat as Present/Late, not WFH.
-      const hasRealCheckIn = !!(rec?.checkInAt) && !isApprovedEmpWfh;
-      const isWfh = isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn);
+      
+      // If employee has physically checked in, check-in always wins over WFH unless explicitly approved WFH
+      const hasRealCheckIn = !!(rec?.checkInAt);
+      const isExplicitNonWfh = rec?.isWfh === false;
+      const isWfh = !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
 
       // Active break detection
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
@@ -180,10 +213,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
-      } else if (rec?.checkInAt && !isApprovedEmpWfh) {
-        // Real check-in record without individual WFH approval → Present/Late (office attendance)
+      } else if (rec?.checkInAt && (!isApprovedEmpWfh || isExplicitNonWfh)) {
+        // Any checked in employee without active approved WFH is Present
         computedStatus = 'Present';
-      } else if (isWfh) {
+      } else if (isWfh && !isExplicitNonWfh) {
         computedStatus = 'Work From Home';
       } else if (rec) {
         if (rec.status === 'Present' || rec.status === 'Late' || rec.checkInAt) {
@@ -193,7 +226,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         } else if (rec.status === 'Absent') {
           computedStatus = 'Absent';
         }
-      } else if (leaveReq) {
+      } else if (leaveReq && leaveReq.type !== 'WFH') {
         computedStatus = 'On Leave';
       } else if (emp.status === 'On Leave') {
         computedStatus = 'On Leave';
@@ -211,7 +244,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         isCheckedIn,
         activeBreak,
         isLate,
-        isWfh,
+        isWfh: computedStatus === 'Work From Home',
         isShiftComplete: isComplete,
         leaveReq
       };

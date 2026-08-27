@@ -147,8 +147,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
       const isCompanyWfh = ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
       const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
-      const hasRealCheckIn = !!(rec?.checkInAt) && !isApprovedEmpWfh;
-      const isWfh = isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn);
+      const hasRealCheckIn = !!(rec?.checkInAt);
+      const isExplicitNonWfh = rec?.isWfh === false;
+      const isWfh = !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
 
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
       const isComplete = isShiftComplete(rec);
@@ -159,9 +160,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
-      } else if (rec?.checkInAt && !isApprovedEmpWfh) {
+      } else if (rec?.checkInAt && (!isApprovedEmpWfh || isExplicitNonWfh)) {
         computedStatus = 'Present';
-      } else if (isWfh) {
+      } else if (isWfh && !isExplicitNonWfh) {
         computedStatus = 'Work From Home';
       } else if (rec) {
         if (rec.status === 'Present' || rec.status === 'Late' || rec.checkInAt) {
@@ -171,7 +172,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         } else if (rec.status === 'Absent') {
           computedStatus = 'Absent';
         }
-      } else if (leaveReq) {
+      } else if (leaveReq && leaveReq.type !== 'WFH') {
         computedStatus = 'On Leave';
       } else if (emp.status === 'On Leave') {
         computedStatus = 'On Leave';
@@ -188,7 +189,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         isCheckedIn,
         activeBreak,
         isLate,
-        isWfh,
+        isWfh: computedStatus === 'Work From Home',
         isShiftComplete: isComplete,
         leaveReq
       };
