@@ -9,6 +9,7 @@ import {
   X,
   Download
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { UserRole } from '../../types';
 import { getEmployeeWorkDate, resolveAttendanceRecord } from '../../lib/attendanceEngine';
 import { NotificationBell } from './NotificationBell';
@@ -42,30 +43,55 @@ export const Header: React.FC<HeaderProps> = ({
     if (!activeEmployee) return;
     setHeaderActionLoading(true);
 
-    let resolved = false;
-    const runCheckIn = (lat?: number, lon?: number, accuracy: number = 10) => {
-      if (resolved) return;
-      resolved = true;
-      checkIn(activeEmployee.id, lat, lon, 'Facial Recognition', accuracy).finally(() => setHeaderActionLoading(false));
-    };
+    const submit = (lat?: number, lon?: number, accuracy: number = 10) =>
+      checkIn(activeEmployee.id, lat, lon, 'Facial Recognition', accuracy)
+        .then(res => {
+          // The result used to be discarded (.finally only), so a REJECTED
+          // check-in looked identical to a successful one from the employee's
+          // side — they had no way to tell they had been blocked.
+          if (res.success) toast.success(res.message || 'Checked in.');
+          else toast.error(res.message || 'Check-In failed.');
+        })
+        .catch(err => toast.error(err?.message || 'Check-In failed.'))
+        .finally(() => setHeaderActionLoading(false));
 
-    if (navigator.geolocation) {
-      const fallbackTimer = setTimeout(() => runCheckIn(), 1200);
+    // ── GEOFENCE FIX ─────────────────────────────────────────────────────────
+    // This used to arm a 1200ms timer that called checkIn() with NO coordinates,
+    // and the geolocation error callback did exactly the same. So denying the
+    // location prompt — or merely taking longer than 1.2s to answer it, which a
+    // real GPS fix almost always does — checked the employee in from anywhere.
+    // A coordinate-less check-in is now refused outright while the geofence is
+    // on; only an admin turning settings.gpsRequired off still permits one.
+    // The timeout is also raised to 10s to match the employee portal, because
+    // 1200ms was never long enough to acquire a fix in the first place.
+    const geofenceOn = settings.gpsRequired !== false;
 
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          clearTimeout(fallbackTimer);
-          runCheckIn(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
-        },
-        () => {
-          clearTimeout(fallbackTimer);
-          runCheckIn();
-        },
-        { enableHighAccuracy: false, timeout: 1200 }
-      );
-    } else {
-      runCheckIn();
+    if (!navigator.geolocation) {
+      if (geofenceOn) {
+        toast.error('GPS Required: this device cannot report a location, so office check-in is not possible.');
+        setHeaderActionLoading(false);
+        return;
+      }
+      submit();
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      pos => submit(pos.coords.latitude, pos.coords.longitude, Math.round(pos.coords.accuracy) || 10),
+      err => {
+        if (geofenceOn) {
+          toast.error(
+            err && err.code === 1
+              ? 'Location Permission Denied: you must allow location access to check in at the office.'
+              : `GPS Location Required: your location could not be determined (${err?.message || 'unavailable'}). Move to a spot with a clearer signal and try again.`
+          );
+          setHeaderActionLoading(false);
+          return;
+        }
+        submit();
+      },
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 }
+    );
   };
 
   useEffect(() => {

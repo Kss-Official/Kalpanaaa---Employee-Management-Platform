@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { isExecutiveOrLeadership, formatShiftTiming } from '../../lib/attendanceEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, 
@@ -24,11 +25,14 @@ import {
 import { OneOnOneNote, Employee } from '../../types';
 import { db, cleanFirestorePayload, subscribeWithRecovery } from '../../lib/firebase';
 import { collection, setDoc, doc, deleteDoc } from 'firebase/firestore';
+import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
+
 export const PMTeamPerformance: React.FC = () => {
   const { employees, activeEmployee, isAuthenticated } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDept, setSelectedDept] = useState('ALL');
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.id || '');
+  const [monthlyAttendanceEmp, setMonthlyAttendanceEmp] = useState<Employee | null>(null);
 
   // 1:1 Notes state with LocalStorage and Firestore persistence
   const [notes, setNotes] = useState<OneOnOneNote[]>(() => {
@@ -81,8 +85,12 @@ export const PMTeamPerformance: React.FC = () => {
   const [noteContent, setNoteContent] = useState('');
   const [actionItemInput, setActionItemInput] = useState('');
 
-  // Extract unique departments for filter buttons
-  const validEmployees = employees.filter(e => e && e.fullName && e.fullName.trim().length > 0);
+  // Extract unique departments for filter buttons. Executive Leadership is
+  // excluded here too, so this surface agrees with the admin/HR dashboards and
+  // the payroll ledger instead of quietly reporting a larger team.
+  const validEmployees = employees.filter(
+    e => e && e.fullName && e.fullName.trim().length > 0 && !isExecutiveOrLeadership(e)
+  );
   const departments = ['ALL', ...Array.from(new Set(validEmployees.map(e => e.department).filter(Boolean)))];
 
   const filteredEmployees = validEmployees.filter(emp => {
@@ -137,7 +145,7 @@ export const PMTeamPerformance: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono font-bold text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
-            {filteredEmployees.length} / {employees.length} Team Members
+            {filteredEmployees.length} / {validEmployees.length} Team Members
           </span>
         </div>
       </div>
@@ -237,7 +245,7 @@ export const PMTeamPerformance: React.FC = () => {
               </div>
               <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
                 <span className="text-slate-400 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-slate-500" /> Assigned Shift</span>
-                <span className="text-slate-300 text-[11px]">{selectedEmp.shift || 'Day Shift (10:00 - 19:00)'}</span>
+                <span className="text-slate-300 font-semibold text-[11px]">{formatShiftTiming(selectedEmp.shift || selectedEmp.preferredShift)}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">Sprint On-Time Score</span>
@@ -251,12 +259,21 @@ export const PMTeamPerformance: React.FC = () => {
               </div>
             </div>
 
-            <button
-              onClick={() => setIsNoteModalOpen(true)}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-900/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> Add 1:1 Meeting Note
-            </button>
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={() => setIsNoteModalOpen(true)}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-900/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> Add 1:1 Meeting Note
+              </button>
+
+              <button
+                onClick={() => setMonthlyAttendanceEmp(selectedEmp)}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Calendar className="w-4 h-4 text-blue-400" /> View &amp; Override 30-Day Attendance
+              </button>
+            </div>
           </div>
 
           {/* 1:1 Meeting Notes & Mentorship Feed */}
@@ -377,6 +394,14 @@ export const PMTeamPerformance: React.FC = () => {
             </form>
           </motion.div>
         </div>
+      )}
+
+      {/* Render Employee Monthly Attendance Modal with PM Override */}
+      {monthlyAttendanceEmp && (
+        <EmployeeMonthlyAttendanceModal
+          employee={monthlyAttendanceEmp}
+          onClose={() => setMonthlyAttendanceEmp(null)}
+        />
       )}
     </div>
   );

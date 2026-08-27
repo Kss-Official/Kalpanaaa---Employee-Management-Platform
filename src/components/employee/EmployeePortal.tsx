@@ -30,6 +30,7 @@ import {
   Calendar,
   Globe,
   ShieldCheck,
+  Palmtree,
   Zap,
   Save,
   RotateCcw,
@@ -52,7 +53,10 @@ import {
   Key,
   Users,
   GraduationCap,
-  Filter
+  Filter,
+  MessageSquare,
+  Star,
+  PieChart as PieChartIcon
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import Barcode from 'react-barcode';
@@ -66,17 +70,35 @@ import {
   resolveAttendanceRecord,
   isShiftComplete,
   safeGetTimestampMillis,
-  calculateBreakBreakdown,
   calculateTotalBreakMinutes,
-  isLateCheckIn
+  isLateCheckIn,
+  computeLiveShiftBreakdown,
+  buildPieSlices,
+  formatDuration,
+  formatClock,
+  classifyBreakType,
+  buildEmployeeMonthRoster,
+  summarizeMonthRoster,
+  buildMonthCalendar,
+  getMonthKey,
+  shiftMonthKey,
+  formatMonthKey,
+  getDayName,
+  getHolidayInfo,
+  SHIFT_LABEL,
+  SHIFT_TOTAL_MINUTES,
+  formatShiftTiming,
+  validateCheckInEligibility
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
 import { EmployeeLeaveTab } from './EmployeeLeaveTab';
 import { EmployeeTeamDirectory } from './EmployeeTeamDirectory';
 import { EmployeePayslips } from './EmployeePayslips';
+import { EmployeeFeedbackView } from './EmployeeFeedbackView';
 import { ConsentModal } from '../shared/ConsentModal';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
+import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { getEmployeeDescriptor } from '../../lib/faceDescriptorStore';
 import { BreakEntry, BreakType, normalizeBreakType } from '../../types';
 
@@ -181,7 +203,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [bio, setBio] = useState(activeEmployee?.bio || 'Dedicated software & operations engineering professional at Kalpanaaa HRMS.');
   const [skills, setSkills] = useState<string[]>(activeEmployee?.skills || ['React', 'TypeScript', 'HR Management', 'Project Coordination']);
   const [newSkillInput, setNewSkillInput] = useState('');
-  const [preferredShift, setPreferredShift] = useState(activeEmployee?.preferredShift || activeEmployee?.shift || 'General Shift (10:00 - 19:00)');
+  const [preferredShift, setPreferredShift] = useState(activeEmployee?.preferredShift || activeEmployee?.shift || 'Day Shift (10:00 AM – 7:00 PM)');
   const [linkedinUrl, setLinkedinUrl] = useState(activeEmployee?.linkedinUrl || 'https://linkedin.com/in/employee');
 
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -190,6 +212,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Late' | 'Absent' | 'Leave'>('All');
+  const [isMonthlyAnalyticsOpen, setIsMonthlyAnalyticsOpen] = useState(false);
 
   const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
     (activeEmployee?.designation || '').toUpperCase().includes('CEO') ||
@@ -210,15 +233,71 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const shiftComplete = isShiftComplete(todayRecord);
 
   const rawHistory = attendance.filter(a => isAttendanceForEmployee(a, activeEmployee));
-  const empHistory = rawHistory.filter(rec => {
+
+  // ── Item #6: month-wise attendance ─────────────────────────────────────────
+  // The history list used to be a plain filter over /attendance, which can only
+  // ever show the days the employee turned UP: absence is the absence of a
+  // document, so absent days, weekly offs and holidays were all equally invisible.
+  // buildEmployeeMonthRoster materialises a row per calendar day using the very
+  // same precedence rules as the admin roster, so the two can never disagree.
+  const [monthKey, setMonthKey] = useState<string>(() => getMonthKey(new Date()));
+  const holidayDates = React.useMemo<string[]>(
+    () => ((settings as any)?.holidayDates || []) as string[],
+    [settings]
+  );
+
+  const monthRoster = React.useMemo(
+    () => buildEmployeeMonthRoster(activeEmployee, attendance, monthKey, {
+      leaveRequests,
+      holidayDates,
+      nowMs: Date.now()
+    }),
+    [activeEmployee, attendance, monthKey, leaveRequests, holidayDates]
+  );
+
+  const monthSummary = React.useMemo(
+    () => summarizeMonthRoster(monthRoster, monthKey, { nowMs: Date.now() }),
+    [monthRoster, monthKey]
+  );
+
+  const monthCalendar = React.useMemo(
+    () => buildMonthCalendar(monthKey, monthRoster, { holidayDates, todayStr }),
+    [monthKey, monthRoster, holidayDates, todayStr]
+  );
+
+  const applyStatusFilter = React.useCallback((rec: any) => {
     if (attendanceFilter === 'All') return true;
-    if (attendanceFilter === 'Leave') return rec.status === 'On Leave' || rec.status === 'Leave';
+    if (attendanceFilter === 'Leave') {
+      return rec.status === 'On Leave' || rec.status === 'Leave' ||
+        rec.status === 'Work From Home' || rec.isWfh;
+    }
+    if (attendanceFilter === 'Present') {
+      // Late and WFH employees ARE at work — filtering them out of "Present" made
+      // the list disagree with the headline present count.
+      return rec.status === 'Present' || rec.status === 'Late' ||
+        rec.status === 'Work From Home' || rec.isWfh;
+    }
     return rec.status === attendanceFilter;
-  });
+  }, [attendanceFilter]);
+
+  // 'all' shows the raw lifetime history; a month key shows the derived roster.
+  const [historyScope, setHistoryScope] = useState<'month' | 'all'>('month');
+  const empHistory = React.useMemo(
+    () => (historyScope === 'all' ? (rawHistory as any[]) : monthRoster)
+      .filter(applyStatusFilter)
+      // A history list must not contain days that have not happened. The month
+      // roster deliberately carries future weekly offs and approved upcoming
+      // leave (the calendar wants them); the list does not.
+      .filter((rec: any) => !rec.date || rec.date <= todayStr)
+      // Newest first. The month roster is generated day 1 -> day N, which would
+      // otherwise flip the list order the moment the user switched scope.
+      .slice()
+      .sort((a: any, b: any) => String(b.date || '').localeCompare(String(a.date || ''))),
+    [historyScope, rawHistory, monthRoster, applyStatusFilter, todayStr]
+  );
 
   // Break & WFH state
   const [activeBreak, setActiveBreak] = useState<{ type: string; startAt: string } | null>(null);
-  const [breakElapsedSec, setBreakElapsedSec] = useState(0);
   const [isWfh, setIsWfh] = useState(false);
 
   // ── BUG 7 FIX — Stable scalar derived from the open (in-progress) break. ──
@@ -245,74 +324,46 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     setIsWfh(!!todayRecord?.isWfh || todayRecord?.status === 'Work From Home');
   }, [todayRecord?.breaks, todayRecord?.isWfh, todayRecord?.status]);
 
-  // Multi-Device Real-Time Live Shift Sync (Fixes E37 Contract)
-  const [, setLiveSyncTick] = useState(0);
+  // ── Single live clock for the whole shift panel ──────────────────────────────
+  // P2 FIX (proficiency timer accuracy): there used to be THREE independent
+  // tickers — a 2s multi-device sync tick, a 1s break ticker and a 1s work
+  // ticker — each with its own arithmetic. The work ticker subtracted the
+  // minute-rounded `totalBreakMinutes` while the productivity ratio used
+  // timestamp-exact seconds, so the two disagreed and the displayed percentages
+  // drifted further apart the more short breaks an employee took.
+  //
+  // Now ONE 1-second clock drives ONE memoised breakdown
+  // (computeLiveShiftBreakdown), and every timer, bar and pie slice on this
+  // screen is read off that single object. They cannot disagree by construction.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const syncInterval = setInterval(() => {
-      setLiveSyncTick(t => t + 1);
-    }, 2000);
-    return () => clearInterval(syncInterval);
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Break live timer — driven by the stable openBreakStartAt scalar.
-  // Resets cleanly when a new break starts or the current break ends.
-  useEffect(() => {
-    if (!openBreakStartAt) { setBreakElapsedSec(0); return; }
-    const startMs = safeGetTimestampMillis(openBreakStartAt);
-    if (!startMs) { setBreakElapsedSec(0); return; }
-    const calc = () => {
-      setBreakElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
-    };
-    calc();
-    const interval = setInterval(calc, 1000);
-    return () => clearInterval(interval);
-  }, [openBreakStartAt]);
+  const liveShift = React.useMemo(
+    () => computeLiveShiftBreakdown(todayRecord, nowMs),
+    // Stable scalar deps only — never JSON.stringify(todayRecord), which fired on
+    // every Firestore field write (BUG 7) and reset the counter mid-shift.
+    // `nowMs` advances every second, so open breaks stay live regardless.
+    [todayRecord?.checkInAt, todayRecord?.checkOutAt, todayRecord?.breaks, nowMs]
+  );
 
-  // Live WORK seconds ticker.
-  // BUG 7 FIX: Deps use only stable scalar values — never JSON.stringify(todayRecord)
-  // which fired on every Firestore field write and reset the counter mid-shift.
-  // Also reads the active break directly from openBreakStartAt (stable scalar)
-  // instead of from the activeBreak React state, which could lag one render behind.
-  const [liveWorkSec, setLiveWorkSec] = useState(0);
-  useEffect(() => {
-    const startMs = safeGetTimestampMillis(todayRecord?.checkInAt);
-    const endMs = safeGetTimestampMillis(todayRecord?.checkOutAt);
-    if (!startMs) {
-      setLiveWorkSec(0);
-      return;
-    }
-    const completedBreakMs = (todayRecord?.totalBreakMinutes ?? 0) * 60000;
+  // Kept as named values so the existing render code reads unchanged, but both
+  // now come from the same source of truth.
+  const liveWorkSec = liveShift.workSecs;
+  const breakElapsedSec = liveShift.activeBreakSecs;
 
-    // If shift is completed (checked out), compute total finished shift work seconds
-    if (endMs && endMs > startMs) {
-      const totalElapsedMs = Math.max(0, endMs - startMs);
-      const workMs = Math.max(0, totalElapsedMs - completedBreakMs);
-      setLiveWorkSec(Math.floor(workMs / 1000));
-      return;
-    }
+  // Root-Level Check-In Eligibility (Strictly blocks check-in on leaves, holidays, Sundays)
+  const checkInEligibility = React.useMemo(() => {
+    if (!activeEmployee) return { allowed: false, reason: 'NONE' as const, message: 'No active employee' };
+    return validateCheckInEligibility(activeEmployee, todayStr, {
+      leaveRequests,
+      settings
+    });
+  }, [activeEmployee, todayStr, leaveRequests, settings]);
 
-    const activeBreakStartMs = safeGetTimestampMillis(openBreakStartAt);
-
-    const computeWorkSec = () => {
-      const totalElapsedMs = Math.max(0, Date.now() - startMs);
-      const activeBreakMs = openBreakStartAt && activeBreakStartMs
-        ? Math.max(0, Date.now() - activeBreakStartMs)
-        : 0;
-      const workMs = Math.max(0, totalElapsedMs - completedBreakMs - activeBreakMs);
-      setLiveWorkSec(Math.floor(workMs / 1000));
-    };
-
-    computeWorkSec();
-    const interval = setInterval(computeWorkSec, 1000);
-    return () => clearInterval(interval);
-  }, [
-    todayRecord?.checkInAt,
-    todayRecord?.checkOutAt,
-    todayRecord?.totalBreakMinutes,
-    openBreakStartAt,
-  ]);
-
-  const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list'>('cards');
+  const [attendanceViewMode, setAttendanceViewMode] = useState<'cards' | 'list' | 'calendar'>('calendar');
   const [editingProfileField, setEditingProfileField] = useState<string | null>(null);
   const [isEditingProfileSheet, setIsEditingProfileSheet] = useState(false);
 
@@ -506,6 +557,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       return;
     }
 
+    let fallbackWatchId: number | null = null;
     const watchId = navigator.geolocation.watchPosition(
       pos => {
         setGpsLocation({ 
@@ -516,13 +568,35 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         setGpsError(null);
       },
       err => {
-        console.warn('Employee location watch prompt:', err.message);
-        setGpsError(err.message || 'Location access denied or unavailable.');
+        // If high accuracy timed out, fall back to standard accuracy
+        if (err.code === 3 && fallbackWatchId === null) {
+          fallbackWatchId = navigator.geolocation.watchPosition(
+            pos => {
+              setGpsLocation({ 
+                lat: pos.coords.latitude, 
+                lon: pos.coords.longitude,
+                accuracy: Math.round(pos.coords.accuracy) || 15
+              });
+              setGpsError(null);
+            },
+            err2 => {
+              console.warn('Employee location standard watch error:', err2.message);
+              setGpsError(err2.message || 'Location access denied or unavailable.');
+            },
+            { enableHighAccuracy: false, maximumAge: 30000, timeout: 20000 }
+          );
+        } else {
+          console.warn('Employee location watch prompt:', err.message);
+          setGpsError(err.message || 'Location access denied or unavailable.');
+        }
       },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 }
     );
 
-    return () => navigator.geolocation.clearWatch(watchId);
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      if (fallbackWatchId !== null) navigator.geolocation.clearWatch(fallbackWatchId);
+    };
   }, []);
 
   const liveDistanceMeters = (gpsLocation && companyWorkZone)
@@ -533,8 +607,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     ? liveDistanceMeters <= companyWorkZone.radiusMeters
     : false;
 
-  // GPS location verification is active for manual Check-In & Check-Out.
-  // Geofence automated breaks are completely disabled (all breaks & check-ins are manually triggered on laptop).
+  // GPS location verification is enforced for check-in, check-out AND every break
+  // (meal, tea, huddle, training…). All of them are office-only unless the day is an
+  // approved WFH day or an admin has switched settings.gpsRequired off. The live fix
+  // above is handed to the break calls so they reuse it instead of re-acquiring one.
 
   // Generate Static QR Code for ID Card (Company Website)
   useEffect(() => {
@@ -573,6 +649,39 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
       isFaceModalOpen ||
       isEnrollFaceModalOpen
     ) return;
+
+    // Strict Root Rule Check: Approved Leaves, Official Holidays & Sunday Weekly Offs
+    if (!checkInEligibility.allowed) {
+      triggerHaptic('error');
+      setActionFeedback({
+        success: false,
+        message: checkInEligibility.message
+      });
+      return;
+    }
+
+    // Strict GPS Geofence Pre-Check on normal office days
+    const isGpsEnforced = settings.gpsRequired !== false;
+    if (!isWfh && isGpsEnforced) {
+      if (!gpsLocation) {
+        triggerHaptic('error');
+        setActionFeedback({
+          success: false,
+          message: 'GPS Location Required: Location access is denied or unavailable. Please enable browser location permissions and be at the company office to check in.'
+        });
+        return;
+      }
+
+      if (liveDistanceMeters !== null && !isVerifiedLocation) {
+        triggerHaptic('error');
+        setActionFeedback({
+          success: false,
+          message: `Check-In Blocked: You are ${liveDistanceMeters}m away from the office (Allowed limit: ${companyWorkZone.radiusMeters}m). You must check in at the company office location.`
+        });
+        return;
+      }
+    }
+
     selfCheckInInProgressRef.current = true;
     triggerHaptic('medium');
     const hasConsent = localStorage.getItem('kss_biometric_consent') === 'true';
@@ -660,7 +769,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     triggerHaptic('medium');
     try {
       if (!activeEmployee) return;
-      const res = await startBreak(activeEmployee.id, type);
+      const res = await startBreak(activeEmployee.id, type, gpsLocation?.lat, gpsLocation?.lon);
       if (res.success) {
         triggerHaptic('success');
         const emojiMap: Record<string, string> = {
@@ -694,7 +803,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     triggerHaptic('medium');
     try {
       if (!activeEmployee) return;
-      const res = await endBreak(activeEmployee.id);
+      const res = await endBreak(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon);
       if (res.success) {
         triggerHaptic('success');
         setActionFeedback({ success: true, message: res.message || 'Break ended. Welcome back! 👋' });
@@ -1037,30 +1146,77 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                       </span>
                     </div>
                   ) : !todayRecord?.checkInAt ? (
-                    <button 
-                      onClick={handleSelfCheckIn} 
-                      disabled={isCheckingIn || isCheckingOut}
-                      className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] transition-all cursor-pointer outline-none ${
-                        isCheckingIn 
-                          ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
-                          : 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-glow-blue)]'
-                      } ${!isCheckingIn && animations.tap}`}
-                    >
-                      <div className="absolute inset-1 rounded-full border border-[var(--border-subtle)] opacity-50 pointer-events-none" />
-                      
-                      {isCheckingIn ? (
-                        <>
-                          <Loader2 className="w-10 h-10 mb-2 animate-spin text-[var(--accent-blue)]" />
-                          <span className="font-semibold text-sm">Verifying...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Fingerprint className="w-12 h-12 mb-3 text-[var(--accent-blue)]" strokeWidth={1.5} />
-                          <span className="font-bold text-sm tracking-wide">Tap to Check In</span>
-                          <span className="text-[10px] text-[var(--text-tertiary)] mt-1">Ready</span>
-                        </>
-                      )}
-                    </button>
+                    !checkInEligibility.allowed ? (
+                      <div className="flex flex-col items-center justify-center gap-3 text-center">
+                        <div className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] shadow-xl text-center p-4 ${
+                          checkInEligibility.reason === 'ON_LEAVE'
+                            ? 'border-purple-500/60 bg-gradient-to-b from-purple-950/40 to-slate-900 text-purple-300 shadow-purple-950/50'
+                            : checkInEligibility.reason === 'OFFICIAL_HOLIDAY'
+                              ? 'border-amber-500/60 bg-gradient-to-b from-amber-950/40 to-slate-900 text-amber-300 shadow-amber-950/50'
+                              : 'border-blue-500/60 bg-gradient-to-b from-blue-950/40 to-slate-900 text-blue-300 shadow-blue-950/50'
+                        }`}>
+                          {checkInEligibility.reason === 'ON_LEAVE' ? (
+                            <>
+                              <Palmtree className="w-10 h-10 mb-1.5 text-purple-400" />
+                              <span className="font-extrabold text-sm tracking-wide text-white">On Approved Leave</span>
+                              <span className="text-[10px] font-bold text-purple-300 mt-1 bg-purple-500/20 px-2.5 py-0.5 rounded-full border border-purple-500/30 truncate max-w-[150px]">
+                                {checkInEligibility.leaveType || 'Paid Leave'}
+                              </span>
+                            </>
+                          ) : checkInEligibility.reason === 'OFFICIAL_HOLIDAY' ? (
+                            <>
+                              <Calendar className="w-10 h-10 mb-1.5 text-amber-400" />
+                              <span className="font-extrabold text-sm tracking-wide text-white">Company Holiday</span>
+                              <span className="text-[10px] font-bold text-amber-300 mt-1 bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-500/30 truncate max-w-[150px]">
+                                {checkInEligibility.holidayName || 'Official Holiday'}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Calendar className="w-10 h-10 mb-1.5 text-blue-400" />
+                              <span className="font-extrabold text-sm tracking-wide text-white">Weekly Off</span>
+                              <span className="text-[10px] font-bold text-blue-300 mt-1 bg-blue-500/20 px-2.5 py-0.5 rounded-full border border-blue-500/30">
+                                Sunday Off
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className={`text-xs font-semibold px-4 py-2 rounded-xl border max-w-[320px] ${
+                          checkInEligibility.reason === 'ON_LEAVE'
+                            ? 'bg-purple-500/10 border-purple-500/30 text-purple-300'
+                            : checkInEligibility.reason === 'OFFICIAL_HOLIDAY'
+                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                              : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                        }`}>
+                          {checkInEligibility.message}
+                        </div>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={handleSelfCheckIn} 
+                        disabled={isCheckingIn || isCheckingOut}
+                        className={`relative flex flex-col items-center justify-center w-[180px] h-[180px] rounded-full border-[3px] transition-all cursor-pointer outline-none ${
+                          isCheckingIn 
+                            ? 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] text-[var(--accent-blue)] animate-pulse'
+                            : 'border-[var(--accent-blue)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-glow-blue)]'
+                        } ${!isCheckingIn && animations.tap}`}
+                      >
+                        <div className="absolute inset-1 rounded-full border border-[var(--border-subtle)] opacity-50 pointer-events-none" />
+                        
+                        {isCheckingIn ? (
+                          <>
+                            <Loader2 className="w-10 h-10 mb-2 animate-spin text-[var(--accent-blue)]" />
+                            <span className="font-semibold text-sm">Verifying...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Fingerprint className="w-12 h-12 mb-3 text-[var(--accent-blue)]" strokeWidth={1.5} />
+                            <span className="font-bold text-sm tracking-wide">Tap to Check In</span>
+                            <span className="text-[10px] text-[var(--text-tertiary)] mt-1">Ready</span>
+                          </>
+                        )}
+                      </button>
+                    )
                   ) : !shiftComplete ? (
                     <div className="flex flex-col items-center justify-center gap-4 w-full">
                       <div className="flex items-center justify-center gap-4 sm:gap-6 flex-wrap">
@@ -1237,6 +1393,74 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 </div>
               </div>
 
+              {/* Pre-shift state — the right panel used to render NOTHING at all
+                  before check-in (item #11: "employee right section is empty").
+                  It now always shows the shift plan and a zeroed live pie, so the
+                  panel is informative from the moment the portal loads. */}
+              {!todayRecord?.checkInAt && (
+                <div
+                  data-testid="preshift-panel"
+                  className="mt-4 pt-3 border-t border-slate-800/80 space-y-3"
+                >
+                  <div className="flex items-center justify-between text-[11px] font-bold">
+                    <span className="text-slate-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                      Shift Productivity Ratio
+                    </span>
+                    <span className="text-slate-500 font-mono">Awaiting check-in</span>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="relative shrink-0">
+                      <svg viewBox="0 0 100 100" className="w-[104px] h-[104px]" role="img" aria-label="Shift not started">
+                        <circle cx="50" cy="50" r="42" className="fill-slate-950" />
+                        <circle
+                          cx="50" cy="50" r="34"
+                          className="fill-none stroke-slate-800"
+                          strokeWidth="16"
+                          strokeDasharray="4 4"
+                        />
+                        <circle cx="50" cy="50" r="25" className="fill-slate-900" />
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span className="text-[15px] font-black text-slate-600 font-mono leading-none">--</span>
+                        <span className="text-[8px] font-bold text-slate-600 uppercase tracking-wider mt-0.5">Work</span>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Rostered Shift</span>
+                        <span className="font-mono font-bold text-slate-300 shrink-0">{SHIFT_LABEL}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Shift Length</span>
+                        <span className="font-mono font-bold text-slate-300 shrink-0">
+                          {formatDuration(SHIFT_TOTAL_MINUTES * 60)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Work Timer</span>
+                        <span className="font-mono font-bold text-slate-500 shrink-0">{formatClock(0)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="w-2 h-2 rounded-full bg-slate-700 inline-block shrink-0" />
+                        <span className="font-bold text-slate-400 truncate flex-1">Breaks Taken</span>
+                        <span className="font-mono font-bold text-slate-500 shrink-0">{formatClock(0)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800" />
+                  <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider text-center">
+                    Your live work, break and meal timings appear here once you check in
+                  </p>
+                </div>
+              )}
+
               {todayRecord?.checkInAt && (
                 <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2">
                   {/* Live Work Timer */}
@@ -1279,83 +1503,104 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     );
                   })()}
 
-                  {/* Live Productivity & Multi-Color Shift Distribution Meter */}
+                  {/* Live Productivity — Pie + Segmented Bar, one source of truth */}
                   {(() => {
-                    const breakdown = calculateBreakBreakdown(todayRecord.breaks || [], breakElapsedSec);
-                    const { teaSecs, mealSecs, huddleSecs, meetingSecs, trainingSecs, activitySecs, totalBreakSecs } = breakdown;
-                    const grandTotalSecs = liveWorkSec + totalBreakSecs;
-
-                    const workPct = grandTotalSecs > 0 ? Math.round((liveWorkSec / grandTotalSecs) * 100) : 100;
-                    const teaPct = grandTotalSecs > 0 ? Math.round((teaSecs / grandTotalSecs) * 100) : 0;
-                    const mealPct = grandTotalSecs > 0 ? Math.round((mealSecs / grandTotalSecs) * 100) : 0;
-                    const huddlePct = grandTotalSecs > 0 ? Math.round((huddleSecs / grandTotalSecs) * 100) : 0;
-                    const meetingPct = grandTotalSecs > 0 ? Math.round((meetingSecs / grandTotalSecs) * 100) : 0;
-                    const trainingPct = grandTotalSecs > 0 ? Math.round((trainingSecs / grandTotalSecs) * 100) : 0;
-                    const activityPct = Math.max(0, 100 - (workPct + teaPct + mealPct + huddlePct + meetingPct + trainingPct));
+                    /*
+                     * P2 FIX (proficiency timer accuracy).
+                     *
+                     * BEFORE: six percentages were each Math.round()ed independently
+                     * against a denominator that was itself a reconstruction
+                     * (liveWorkSec + totalBreakSecs), and the leftover was dumped into
+                     * `activityPct = 100 - sum(others)`. That made rounding noise render
+                     * as a phantom cyan "Activity" slice for employees who had never
+                     * taken an activity break, and the ratio drifted from reality
+                     * because work-seconds were minute-rounded while break-seconds were
+                     * timestamp-exact.
+                     *
+                     * AFTER: `liveShift` measures elapsed time once, derives work as the
+                     * remainder, and apportions percentages by largest remainder, so
+                     * they total exactly 100 with no residual bucket.
+                     */
+                    const segments = liveShift.segments;
+                    const slices = buildPieSlices(segments, 42, 26);
+                    const workPct = segments.find(s => s.key === 'work')?.percent ?? 0;
 
                     return (
-                      <div className="pt-2 space-y-2 border-t border-slate-800/60">
+                      <div className="pt-3 space-y-3 border-t border-slate-800/60">
                         <div className="flex items-center justify-between text-[11px] font-bold">
                           <span className="text-slate-300 flex items-center gap-1.5">
                             <Sparkles className="w-3.5 h-3.5 text-blue-400" />
                             Shift Productivity Ratio
                           </span>
-                          <span className="text-emerald-400 font-mono">{workPct}% Work ({Math.floor(liveWorkSec / 3600)}h {Math.floor((liveWorkSec % 3600) / 60)}m)</span>
-                        </div>
-
-                        {/* Multi-Color Segmented Progress Bar */}
-                        <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden flex border border-slate-800">
-                          {workPct > 0 && <div style={{ width: `${workPct}%` }} className="bg-emerald-500 transition-all duration-500 h-full" title={`Work: ${workPct}%`} />}
-                          {teaPct > 0 && <div style={{ width: `${teaPct}%` }} className="bg-amber-500 transition-all duration-500 h-full" title={`Tea Break: ${teaPct}%`} />}
-                          {mealPct > 0 && <div style={{ width: `${mealPct}%` }} className="bg-rose-500 transition-all duration-500 h-full" title={`Meal Break: ${mealPct}%`} />}
-                          {huddlePct > 0 && <div style={{ width: `${huddlePct}%` }} className="bg-sky-500 transition-all duration-500 h-full" title={`Team Huddle: ${huddlePct}%`} />}
-                          {meetingPct > 0 && <div style={{ width: `${meetingPct}%` }} className="bg-purple-500 transition-all duration-500 h-full" title={`Team Meeting: ${meetingPct}%`} />}
-                          {trainingPct > 0 && <div style={{ width: `${trainingPct}%` }} className="bg-emerald-400 transition-all duration-500 h-full" title={`Training: ${trainingPct}%`} />}
-                          {activityPct > 0 && <div style={{ width: `${activityPct}%` }} className="bg-cyan-500 transition-all duration-500 h-full" title={`Activity: ${activityPct}%`} />}
-                        </div>
-
-                        {/* Multi-Color Legend */}
-                        <div className="flex items-center gap-3 flex-wrap text-[10px] text-slate-400 font-semibold pt-0.5">
-                          <span className="flex items-center gap-1 text-emerald-400 font-bold">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                            Work ({workPct}%)
+                          <span
+                            className="text-emerald-400 font-mono"
+                            data-testid="productivity-pct"
+                          >
+                            {liveShift.productivityPercent}% Work ({formatDuration(liveShift.workSecs)})
                           </span>
-                          {teaPct > 0 && (
-                            <span className="flex items-center gap-1 text-amber-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                              Tea ({teaPct}%)
-                            </span>
-                          )}
-                          {mealPct > 0 && (
-                            <span className="flex items-center gap-1 text-rose-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
-                              Meal ({mealPct}%)
-                            </span>
-                          )}
-                          {huddlePct > 0 && (
-                            <span className="flex items-center gap-1 text-sky-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-sky-500 inline-block" />
-                              Huddle ({huddlePct}%)
-                            </span>
-                          )}
-                          {meetingPct > 0 && (
-                            <span className="flex items-center gap-1 text-purple-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />
-                              Meeting ({meetingPct}%)
-                            </span>
-                          )}
-                          {trainingPct > 0 && (
-                            <span className="flex items-center gap-1 text-emerald-300 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                              Training ({trainingPct}%)
-                            </span>
-                          )}
-                          {activityPct > 0 && (
-                            <span className="flex items-center gap-1 text-cyan-400 font-bold">
-                              <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block" />
-                              Activity ({activityPct}%)
-                            </span>
-                          )}
+                        </div>
+
+                        {/* Live donut pie of the whole shift */}
+                        <div className="flex items-center gap-4">
+                          <div className="relative shrink-0">
+                            <svg viewBox="0 0 100 100" className="w-[104px] h-[104px] -rotate-0" role="img" aria-label="Shift time distribution">
+                              <circle cx="50" cy="50" r="42" className="fill-slate-950" />
+                              {slices.map(sl => (
+                                <path
+                                  key={sl.key}
+                                  d={sl.d}
+                                  fill={sl.color}
+                                  className="transition-all duration-700"
+                                >
+                                  <title>{`${sl.label}: ${sl.percent}% (${formatDuration(sl.seconds, true)})`}</title>
+                                </path>
+                              ))}
+                              <circle cx="50" cy="50" r="25" className="fill-slate-900" />
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                              <span className="text-[15px] font-black text-emerald-400 font-mono leading-none">{workPct}%</span>
+                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">Work</span>
+                            </div>
+                          </div>
+
+                          {/* Per-segment live readout */}
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            {segments.map(seg => (
+                              <div key={seg.key} className="flex items-center gap-2 text-[10px]">
+                                <span
+                                  className="w-2 h-2 rounded-full inline-block shrink-0"
+                                  style={{ backgroundColor: seg.color }}
+                                />
+                                <span className="font-bold text-slate-300 truncate flex-1">{seg.label}</span>
+                                <span className="font-mono font-bold text-slate-400 shrink-0">
+                                  {formatDuration(seg.seconds, true)}
+                                </span>
+                                <span
+                                  className="font-mono font-black shrink-0 w-9 text-right"
+                                  style={{ color: seg.color }}
+                                >
+                                  {seg.percent}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Segmented bar — same numbers, linear view */}
+                        <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden flex border border-slate-800">
+                          {segments.map(seg => (
+                            <div
+                              key={seg.key}
+                              style={{ width: `${seg.percent}%`, backgroundColor: seg.color }}
+                              className="transition-all duration-500 h-full"
+                              title={`${seg.label}: ${seg.percent}%`}
+                            />
+                          ))}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                          <span>Elapsed {formatDuration(liveShift.elapsedSecs, true)}</span>
+                          <span>Shift {SHIFT_LABEL}</span>
                         </div>
                       </div>
                     );
@@ -1366,6 +1611,207 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
           </div>
 
 
+
+          {/* ── WORK TIME — its own dedicated section (no break data in here) ───── */}
+          {todayRecord?.checkInAt && (
+            <div
+              data-testid="work-time-section"
+              className="bg-slate-900/90 rounded-2xl border border-emerald-500/20 p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <Timer className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-white">Work Time</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Productive time only — breaks are excluded and tracked separately below.
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-[10px] font-bold text-slate-300 font-mono">
+                  {SHIFT_LABEL}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="bg-slate-950/70 rounded-xl border border-emerald-500/25 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Live Work Timer</p>
+                  <p
+                    data-testid="work-live-timer"
+                    className={`text-xl font-mono font-black tabular-nums ${liveShift.isOnBreak ? 'text-amber-300' : 'text-emerald-400'}`}
+                  >
+                    {formatClock(liveShift.workSecs)}
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    {liveShift.isOnBreak
+                      ? `Paused — ${liveShift.activeBreakType} running`
+                      : liveShift.isShiftComplete ? 'Shift closed' : 'Counting up'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 rounded-xl border border-slate-800 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Checked In</p>
+                  <p className="text-xl font-mono font-black text-white tabular-nums">
+                    {todayRecord.checkInAt ? toISTTimeString(todayRecord.checkInAt) : '--:--'}
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    {isLateCheckIn(todayRecord.checkInAt as any) ? 'After grace period' : 'On time'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 rounded-xl border border-slate-800 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Checked Out</p>
+                  <p className="text-xl font-mono font-black text-white tabular-nums">
+                    {todayRecord.checkOutAt ? toISTTimeString(todayRecord.checkOutAt) : '--:--'}
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    {todayRecord.checkOutAt ? 'Shift complete' : 'Still on shift'}
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 rounded-xl border border-slate-800 p-3.5">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Shift Target</p>
+                  <p className="text-xl font-mono font-black text-blue-400 tabular-nums">
+                    {liveShift.shiftProgressPercent}%
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-500 mt-1">
+                    of {Math.floor(SHIFT_TOTAL_MINUTES / 60)}h {SHIFT_TOTAL_MINUTES % 60 > 0 ? `${SHIFT_TOTAL_MINUTES % 60}m ` : ''}rostered
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3.5">
+                <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
+                    style={{ width: `${liveShift.shiftProgressPercent}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider mt-1.5">
+                  <span>Work {formatDuration(liveShift.workSecs, true)}</span>
+                  <span>Remaining {formatDuration(Math.max(0, SHIFT_TOTAL_MINUTES * 60 - liveShift.workSecs))}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── BREAKS — its own dedicated section (no work time in here) ───────── */}
+          {todayRecord?.checkInAt && (
+            <div
+              data-testid="breaks-section"
+              className="bg-slate-900/90 rounded-2xl border border-amber-500/20 p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                    <Coffee className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-white">Breaks &amp; Meal Breaks</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Every break logged today, exact to the second.
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Break Time</p>
+                  <p
+                    data-testid="breaks-total"
+                    className="text-lg font-mono font-black text-amber-300 tabular-nums leading-tight"
+                  >
+                    {formatClock(liveShift.breakSecs)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Per-type totals — driven by the same breakdown as the pie */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {([
+                  { key: 'meal', label: 'Meal Break', secs: liveShift.mealSecs, color: '#f43f5e', icon: UtensilsCrossed },
+                  { key: 'tea', label: 'Tea Break', secs: liveShift.teaSecs, color: '#f59e0b', icon: Coffee },
+                  { key: 'huddle', label: 'Team Huddle', secs: liveShift.huddleSecs, color: '#0ea5e9', icon: Users },
+                  { key: 'meeting', label: 'Team Meeting', secs: liveShift.meetingSecs, color: '#a855f7', icon: Briefcase },
+                  { key: 'training', label: 'Training', secs: liveShift.trainingSecs, color: '#34d399', icon: GraduationCap },
+                  { key: 'activity', label: 'Activity', secs: liveShift.activitySecs, color: '#06b6d4', icon: Zap }
+                ] as const).map(b => {
+                  const Icon = b.icon;
+                  const isLive = liveShift.isOnBreak && classifyBreakType(liveShift.activeBreakType) === b.key;
+                  return (
+                    <div
+                      key={b.key}
+                      data-testid={`break-total-${b.key}`}
+                      className={`bg-slate-950/70 rounded-xl border p-3 ${
+                        isLive ? 'border-amber-400/60 ring-1 ring-amber-400/30' : 'border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: b.color }} />
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider truncate">
+                          {b.label}
+                        </span>
+                        {isLive && (
+                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                        )}
+                      </div>
+                      <p
+                        className="text-base font-mono font-black tabular-nums"
+                        style={{ color: b.secs > 0 ? b.color : '#475569' }}
+                      >
+                        {formatClock(b.secs)}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Break log */}
+              {(todayRecord.breaks || []).length > 0 ? (
+                <div className="mt-4 pt-3.5 border-t border-slate-800/80 space-y-1.5 max-h-52 overflow-y-auto">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    Break Log ({(todayRecord.breaks || []).length})
+                  </p>
+                  {(todayRecord.breaks || []).map((b: any, idx: number) => {
+                    const startMs = safeGetTimestampMillis(b.startAt || b.startTime);
+                    const endMs = safeGetTimestampMillis(b.endAt || b.endTime);
+                    const open = !endMs;
+                    const secs = startMs
+                      ? Math.max(0, Math.floor(((open ? nowMs : (endMs as number)) - startMs) / 1000))
+                      : 0;
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex items-center gap-2.5 text-[10px] p-2.5 rounded-xl border ${
+                          open ? 'bg-amber-500/5 border-amber-500/30' : 'bg-slate-950/60 border-slate-800/60'
+                        }`}
+                      >
+                        <span className="font-mono text-slate-400 font-bold shrink-0 w-14 tabular-nums">
+                          {startMs ? toISTTimeString(b.startAt || b.startTime) : '--:--'}
+                        </span>
+                        <span className="text-slate-600 shrink-0">→</span>
+                        <span className="font-mono text-slate-400 font-bold shrink-0 w-14 tabular-nums">
+                          {open ? '· · ·' : toISTTimeString(b.endAt || b.endTime)}
+                        </span>
+                        <span className="font-bold text-slate-200 truncate flex-1">{b.type || 'Break'}</span>
+                        <span
+                          className={`font-mono font-black shrink-0 tabular-nums ${
+                            open ? 'text-amber-300 animate-pulse' : 'text-slate-300'
+                          }`}
+                        >
+                          {formatClock(secs)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-4 pt-3.5 border-t border-slate-800/80 text-[11px] text-slate-500 font-semibold text-center py-2">
+                  No breaks taken yet today.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Break & Activity Management */}
           {todayRecord?.checkInAt && !shiftComplete && (
@@ -1463,18 +1909,142 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               )}
             </div>
           )}
+
+          {/* ── MY PERFORMANCE FEEDBACK & REVIEWS QUICK WIDGET ── */}
+          <div className="bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 rounded-2xl border border-blue-500/30 p-5 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shrink-0 shadow-inner">
+                <MessageSquare className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-black text-white">Performance Feedback &amp; Appraisals</h4>
+                  <span className="text-[9px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md flex items-center gap-1">
+                    <Star className="w-3 h-3 text-amber-400 fill-amber-400" /> Confidential
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  View 1:1 sprint performance evaluations, strengths, and mentorship goals from CEO, CTO &amp; Project Managers.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                triggerHaptic();
+                setActiveTab('emp_feedback');
+              }}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-blue-900/40 cursor-pointer transition-all hover:scale-105 shrink-0"
+            >
+              <span>View My Reviews &amp; Goals</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
         </div>
       )}
 
       {/* 2. ATTENDANCE HISTORY TAB */}
       {activeTab === 'emp_attendance' && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 min-h-[500px] flex flex-col space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-blue-400" />
-              Attendance History
-            </h2>
-            <span className="text-xs text-slate-400 font-mono">{empHistory.length} Records</span>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-blue-400" />
+                Attendance History &amp; Monthly Analytics
+              </h2>
+              <span className="text-xs text-slate-400 font-mono">({empHistory.length} Records)</span>
+            </div>
+
+            <button
+              onClick={() => {
+                triggerHaptic();
+                setIsMonthlyAnalyticsOpen(true);
+              }}
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-black text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-purple-950/50 active:scale-95"
+            >
+              <Calendar className="w-4 h-4 text-purple-200" />
+              <PieChartIcon className="w-4 h-4 text-blue-200" />
+              <span>Full Monthly Work Analytics &amp; Day Pie</span>
+            </button>
+          </div>
+
+          {/* ── Item #6: month navigator + month-wise present list summary ────── */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-1.5 rounded-xl">
+                <button
+                  onClick={() => { triggerHaptic(); setMonthKey(m => shiftMonthKey(m, -1)); setHistoryScope('month'); }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span
+                  data-testid="month-label"
+                  className="text-xs font-black text-white min-w-[110px] text-center tabular-nums"
+                >
+                  {formatMonthKey(monthKey)}
+                </span>
+                <button
+                  onClick={() => { triggerHaptic(); setMonthKey(m => shiftMonthKey(m, 1)); setHistoryScope('month'); }}
+                  disabled={monthKey >= getMonthKey(new Date())}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <button
+                  onClick={() => { triggerHaptic(); setHistoryScope('month'); }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    historyScope === 'month' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  This Month
+                </button>
+                <button
+                  onClick={() => { triggerHaptic(); setHistoryScope('all'); }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    historyScope === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  All Time
+                </button>
+              </div>
+            </div>
+
+            {/* Clickable month totals — each drills the list below into that status */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {([
+                { key: 'All', label: 'Working Days', value: monthSummary.workingDays, tone: 'text-white border-slate-800' },
+                { key: 'Present', label: 'Present', value: monthSummary.present, tone: 'text-emerald-400 border-emerald-500/25' },
+                { key: 'Late', label: 'Late', value: monthSummary.late, tone: 'text-amber-400 border-amber-500/25' },
+                { key: 'Leave', label: 'WFH / Leave', value: monthSummary.wfh + monthSummary.onLeave, tone: 'text-sky-400 border-sky-500/25' },
+                { key: 'Absent', label: 'Absent', value: monthSummary.absent, tone: 'text-rose-400 border-rose-500/25' },
+                { key: 'All', label: 'Attendance', value: `${monthSummary.attendanceRate}%`, tone: 'text-blue-400 border-blue-500/25' }
+              ] as const).map((card, idx) => (
+                <button
+                  key={`${card.key}-${idx}`}
+                  onClick={() => { triggerHaptic(); setAttendanceFilter(card.key as any); setHistoryScope('month'); }}
+                  data-testid={`month-kpi-${card.label.replace(/[^a-zA-Z]/g, '').toLowerCase()}`}
+                  className={`bg-slate-950/70 rounded-xl border p-2.5 text-left transition-all cursor-pointer hover:border-blue-500/50 ${card.tone} ${
+                    attendanceFilter === card.key ? 'ring-1 ring-blue-500/50' : ''
+                  }`}
+                >
+                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-wider truncate">{card.label}</p>
+                  <p className="text-lg font-mono font-black tabular-nums leading-tight">{card.value}</p>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-wider px-1">
+              <span>Total worked {formatDuration(monthSummary.totalWorkedMinutes * 60)}</span>
+              <span>Avg / day {formatDuration(monthSummary.averageWorkedMinutes * 60)}</span>
+              <span className="hidden sm:inline">Breaks {formatDuration(monthSummary.totalBreakMinutes * 60)}</span>
+            </div>
           </div>
 
           {/* View Mode Toggle & Filter Header */}
@@ -1521,10 +2091,104 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               >
                 <CreditCard className="w-3.5 h-3.5" /> Cards View
               </button>
+              <button
+                onClick={() => { setAttendanceViewMode('calendar'); setHistoryScope('month'); }}
+                data-testid="calendar-view-toggle"
+                className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  attendanceViewMode === 'calendar' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" /> Calendar
+              </button>
             </div>
           </div>
           
-          {attendanceViewMode === 'list' ? (
+          {attendanceViewMode === 'calendar' ? (
+            /* ── Item #10: attendance calendar ──────────────────────────────────
+               Mon-first grid so the Sunday weekly off lands in the last column
+               instead of splitting each work week across two rows. */
+            <div data-testid="attendance-calendar" className="space-y-3">
+              <div className="grid grid-cols-7 gap-1.5">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+                  <div key={d} className="text-center text-[9px] font-black text-slate-500 uppercase tracking-wider py-1">
+                    {d}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1.5">
+                {monthCalendar.map((cell, idx) => {
+                  if (!cell.dateStr) {
+                    return <div key={`pad-${idx}`} className="aspect-square rounded-xl bg-transparent" />;
+                  }
+
+                  const rec: any = cell.record;
+                  const holidayInfo = cell.dateStr ? getHolidayInfo(cell.dateStr) : undefined;
+                  const isSun = cell.dateStr ? new Date(`${cell.dateStr}T00:00:00Z`).getUTCDay() === 0 : false;
+                  const status: string = rec?.status || (cell.isNonWorking ? (holidayInfo ? holidayInfo.name : 'Weekly Off') : cell.isFuture ? '' : '');
+                  const cfg = (() => {
+                    if (rec?.status === 'Present') return { bg: 'bg-emerald-500/10 border-emerald-500/30', text: 'text-emerald-400', dot: 'bg-emerald-500' };
+                    if (rec?.status === 'Late') return { bg: 'bg-amber-500/10 border-amber-500/30', text: 'text-amber-400', dot: 'bg-amber-500' };
+                    if (rec?.status === 'Work From Home' || rec?.isWfh) return { bg: 'bg-sky-500/10 border-sky-500/30', text: 'text-sky-400', dot: 'bg-sky-500' };
+                    if (rec?.status === 'Absent') return { bg: 'bg-rose-500/10 border-rose-500/30', text: 'text-rose-400', dot: 'bg-rose-500' };
+                    if (rec?.status === 'On Leave') return { bg: 'bg-violet-500/10 border-violet-500/30', text: 'text-violet-400', dot: 'bg-violet-500' };
+                    if (rec?.status === 'Half Day') return { bg: 'bg-orange-500/10 border-orange-500/30', text: 'text-orange-400', dot: 'bg-orange-500' };
+                    if (cell.isNonWorking || status === 'Holiday' || isSun || holidayInfo) {
+                      return { 
+                        bg: holidayInfo ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-900/60 border-slate-800', 
+                        text: holidayInfo ? 'text-indigo-400' : 'text-slate-500', 
+                        dot: holidayInfo ? 'bg-indigo-400' : 'bg-slate-600' 
+                      };
+                    }
+                    return { bg: 'bg-slate-950/50 border-slate-800/60', text: 'text-slate-600', dot: '' };
+                  })();
+
+                  const mins = Math.max(0, Number(rec?.workingMinutes) || 0);
+                  const displayLabel = holidayInfo ? `Holiday: ${holidayInfo.name}` : (isSun ? 'Weekly Off (Sunday)' : status);
+
+                  return (
+                    <div
+                      key={cell.dateStr}
+                      data-testid={`cal-day-${cell.dateStr}`}
+                      title={`${getDayName(cell.dateStr, true)} ${cell.dateStr}${displayLabel ? ` — ${displayLabel}` : cell.isFuture ? ' — upcoming' : ''}${mins > 0 ? ` — ${formatDuration(mins * 60)}` : ''}`}
+                      className={`aspect-square rounded-xl border p-1.5 flex flex-col justify-between transition-all ${cfg.bg} ${
+                        cell.isToday ? 'ring-2 ring-blue-500/60' : ''
+                      } ${cell.isFuture ? 'opacity-40' : ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-0.5">
+                        <span className={`text-[10px] font-black tabular-nums ${cell.isToday ? 'text-blue-400' : cfg.text}`}>
+                          {cell.dayOfMonth}
+                        </span>
+                        {cfg.dot && <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-0.5 ${cfg.dot}`} />}
+                      </div>
+                      {mins > 0 && (
+                        <span className="text-[8px] font-mono font-bold text-slate-400 leading-none">
+                          {Math.floor(mins / 60)}h{String(mins % 60).padStart(2, '0')}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Legend */}
+              <div className="flex items-center gap-3 flex-wrap text-[9px] font-bold text-slate-400 pt-2 border-t border-slate-800/60">
+                {[
+                  { label: 'Present', dot: 'bg-emerald-500' },
+                  { label: 'Late', dot: 'bg-amber-500' },
+                  { label: 'Work From Home', dot: 'bg-sky-500' },
+                  { label: 'Absent', dot: 'bg-rose-500' },
+                  { label: 'On Leave', dot: 'bg-violet-500' },
+                  { label: 'Holiday / Weekly Off', dot: 'bg-slate-600' }
+                ].map(l => (
+                  <span key={l.label} className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${l.dot} inline-block`} />
+                    {l.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : attendanceViewMode === 'list' ? (
             <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/80 shadow-md custom-scrollbar">
               {/* Mobile Scroll Swipe Indicator */}
               <div className="sm:hidden px-4 py-2 bg-slate-900/90 border-b border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400 font-mono">
@@ -1553,13 +2217,16 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                     empHistory.map(rec => (
                       <tr key={rec.id} className="hover:bg-slate-900/40 transition-colors">
                         <td className="px-4 py-3.5 font-bold text-white font-mono whitespace-nowrap w-36">
-                          {new Date(rec.date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}
+                          {new Date(`${rec.date}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' })}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap w-32">
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
                             rec.status === 'Present' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
                             rec.status === 'Late' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
                             rec.status === 'Work From Home' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                            rec.status === 'Absent' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                            rec.status === 'Half Day' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
+                            rec.status === 'Holiday' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
                             'bg-violet-500/10 text-violet-400 border border-violet-500/20'
                           }`}>
                             <span className="w-1.5 h-1.5 rounded-full bg-current" />
@@ -1570,7 +2237,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                           {rec.checkInAt ? toISTTimeString(rec.checkInAt) : '--:--'}
                         </td>
                         <td className="px-4 py-3.5 font-mono text-slate-200 whitespace-nowrap w-32">
-                          {rec.checkOutAt ? toISTTimeString(rec.checkOutAt) : <span className="text-emerald-400 text-[11px] font-bold">Active Shift</span>}
+                          {rec.checkOutAt
+                            ? toISTTimeString(rec.checkOutAt)
+                            : rec.checkInAt
+                              ? <span className="text-emerald-400 text-[11px] font-bold">Active Shift</span>
+                              : '--:--'}
                         </td>
                         <td className="px-4 py-3.5 font-mono text-slate-400 whitespace-nowrap w-24">
                           {rec.totalBreakMinutes ? `${rec.totalBreakMinutes}m` : '0m'}
@@ -1777,6 +2448,11 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         <EmployeeLeaveTab />
       )}
 
+      {/* 4.5 MY FEEDBACK & REVIEWS TAB */}
+      {activeTab === 'emp_feedback' && (
+        <EmployeeFeedbackView />
+      )}
+
       {/* 5. TEAM DIRECTORY TAB */}
       {(activeTab === 'emp_directory' || activeTab === 'emp_team') && (
         <EmployeeTeamDirectory />
@@ -1900,6 +2576,19 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 <div className="flex flex-wrap items-center gap-3 pt-1">
                   <button
                     type="button"
+                    onClick={() => {
+                      triggerHaptic();
+                      setIsMonthlyAnalyticsOpen(true);
+                    }}
+                    className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-purple-900/40 active:scale-95"
+                  >
+                    <Calendar className="w-4 h-4 text-purple-200" />
+                    <PieChartIcon className="w-4 h-4 text-blue-200" />
+                    <span>View Work Analytics &amp; Monthly Calendar</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setIsEnrollFaceModalOpen(true)}
                     className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-blue-900/40"
                   >
@@ -1952,12 +2641,12 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
                   <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800/80">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Work Location</span>
-                    <span className="text-xs font-bold text-white">{activeEmployee.workLocation || 'AGPS Nagar HQ Campus'}</span>
+                    <span className="text-xs font-bold text-white">{activeEmployee.workLocation || 'Kalpanaaa Headquarters'}</span>
                   </div>
 
                   <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800/80 sm:col-span-2 md:col-span-3">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Assigned Shift Schedule</span>
-                    <span className="text-xs font-bold text-slate-200">{preferredShift || activeEmployee.shift || 'General Shift (09:00 - 18:00)'}</span>
+                    <span className="text-xs font-bold text-slate-200">{formatShiftTiming(preferredShift || activeEmployee.shift)}</span>
                   </div>
                 </div>
               </div>
@@ -2526,6 +3215,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
         cloudDescriptor={activeEmployee.faceDescriptor}
         isEnrollmentMode={true}
       />
+
+      {/* Employee Monthly Attendance & Work Analytics Modal */}
+      {isMonthlyAnalyticsOpen && activeEmployee && (
+        <EmployeeMonthlyAttendanceModal
+          employee={activeEmployee}
+          onClose={() => setIsMonthlyAnalyticsOpen(false)}
+        />
+      )}
 
     </div>
   );

@@ -1,32 +1,34 @@
 import { Employee, AttendanceRecord, AuditLog, CompanySettings, DocumentTemplate, LeaveRequest } from '../types';
+import { OFFICIAL_HOLIDAY_DATES_2026 } from './attendanceEngine';
 
 export const INITIAL_COMPANY_SETTINGS: CompanySettings = {
-  companyName: 'Kalpanaaa Software Solutions',
-  logoUrl: 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=120&auto=format&fit=crop&q=80',
-  companyAddress: 'No. 14, Bhoganahalli, Sarjapur Road, Bengaluru, KA 560102',
-  companyPhone: '+91 (040) 4821-9900',
+  companyName: 'Kalpanaaa Software Solutions Pvt. Ltd.',
+  logoUrl: '/pwa-192x192.png',
+  companyAddress: 'Kalpanaaa Software Solutions Headquarters, 822, 9th Main, 1st C Cross, HRBR Layout, Kalyan Nagar, Bengaluru – 560043',
+  companyPhone: '+91 (080) 4821-9900',
   companyEmail: 'hr@kalpanaaa.in',
   
-  officeName: 'Kalpanaaa Main Office HQ',
+  officeName: 'Kalpanaaa Software Solutions HQ',
   officeLatitude: 13.014333,
   officeLongitude: 77.646000,
   gpsRequired: true,
   allowedRadiusMeters: 500,
-  workStartTime: '10:00',
-  workEndTime: '19:00',
+  workStartTime: '08:00',
+  workEndTime: '23:00',
   gracePeriodMinutes: 15,
   lateThresholdMinutes: 15,
   teaBreakDurationMinutes: 10,
   lunchBreakDurationMinutes: 30,
   wfhEnabled: true,
   companyWideWfhDates: [],
+  holidayDates: OFFICIAL_HOLIDAY_DATES_2026,
   
   qrTokenLifetimeMinutes: 10,
   qrAttendanceEnabled: true,
   
   pdfHeaderTitle: 'CONFIDENTIAL WORKFORCE & ATTENDANCE STATEMENT',
-  authorizedSignatureName: 'Akshit',
-  authorizedSignatureTitle: 'Chief Executive Officer (CEO)'
+  authorizedSignatureName: 'Akshit Ujjain',
+  authorizedSignatureTitle: 'Chief Executive Officer (CEO) & Founder'
 };
 
 const TODAY_STR = new Date().toISOString().split('T')[0];
@@ -345,7 +347,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     dateOfBirth: '1997-02-19',
     department: 'HR Department',
     designation: 'HR Operations Manager',
-    joiningDate: '2024-02-01',
+    joiningDate: '2026-08-24',
     employmentType: 'Full-Time',
     reportingManager: 'Akshit Ujjain',
     workLocation: 'Main Office HQ',
@@ -360,9 +362,9 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     emergencyRelationship: 'Management',
     role: 'HR_ADMIN',
     qrToken: 'QR-KSS2407011',
-    createdAt: '2024-02-01T10:00:00Z',
+    createdAt: '2026-08-24T09:00:00Z',
     updatedAt: new Date().toISOString(),
-    approvedWfhDates: ['2026-09-14', '2026-09-15'],
+    approvedWfhDates: [],
     profilePhotoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300'
   },
   {
@@ -472,26 +474,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   }
 ];
 
-export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
-  {
-    id: 'LR-ABHINAYA-001',
-    employeeUid: 'uid-KSS2407011',
-    employeeId: 'KSS2407011',
-    employeeName: 'Abhinaya V',
-    department: 'HR Department',
-    type: 'WFH',
-    startDate: '2026-09-14',
-    endDate: '2026-09-15',
-    reason: 'health issue',
-    status: 'Approved',
-    pmStatus: 'Approved',
-    hrStatus: 'Approved',
-    ceoStatus: 'Approved',
-    ctoStatus: 'Approved',
-    reviewedBy: 'Gaurav Kumar Tripathi (CTO)',
-    requestDate: '2026-08-13T10:00:00.000Z'
-  }
-];
+export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [];
 
 export const DOCUMENT_TEMPLATES: DocumentTemplate[] = [
   {

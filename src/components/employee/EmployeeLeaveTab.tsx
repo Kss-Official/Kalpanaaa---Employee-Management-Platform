@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight, AlertCircle } from 'lucide-react';
+import { Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight, AlertCircle, Palmtree } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useHaptic } from '../../hooks/useHaptic';
-import { isEmployeeMatch } from '../../lib/attendanceEngine';
+import { isEmployeeMatch, computeEmployeeLeaveBalance } from '../../lib/attendanceEngine';
 import { todayInIST } from '../../lib/absoluteTime';
 
 export const EmployeeLeaveTab: React.FC = () => {
@@ -96,10 +96,7 @@ export const EmployeeLeaveTab: React.FC = () => {
     }
   };
 
-  const isWfhDisabledForEmployee = 
-    activeEmployee?.email?.toLowerCase().includes('asbin') || 
-    activeEmployee?.employeeId === 'KSS2407004' || 
-    (activeEmployee?.fullName || '').toLowerCase().includes('asbin');
+  const myLeaveBalance = computeEmployeeLeaveBalance(activeEmployee as any, leaveRequests);
 
   return (
     <div className="bg-slate-900/90 rounded-3xl border border-slate-800 p-4 sm:p-8 shadow-2xl w-full space-y-6 backdrop-blur-md">
@@ -107,20 +104,18 @@ export const EmployeeLeaveTab: React.FC = () => {
         <div>
           <h2 className="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
             <CalendarDays className="w-5 h-5 text-blue-400 shrink-0" />
-            <span>{isWfhDisabledForEmployee ? 'My Leave Requests' : 'My Leave & WFH Requests'}</span>
+            <span>My Leave &amp; WFH Requests</span>
           </h2>
           <p className="text-slate-400 text-xs mt-1 leading-relaxed">Submit new requests and track your 4-stage approval status.</p>
         </div>
-        <div className={`grid ${isWfhDisabledForEmployee ? 'grid-cols-1' : 'grid-cols-2'} gap-2.5 w-full sm:w-auto shrink-0`}>
-          {!isWfhDisabledForEmployee && (
-            <button
-              onClick={() => { setType('WFH'); setShowForm(true); setFeedback(null); }}
-              className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 ${showForm && type === 'WFH' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300'} hover:bg-purple-500 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer w-full`}
-            >
-              <Plus className="w-4 h-4" />
-              <span>Request WFH</span>
-            </button>
-          )}
+        <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto shrink-0">
+          <button
+            onClick={() => { setType('WFH'); setShowForm(true); setFeedback(null); }}
+            className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 ${showForm && type === 'WFH' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300'} hover:bg-purple-500 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer w-full`}
+          >
+            <Plus className="w-4 h-4" />
+            <span>Request WFH</span>
+          </button>
           <button
             onClick={() => { setType('Leave'); setShowForm(true); setFeedback(null); }}
             className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 ${showForm && type === 'Leave' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300'} hover:bg-orange-500 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer w-full`}
@@ -128,6 +123,54 @@ export const EmployeeLeaveTab: React.FC = () => {
             <Plus className="w-4 h-4" />
             <span>Request Leave</span>
           </button>
+        </div>
+      </div>
+
+      {/* ── Paid Leave Balance Quota Card ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="bg-slate-950/70 border border-purple-500/30 rounded-2xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+              <Palmtree className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paid Leave Balance</span>
+              <span className="text-sm sm:text-base font-black text-purple-300 font-mono">{myLeaveBalance.balance} Leaves Left</span>
+            </div>
+          </div>
+          <span className="text-[10px] text-slate-500 font-medium hidden sm:inline text-right">
+            1 credited/mo (1st date)
+          </span>
+        </div>
+
+        <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Monthly Credited</span>
+              <span className="text-sm sm:text-base font-black text-blue-300 font-mono">{myLeaveBalance.credited} Leave Credit</span>
+            </div>
+          </div>
+          <span className="text-[10px] text-slate-500 font-medium hidden sm:inline text-right">
+            Zero-base policy
+          </span>
+        </div>
+
+        <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Leaves Taken This Month</span>
+              <span className="text-sm sm:text-base font-black text-orange-300 font-mono">{myLeaveBalance.taken} Taken</span>
+            </div>
+          </div>
+          <span className="text-[10px] text-slate-500 font-medium hidden sm:inline text-right">
+            Approved only
+          </span>
         </div>
       </div>
 

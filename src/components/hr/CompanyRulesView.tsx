@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BookOpen, ShieldCheck, Clock, Shirt, Palmtree, Plus, Edit2, Trash2, CheckCircle2, AlertCircle, Save, X } from 'lucide-react';
+import { BookOpen, ShieldCheck, Clock, Shirt, Palmtree, Plus, Edit2, Trash2, CheckCircle2, AlertCircle, Save, X, Calendar, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { OFFICIAL_COMPANY_HOLIDAYS_2026 } from '../../lib/attendanceEngine';
 
 export interface CompanyRuleItem {
   id: string;
@@ -17,40 +18,48 @@ const DEFAULT_RULES: CompanyRuleItem[] = [
     id: 'rule-1',
     category: 'Company Rules',
     title: 'Core Office Hours & GPS Verification',
-    description: 'Standard work hours are 10:00 AM to 07:30 PM. All employees checking in at Main Office HQ must be within the 300m GPS radius.',
-    effectiveDate: '2024-01-01',
+    description: 'Standard work hours are 10:00 AM to 07:00 PM IST (Mon–Sat). All employees checking in at Kalpanaaa Headquarters must be within the 500m GPS radius.',
+    effectiveDate: '2026-01-01',
     isMandatory: true
   },
   {
     id: 'rule-2',
     category: 'Employee Rules',
     title: 'Work From Home (WFH) Approval Flow',
-    description: 'WFH requests must be submitted at least 24 hours in advance and approved by HR/Manager before taking remote work.',
-    effectiveDate: '2024-01-01',
+    description: 'WFH requests must be submitted in advance and approved by HR/Manager before taking remote work.',
+    effectiveDate: '2026-01-01',
     isMandatory: true
   },
   {
     id: 'rule-3',
     category: 'Employee Rules',
     title: 'Grace Period & Late Check-in Penalty',
-    description: 'A 60-minute grace period (up to 11:00 AM) is granted per month. Beyond 60 minutes, check-in is logged as Late.',
-    effectiveDate: '2024-01-01',
+    description: 'A 15-minute grace period (up to 10:15 AM) is granted. Beyond this threshold, check-in is logged as Late.',
+    effectiveDate: '2026-01-01',
     isMandatory: false
   },
   {
     id: 'rule-4',
     category: 'Employee Rules',
     title: 'Professional Business Casual Etiquette',
-    description: 'Smart business casual attire is expected Monday through Thursday. Casual Fridays permit neat casual wear.',
-    effectiveDate: '2024-01-01',
+    description: 'Smart business casual attire is expected Monday through Thursday. Neat casual wear is permitted on Fridays and Saturdays.',
+    effectiveDate: '2026-01-01',
     isMandatory: false
   },
   {
     id: 'rule-5',
     category: 'Employee Rules',
-    title: 'Paid Time Off (PTO) & Emergency Leave',
-    description: 'Employees accrue 1.5 days of PTO per month. Emergency leaves must be reported to HR by 09:30 AM on the day of absence.',
-    effectiveDate: '2024-01-01',
+    title: 'Paid Time Off (PTO), Holidays & Weekly Offs',
+    description: 'Every Sunday is an official Weekly Off. In addition, 17 declared Indian National, State (Karnataka Rajyotsava), and Festival Holidays are recognized as paid non-working days. Attendance check-in is strictly disabled on Sundays, official holidays, and during approved employee leaves.',
+    effectiveDate: '2026-01-01',
+    isMandatory: true
+  },
+  {
+    id: 'rule-6',
+    category: 'Company Rules',
+    title: 'Monthly Salary Calculation Cycle (27th to 26th)',
+    description: 'The company salary calculation cycle runs from the 27th of the previous month to the 26th of the current month (30-day accounting period). The 26th is the monthly payroll cut-off date. All working days, attendance, paid leaves, and Loss of Pay (LOP) are calculated on this cycle. A new cycle begins on the 27th of every month.',
+    effectiveDate: '2026-01-01',
     isMandatory: true
   }
 ];
@@ -82,7 +91,7 @@ export const CompanyRulesView: React.FC = () => {
     }
   });
 
-  const [selectedCategory, setSelectedCategory] = useState<'Company Rules' | 'Employee Rules'>('Company Rules');
+  const [selectedCategory, setSelectedCategory] = useState<'Company Rules' | 'Employee Rules' | 'Holidays 2026'>('Company Rules');
   const [editingRule, setEditingRule] = useState<CompanyRuleItem | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
@@ -157,6 +166,7 @@ export const CompanyRulesView: React.FC = () => {
 
   const companyRulesCount = rules.filter(r => r.category === 'Company Rules').length;
   const employeeRulesCount = rules.filter(r => r.category === 'Employee Rules').length;
+  const holidaysCount = OFFICIAL_COMPANY_HOLIDAYS_2026.length;
 
   return (
     <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
@@ -164,12 +174,12 @@ export const CompanyRulesView: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-blue-400" />
-            Company & Employee Rules
+            Company Policies &amp; Holiday Calendar
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">Maintain official organization policy rules and employee workplace conduct regulations.</p>
+          <p className="text-xs text-slate-400 mt-0.5">Maintain official organization policies, workplace regulations, and declared 2026 public holidays.</p>
         </div>
 
-        {isHR && (
+        {isHR && selectedCategory !== 'Holidays 2026' && (
           <button
             onClick={() => { closeModal(); setIsAddModalOpen(true); }}
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-900/40 transition-all flex items-center gap-2 cursor-pointer"
@@ -180,11 +190,11 @@ export const CompanyRulesView: React.FC = () => {
         )}
       </div>
 
-      {/* 2 Category Pills Only: Company Rules & Employee Rules */}
-      <div className="flex items-center gap-2.5 p-1 bg-slate-950/80 rounded-2xl border border-slate-800 w-fit">
+      {/* Category Pills: Company Rules, Employee Rules & Holidays 2026 */}
+      <div className="flex items-center gap-2 p-1 bg-slate-950/80 rounded-2xl border border-slate-800 w-fit flex-wrap">
         <button
           onClick={() => setSelectedCategory('Company Rules')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
             selectedCategory === 'Company Rules' 
               ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40' 
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
@@ -196,7 +206,7 @@ export const CompanyRulesView: React.FC = () => {
 
         <button
           onClick={() => setSelectedCategory('Employee Rules')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
             selectedCategory === 'Employee Rules' 
               ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40' 
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
@@ -205,10 +215,77 @@ export const CompanyRulesView: React.FC = () => {
           <BookOpen className="w-4 h-4" />
           <span>Employee Rules ({employeeRulesCount})</span>
         </button>
+
+        <button
+          onClick={() => setSelectedCategory('Holidays 2026')}
+          className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            selectedCategory === 'Holidays 2026' 
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <Calendar className="w-4 h-4 text-indigo-400" />
+          <span>Official Holidays 2026 ({holidaysCount})</span>
+        </button>
       </div>
 
-      {/* Rules Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* Holidays Grid */}
+      {selectedCategory === 'Holidays 2026' ? (
+        <div className="space-y-4">
+          <div className="bg-slate-950 p-4 rounded-2xl border border-indigo-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Kalpanaaa Software Solutions — 2026 Declared Holidays</h3>
+                <p className="text-xs text-slate-400">Sundays are standard weekly off days. The following 17 dates are recognized as paid public &amp; state holidays.</p>
+              </div>
+            </div>
+            <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-indigo-300 font-mono text-xs font-bold shrink-0">
+              17 Official Holidays
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {OFFICIAL_COMPANY_HOLIDAYS_2026.map((h, index) => {
+              const [y, m, d] = h.date.split('-');
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+              const monthLabel = monthNames[parseInt(m, 10) - 1];
+
+              return (
+                <motion.div
+                  key={h.date}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.02 }}
+                  className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3 hover:border-indigo-500/40 transition-colors shadow-md"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-slate-950 border border-indigo-500/30 flex flex-col items-center justify-center shrink-0">
+                      <span className="text-[10px] font-black text-indigo-400 uppercase leading-none">{monthLabel}</span>
+                      <span className="text-base font-black text-white font-mono leading-none mt-0.5">{d}</span>
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white tracking-tight">{h.name}</h4>
+                      <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                        <span className="font-semibold text-indigo-300/90">{h.dayOfWeek}</span>
+                        <span>•</span>
+                        <span className="font-mono text-[10px] text-slate-500">{h.date}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 shrink-0">
+                    Paid Off
+                  </span>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* Rules Grid */
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {filteredRules.map(rule => (
           <motion.div
             key={rule.id}
@@ -260,6 +337,7 @@ export const CompanyRulesView: React.FC = () => {
           </motion.div>
         ))}
       </div>
+      )}
 
       {/* Add / Edit Rule Modal */}
       {isAddModalOpen && (

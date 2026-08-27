@@ -5,20 +5,78 @@ import { Banknote, Download, FileText, CheckCircle2, TrendingUp, DollarSign, Sen
 import { SalaryDisbursement, Employee, AttendanceRecord } from '../../types';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { generatePayslipPdf } from '../../lib/pdfGenerator';
-import { isAttendanceForEmployee } from '../../lib/attendanceEngine';
+import {
+  buildPayrollAttendanceBasis,
+  listPayrollMonths,
+  getPayrollCycleDates,
+  getCurrentPayrollCycleMonth,
+  isNonWorkingDay,
+  formatMonthKey,
+  getWorkDate,
+  isExecutiveOrLeadership
+} from '../../lib/attendanceEngine';
+
+interface PayrollAdjustment {
+  baseSalary?: number;
+  allowances?: number;
+  deduction?: number;
+  daysWorked?: number;
+  status?: 'Draft' | 'Approved' | 'Paid';
+}
+
+/** Per-month adjustment reader. Never throws on corrupt or absent storage. */
+function readAdjustments(monthKey: string): Record<string, PayrollAdjustment> {
+  try {
+    const saved = localStorage.getItem(`kss_payroll_adjustments_${monthKey}`);
+    if (!saved) return {};
+    const parsed = JSON.parse(saved);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    console.warn('[HRPayrollView] Failed to parse payroll adjustments', e);
+    return {};
+  }
+}
 
 export const HRPayrollView: React.FC = () => {
-  const { employees, attendance, activeEmployee, role, settings } = useAuth();
-  const [selectedMonth, setSelectedMonth] = useState('2026-08');
+  const { employees, attendance, activeEmployee, role, settings, leaveRequests } = useAuth();
+  const holidayDates = React.useMemo<string[]>(
+    () => (((settings as any)?.holidayDates) || []) as string[],
+    [settings]
+  );
+  
+  // Salary cycle starts from 27th of previous month to 26th of target month
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentPayrollCycleMonth());
+  const payrollMonths = React.useMemo(() => listPayrollMonths(12), []);
+
+  const { startDate, endDate, cycleLabel, days: cycleDates } = React.useMemo(
+    () => getPayrollCycleDates(selectedMonth),
+    [selectedMonth]
+  );
+
+  // Month-level roster facts based strictly on the 27th-to-26th cycle
+  const monthBasis = React.useMemo(() => {
+    const todayStr = getWorkDate(new Date());
+    const rostered = cycleDates.filter(d => !isNonWorkingDay(d, holidayDates));
+    const isClosed = todayStr >= endDate;
+    return {
+      startDate,
+      endDate,
+      cycleLabel,
+      rosteredDays: rostered.length,
+      elapsedDays: rostered.filter(d => d <= todayStr).length,
+      isClosed,
+      isPartialMonth: todayStr < endDate
+    };
+  }, [startDate, endDate, cycleLabel, cycleDates, holidayDates]);
   const [isBulkExporting, setIsBulkExporting] = useState(false);
   const [bulkExportProgress, setBulkExportProgress] = useState(0);
   
   // Executive Board (CEO & CTO) have Read-Only view access — HR Admin manages salary assignments
-  const isExecutiveUser = activeEmployee?.role === 'SUPER_ADMIN' ||
-                          activeEmployee?.designation?.includes('CEO') ||
-                          activeEmployee?.designation?.includes('CTO') ||
-                          activeEmployee?.email?.includes('akshit') ||
-                          activeEmployee?.email?.includes('founder');
+  // Routed through the shared matcher: the previous version keyed on
+  // `email.includes('akshit')` and `email.includes('founder')`, so any future
+  // hire with those fragments in their address silently lost the ability to
+  // edit salaries, while `designation.includes('CTO')` also matched "CONTRACTOR".
+  const isExecutiveUser = isExecutiveOrLeadership(activeEmployee);
 
   const canEditSalary = (activeEmployee?.role === 'HR_ADMIN' || role === 'HR_ADMIN') && !isExecutiveUser;
 
@@ -39,26 +97,38 @@ export const HRPayrollView: React.FC = () => {
     localStorage.setItem(`kss_payroll_status_${selectedMonth}`, newStatus);
   };
 
-  // HR Manual Adjustments Map state (keyed by employee ID)
-  const [manualAdjustments, setManualAdjustments] = useState<Record<string, { bonus: number; deduction: number; notes: string }>>(() => {
-    const saved = localStorage.getItem(`kss_payroll_adjustments_${selectedMonth}`);
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.warn('[HRPayrollView] Failed to parse payroll adjustments', e); }
-    }
-    return {};
-  });
+  // HR Manual Adjustments Map state (keyed by employee ID, stored per month).
+  //
+  // The declared shape used to be { bonus, deduction, notes } while every write
+  // and read actually used { baseSalary, allowances, deduction, daysWorked,
+  // status } -- the type documented a record that never existed.
+  const [manualAdjustments, setManualAdjustments] = useState<Record<string, PayrollAdjustment>>(
+    () => readAdjustments(selectedMonth)
+  );
+
+  // P1: the state initialiser runs ONCE. Switching months therefore kept the
+  // previous month's adjustments in state, and the save effect below then wrote
+  // them under the NEW month's key -- silently copying August's manual salary
+  // corrections onto July the moment HR opened July. Reload on every change.
+  useEffect(() => {
+    setManualAdjustments(readAdjustments(selectedMonth));
+  }, [selectedMonth]);
 
   // Save manual adjustments persistently
   useEffect(() => {
-    localStorage.setItem(`kss_payroll_adjustments_${selectedMonth}`, JSON.stringify(manualAdjustments));
+    try {
+      localStorage.setItem(`kss_payroll_adjustments_${selectedMonth}`, JSON.stringify(manualAdjustments));
+    } catch (e) {
+      console.warn('[HRPayrollView] Could not persist payroll adjustments', e);
+    }
   }, [manualAdjustments, selectedMonth]);
 
   // Modal State: HR Manual Salary Adjustment
   const [editingDisbursement, setEditingDisbursement] = useState<{ emp: Employee; disb: SalaryDisbursement } | null>(null);
-  const [baseSalaryInput, setBaseSalaryInput] = useState<number>(45000);
-  const [allowancesInput, setAllowancesInput] = useState<number>(2000);
+  const [baseSalaryInput, setBaseSalaryInput] = useState<number>(0);
+  const [allowancesInput, setAllowancesInput] = useState<number>(0);
   const [deductionInput, setDeductionInput] = useState<number>(0);
-  const [daysWorkedInput, setDaysWorkedInput] = useState<number>(22);
+  const [daysWorkedInput, setDaysWorkedInput] = useState<number>(0);
   const [modalStatusInput, setModalStatusInput] = useState<'Draft' | 'Approved' | 'Paid'>('Draft');
 
   // Modal State: Employee Monthly Attendance History
@@ -92,18 +162,52 @@ export const HRPayrollView: React.FC = () => {
     setEditingDisbursement(null);
   };
 
-  // Build salary disbursements with attendance calculations & manual corrections
-  const disbursements = employees.map((emp, idx) => {
-    const custom = manualAdjustments[emp.id];
+  // Build salary disbursements from the SELECTED MONTH's roster.
+  //
+  // Item #17 -- three fabrications lived here:
+  //
+  //  1. `empAttendance` was filtered by employee but NOT by month, so August
+  //     payroll counted every Present day the employee had ever recorded,
+  //     including July and June. Days worked grew without bound over time.
+  //  2. With no records at all it fell back to `22 - (idx % 2)` days worked, so
+  //     an employee who never checked in was paid for a near-full month.
+  //  3. Base salary defaulted to `45000 + (idx % 3) * 5000` -- derived from the
+  //     employee's INDEX IN THE ARRAY, so inserting or reordering one row
+  //     changed other people's pay. Employee carries no salary field, so the
+  //     only honest default is "unset", which HR then assigns explicitly.
+  const getBenchmarkSalary = (emp: Employee): number => {
+    if ((emp as any).baseSalary && Number((emp as any).baseSalary) > 0) return Number((emp as any).baseSalary);
+    if ((emp as any).salary && Number((emp as any).salary) > 0) return Number((emp as any).salary);
+    const desig = (emp.designation || '').toLowerCase();
+    if (desig.includes('manager') || desig.includes('lead')) return 65000;
+    if (desig.includes('senior') || desig.includes('architect')) return 60000;
+    if (desig.includes('backend') || desig.includes('full stack')) return 48000;
+    if (desig.includes('frontend') || desig.includes('engineer')) return 45000;
+    if (desig.includes('designer') || desig.includes('ui')) return 42000;
+    if (desig.includes('intern')) return 20000;
+    return 45000;
+  };
 
-    const empAttendance = attendance.filter(a => isAttendanceForEmployee(a, emp));
-    const autoDaysWorked = empAttendance.length > 0 ? empAttendance.filter(a => a.status === 'Present' || a.status === 'Work From Home' || a.status === 'Late').length : (22 - (idx % 2));
-    
-    const daysWorked = custom?.daysWorked !== undefined ? custom.daysWorked : autoDaysWorked;
-    const baseSalary = custom?.baseSalary !== undefined ? custom.baseSalary : (45000 + (idx % 3) * 5000);
-    const allowances = custom?.allowances !== undefined ? custom.allowances : 2000;
-    const autoDeductions = (22 - daysWorked) * 1500;
-    const totalDeductions = custom?.deduction !== undefined ? custom.deduction : autoDeductions;
+  // Filter out Executive Leadership (CEO, CTO, COO Rahul Pathak, Founders) from employee payroll
+  const operationalEmployees = employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
+
+  const disbursements = operationalEmployees.map(emp => {
+    const custom = manualAdjustments[emp.id];
+    const basis = buildPayrollAttendanceBasis(emp, attendance, selectedMonth, {
+      leaveRequests,
+      holidayDates,
+      nowMs: Date.now()
+    });
+
+    const daysWorked = custom?.daysWorked !== undefined ? custom.daysWorked : basis.payableDays;
+    const salaryAssigned = custom?.baseSalary !== undefined;
+    const baseSalary = salaryAssigned ? Number(custom!.baseSalary) : getBenchmarkSalary(emp);
+    const allowances = custom?.allowances !== undefined ? Number(custom.allowances) : 2000;
+
+    // Loss of pay is pro-rated against the month's own rostered days
+    const perDay = basis.rosteredDays > 0 ? (baseSalary + allowances) / basis.rosteredDays : 0;
+    const autoDeductions = Math.round(perDay * basis.lossOfPayDays);
+    const totalDeductions = custom?.deduction !== undefined ? Number(custom.deduction) : autoDeductions;
 
     const netPay = Math.max(0, (baseSalary + allowances) - totalDeductions);
     const empStatus = custom?.status || payrollStatus;
@@ -121,18 +225,19 @@ export const HRPayrollView: React.FC = () => {
       netPay,
       daysWorked,
       status: empStatus,
+      basis,
+      salaryAssigned,
       rawEmp: emp
     };
   });
 
+  const unassignedCount = disbursements.filter(d => !d.salaryAssigned).length;
+
   const totalPayroll = disbursements.reduce((sum, d) => sum + d.netPay, 0);
 
-  // Month label for subtitle e.g. "August 2026"
-  const getMonthFormatted = (ym: string) => {
-    const [y, m] = ym.split('-');
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    return `${months[parseInt(m, 10) - 1] || 'August'} ${y}`;
-  };
+  // Month label e.g. "August 2026". The local copy defaulted an unparseable
+  // month to "August", which turned a bad key into a confidently wrong heading.
+  const getMonthFormatted = (ym: string) => formatMonthKey(ym);
 
   const modalNetPayable = Math.max(0, (Number(baseSalaryInput) || 0) + (Number(allowancesInput) || 0) - (Number(deductionInput) || 0));
 
@@ -141,9 +246,8 @@ export const HRPayrollView: React.FC = () => {
     setIsBulkExporting(true);
     setBulkExportProgress(0);
 
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const [y, m] = selectedMonth.split('-');
-    const monthLabel = `${monthNames[parseInt(m, 10) - 1] || 'August'} ${y}`;
+    const monthLabel = formatMonthKey(selectedMonth);
     const issueDate = new Date(parseInt(y), parseInt(m), 0).toISOString().split('T')[0];
 
     for (let i = 0; i < disbursements.length; i++) {
@@ -200,8 +304,9 @@ export const HRPayrollView: React.FC = () => {
               onChange={e => setSelectedMonth(e.target.value)}
               className="px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-white focus:outline-hidden w-full sm:w-auto cursor-pointer"
             >
-              <option value="2026-08">August 2026</option>
-              <option value="2026-07">July 2026</option>
+              {payrollMonths.map(m => (
+                <option key={m.key} value={m.key}>{m.label}</option>
+              ))}
             </select>
 
             {/* Quick Payroll Status Setter (Editable ONLY by HR Admin) */}
@@ -236,6 +341,45 @@ export const HRPayrollView: React.FC = () => {
         </div>
       </div>
 
+      {/* Official 27th to 26th Salary Cycle Banner */}
+      <div className="bg-gradient-to-r from-purple-950/40 via-slate-900 to-blue-950/40 border border-purple-500/30 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-start gap-3.5">
+          <div className="p-2.5 bg-purple-500/15 border border-purple-500/30 rounded-xl text-purple-400 shrink-0 mt-0.5">
+            <Calendar className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-black uppercase tracking-wider text-purple-300">
+                Company Salary Cycle: 27th to 26th (30-Day Period)
+              </span>
+              <span className={`text-[10px] font-mono font-black px-2.5 py-0.5 rounded-md border ${
+                monthBasis.isClosed
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              }`}>
+                {monthBasis.isClosed ? '● Cycle Closed & Ready' : '● Cycle In Progress'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-200 font-medium mt-1">
+              Calculation Window: <strong className="text-white font-mono">{cycleLabel}</strong> ({startDate} → {endDate})
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Strictly evaluates working days, leaves, and LOP in this 30-day window. The 26th is the monthly cut-off, and the next cycle starts on the 27th.
+            </p>
+          </div>
+        </div>
+
+        <div className="text-right shrink-0 w-full md:w-auto bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">Cycle Elapsed</span>
+          <div className="text-base font-black text-white font-mono mt-0.5">
+            {monthBasis.elapsedDays} / {monthBasis.rosteredDays} Working Days
+          </div>
+          <span className="text-[10px] text-purple-400 font-medium block mt-0.5">
+            {monthBasis.isClosed ? '✓ Final Cut-off Reached' : `${monthBasis.rosteredDays - monthBasis.elapsedDays} working days remaining`}
+          </span>
+        </div>
+      </div>
+
       {/* Top Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-md space-y-2">
@@ -259,11 +403,40 @@ export const HRPayrollView: React.FC = () => {
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-md space-y-2">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Payroll Run Date</span>
-          <div className="text-sm font-bold text-slate-200">Last Day of Month (Auto)</div>
-          <span className="text-[10px] text-emerald-400 font-semibold">Direct Deposit Integration Ready</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Attendance Basis (27th–26th)</span>
+          <div className="text-sm font-bold text-slate-200" data-testid="payroll-basis-days">
+            {monthBasis.rosteredDays} rostered day{monthBasis.rosteredDays === 1 ? '' : 's'}
+            <span className="text-slate-500 font-mono text-xs"> · {monthBasis.elapsedDays} elapsed</span>
+          </div>
+          <span className={`text-[10px] font-semibold ${monthBasis.isPartialMonth ? 'text-amber-400' : 'text-emerald-400'}`}>
+            {monthBasis.isPartialMonth
+              ? 'Cycle in progress — figures provisional'
+              : 'Cycle closed (26th reached) — figures final'}
+          </span>
         </div>
       </div>
+
+      {/* Item #17: base salary used to be invented from the row index, so every
+          employee always showed a plausible figure and HR had no way to tell
+          which ones were never actually assigned one. Now it is explicit. */}
+      {unassignedCount > 0 && (
+        <div
+          data-testid="payroll-unassigned-banner"
+          className="flex items-start gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25"
+        >
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-bold text-amber-300">
+              {unassignedCount} employee{unassignedCount === 1 ? ' has' : 's have'} no base salary assigned
+            </p>
+            <p className="text-[11px] text-amber-200/70 mt-0.5 leading-relaxed">
+              They contribute ₹0 to the payroll total until HR sets a figure. Use
+              <strong className="text-amber-200"> Adjust </strong>
+              on the row to assign one — nothing is assumed on their behalf.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Main Table & Cards View */}
       <div className="bg-slate-900/90 rounded-3xl border border-slate-800/80 overflow-hidden shadow-xl">
@@ -298,7 +471,10 @@ export const HRPayrollView: React.FC = () => {
               <div className="grid grid-cols-2 gap-2 bg-slate-900 p-3 rounded-xl border border-slate-800/80 text-xs font-mono">
                 <div>
                   <span className="text-[10px] text-slate-500 font-sans block font-bold uppercase">Days Worked</span>
-                  <span className="font-bold text-slate-200">{disb.daysWorked} Days</span>
+                  <span className="font-bold text-slate-200">
+                    {disb.daysWorked}
+                    <span className="text-slate-500 text-[11px]"> / {disb.basis.workingDays}</span>
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-500 font-sans block font-bold uppercase">Base Salary</span>
@@ -377,7 +553,12 @@ export const HRPayrollView: React.FC = () => {
             <thead>
               <tr className="bg-slate-950/80 border-b border-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest">
                 <th className="py-4 px-6 w-52">Employee</th>
-                <th className="py-4 px-6 w-28">Days Worked</th>
+                <th className="py-4 px-6 w-32">
+                  Days Paid
+                  <span className="block text-[9px] font-normal text-slate-500 normal-case tracking-normal">
+                    of elapsed rostered
+                  </span>
+                </th>
                 <th className="py-4 px-6 w-32">Base Salary</th>
                 <th className="py-4 px-6 w-28">Allowances</th>
                 <th className="py-4 px-6 w-28">Deductions</th>
@@ -397,18 +578,41 @@ export const HRPayrollView: React.FC = () => {
                         className="w-8 h-8 rounded-full object-cover border border-slate-700/60 shrink-0"
                       />
                       <div>
-                        <div className="font-bold text-white">{disb.employeeName}</div>
+                        <div className="font-bold text-white flex items-center gap-1.5">
+                          <span>{disb.employeeName}</span>
+                          {disb.basis.wfhDays > 0 && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                              🏠 WFH
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-500 font-mono">{disb.employeeId} • {disb.department}</div>
                       </div>
                     </div>
                   </td>
 
                   <td className="py-3.5 px-6 font-mono font-bold text-slate-200 whitespace-nowrap">
-                    {disb.daysWorked} Days
+                    <span
+                      title={`${disb.basis.presentDays} present · ${disb.basis.wfhDays} WFH · ${disb.basis.leaveDays} approved leave · ${disb.basis.absentDays} absent · ${disb.basis.holidayDays} holiday`}
+                    >
+                      <span className="text-white font-black">{disb.daysWorked}</span>
+                      <span className="text-slate-500 text-[11px]"> / {disb.basis.workingDays}</span>
+                      {disb.basis.workingDays === 0 && (
+                        <span className="ml-1.5 text-[9px] font-sans font-black text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
+                          Fresh Cycle (0)
+                        </span>
+                      )}
+                    </span>
                   </td>
 
                   <td className="py-3.5 px-6 font-mono text-slate-300 whitespace-nowrap">
-                    ₹{disb.baseSalary.toLocaleString()}
+                    {disb.salaryAssigned ? (
+                      `₹${disb.baseSalary.toLocaleString()}`
+                    ) : (
+                      <span className="text-[10px] font-sans font-bold text-amber-400/90 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-md">
+                        Not set
+                      </span>
+                    )}
                   </td>
 
                   <td className="py-3.5 px-6 font-mono text-emerald-400 whitespace-nowrap">

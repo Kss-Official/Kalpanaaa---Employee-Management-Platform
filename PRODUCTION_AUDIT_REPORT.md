@@ -106,6 +106,17 @@ Sections 1–4 are merged per-bug so each finding reads as one unit: **what/why 
 - **Location:** `firestore.rules` (`ownsEmployeeRecord()`, `mirrorsEmployeeRole()`, attendance `employeeCode == getEmployeeId()`).
 - **Fix:** ownership matches by uid/email/employeeId **field**; role is validated via `mirrorsEmployeeRole()` against `users.employeeDocId`.
 
+#### A17 · P1 — Landing page company counters permanently read 0
+- **Root cause:** `LandingView` filtered attendance with SCREAMING_SNAKE status literals (`'PRESENT'`, `'LATE'`, `'ON_LEAVE'`) that do not exist in the `AttendanceStatus` union (`'Present' | 'Absent' | 'Late' | 'Half Day' | 'On Leave' | 'Holiday' | 'Work From Home'`). All three filters matched **zero** records, so the live "Present / Late / On Leave" counters showed 0 for the whole company regardless of actual attendance. Not caught at compile time because `a.status` arrives as `any` through the untyped `useAuth()` context (see B9).
+- **Location:** `src/components/landing/LandingView.tsx`
+- **Fix:** correct casing on all three comparisons; `presentCount` also now includes `'Work From Home'` so remote staff are counted present, consistent with the dashboard KPI semantics fixed in A14.
+
+#### A18 · P0 (security) — Credential export untracked and future exports blocked
+- **Root cause:** `users.json` (Firebase Auth export: 15× email + scrypt `passwordHash` + `salt` + `localId`) was tracked in the repo.
+- **Location:** `.gitignore`, plus removal from the git index.
+- **Fix:** file untracked (removed from the index, kept on disk) and `.gitignore` now blocks `users.json`, `*users-export*.json`, `serviceAccount*.json`, `*-firebase-adminsdk-*.json`, and `.firebase/`.
+- **⚠️ Incomplete by design:** this stops *further* exposure only. **The blob is still in history at commit 6b13678** — the purge + rotation in B3 is still required and cannot be done from a code change.
+
 ---
 
 ### PART B — REPORT-ONLY (deliberately NOT changed)
@@ -228,7 +239,7 @@ Each of these is a real finding. None was silently changed because the fix would
 | 15 | Authoritative server time for lateness | ⚠️ Open (B6) | Server timestamp |
 | 16 | Lazy-load jspdf/html2canvas | ⚠️ Recommended | Dynamic import at call sites |
 | 17 | Cloud Storage rules block | ⚠️ Open | Define in `firebase.json` if Storage used |
-| 18 | Pin `@types/react`/`@types/react-dom` | ⚠️ Open (B9) | Add to devDependencies |
+| 18 | **Install `@types/react` + type the auth context** | ⚠️ Open (B9) | **Raised to P1** — its absence already shipped a P1 (A17) |
 | 19 | FCM SW version alignment | ⚠️ Open (B10) | Sync SW version |
 
 **Go / No-Go:** The **data-integrity and isolation P0/P1 bugs are fixed and verified** — the attendance engine, the most business-critical path, is now sound. Before a hard production launch, resolve the three ⛔ security items (**#9 biometric bypass, #11 auth-export history purge, #12 App Check**) — none require rearchitecting, and two are operational rather than code.

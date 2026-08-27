@@ -18,6 +18,12 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
   const isEdit = Boolean(employeeToEdit);
 
+  // A resume already exists for this employee, either still inline on the record or
+  // relocated to employees/{id}/private/resume (flagged by hasResume). Drives both
+  // the required-field check and the "already on file" hint, so an admin editing an
+  // unrelated field is never asked to re-upload a document that is already stored.
+  const hasStoredResume = Boolean(employeeToEdit?.resumeUrl) || Boolean(employeeToEdit?.hasResume);
+
   // Form State
   const [formData, setFormData] = useState({
     employeeId: employeeToEdit?.employeeId || (() => {
@@ -47,9 +53,9 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     joiningDate: employeeToEdit?.joiningDate || new Date().toISOString().split('T')[0],
     employmentType: employeeToEdit?.employmentType || ('Full-Time' as EmploymentType),
     reportingManager: employeeToEdit?.reportingManager || 'Rahul Sharma',
-    workLocation: employeeToEdit?.workLocation || 'AGPS Nagar HQ Campus',
+    workLocation: employeeToEdit?.workLocation || 'Kalpanaaa Headquarters',
     status: employeeToEdit?.status || ('Active' as EmployeeStatus),
-    shift: employeeToEdit?.shift || 'General Shift (09:00 - 18:00)',
+    shift: employeeToEdit?.shift || 'Day Shift (10:00 AM – 7:00 PM)',
     permanentAddress: employeeToEdit?.permanentAddress || 'Hitech City Road',
     currentAddress: employeeToEdit?.currentAddress || 'Hitech City Road',
     city: employeeToEdit?.city || 'Hyderabad',
@@ -168,7 +174,12 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
     if (!validateStep1() || !validateStep2()) return;
 
-    if (!formData.profilePhotoUrl || !formData.resumeUrl) {
+    // The resume requirement is satisfied either by a blob in this form or by one
+    // already stored. Since the resume moved to employees/{id}/private/resume the
+    // parent record no longer carries resumeUrl — checking only formData.resumeUrl
+    // would have blocked EVERY edit of an already-migrated employee (department,
+    // shift, password reset, anything) with a bogus "please upload" error.
+    if (!formData.profilePhotoUrl || !(formData.resumeUrl || hasStoredResume)) {
       setErrorMsg('Please upload both Profile Photo and Resume document.');
       return;
     }
@@ -418,7 +429,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                       name="shift"
                       value={formData.shift}
                       onChange={handleChange}
-                      placeholder="General Shift (09:00 - 18:00)"
+                      placeholder="Day Shift (10:00 AM – 7:00 PM)"
                       className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                     />
                   </div>
@@ -583,6 +594,15 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                       onChange={e => handleFileChange(e, 'resumeUrl')}
                       className="w-full text-[11px] text-slate-400 file:mr-2 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer"
                     />
+                    {/* The input cannot show a pre-existing file, and the resume blob
+                        now lives in employees/{id}/private/resume rather than on the
+                        record, so without this the field looked empty on every edit
+                        and the asterisk implied a re-upload was required. */}
+                    {Boolean(formData.resumeUrl || employeeToEdit?.resumeUrl) && (
+                      <p className="mt-1.5 text-[11px] text-emerald-400 font-semibold">
+                        ✓ A resume is already on file — leave this empty to keep it, or choose a file to replace it.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

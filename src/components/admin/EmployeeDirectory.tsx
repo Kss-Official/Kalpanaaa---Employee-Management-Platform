@@ -1,27 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { AllEmployeeBarcodesView } from './AllEmployeeBarcodesView';
 import { Employee, EmployeeStatus } from '../../types';
 import { motion } from 'framer-motion';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
+import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
 import { 
   Search, 
-  Filter, 
   Plus, 
-  MoreVertical, 
-  QrCode, 
   CreditCard, 
   Mail, 
   Phone, 
   Building2, 
   Edit, 
-  Trash2, 
   Eye, 
-  LayoutGrid, 
   List,
-  Sparkles,
-  ChevronRight,
-  Calendar
+  Calendar,
+  Crown,
+  Star
 } from 'lucide-react';
 
 interface EmployeeDirectoryProps {
@@ -37,7 +33,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   onOpenEditModal,
   onOpenIdCardModal
 }) => {
-  const { employees, deleteEmployee, regenerateQrToken, role } = useAuth();
+  const { employees, role } = useAuth();
   const isAdmin = role === 'SUPER_ADMIN' || role === 'HR_ADMIN';
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
@@ -46,7 +42,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const [showPrintAllBarcodes, setShowPrintAllBarcodes] = useState(false);
   const [attendanceModalEmp, setAttendanceModalEmp] = useState<Employee | null>(null);
 
-  const departments = Array.from(new Set(employees.map(e => e.department)));
+  const departments = useMemo(() => Array.from(new Set(employees.map(e => e.department).filter(Boolean))), [employees]);
+
+  // Single source of truth, shared with payroll and every dashboard. The local
+  // copy this replaced matched `desig.includes('cto')`, which is also true for
+  // "Contractor", and `desig.includes('ceo')`; designation is a free-text input,
+  // so ordinary staff were being promoted into the Executive Leadership section
+  // and removed from the operational roster below it.
+  const isExecutiveLeadership = (emp: any) => isExecutiveOrLeadership(emp);
 
   const formatEmployeeStatus = (status?: string): EmployeeStatus => {
     if (!status || status.toLowerCase() === 'check' || status.toLowerCase() === 'checked in' || status.toLowerCase() === 'active') {
@@ -64,21 +67,31 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     return 'Active';
   };
 
-  const filteredEmployees = employees.filter(emp => {
-    if (!emp.fullName || emp.fullName.trim() === '') return false;
-    
-    const matchesSearch = 
-      (emp.fullName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (emp.employeeId?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (emp.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (emp.designation?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+  const filteredEmployees = useMemo(() => {
+    return employees.filter(emp => {
+      if (!emp.fullName || emp.fullName.trim() === '') return false;
+      
+      const matchesSearch = 
+        (emp.fullName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (emp.employeeId?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (emp.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (emp.designation?.toLowerCase() || '').includes(searchTerm.toLowerCase());
 
-    const matchesDept = deptFilter === 'ALL' || emp.department === deptFilter;
-    const empStatus = formatEmployeeStatus(emp.status);
-    const matchesStatus = statusFilter === 'ALL' || empStatus === statusFilter;
+      const matchesDept = deptFilter === 'ALL' || emp.department === deptFilter;
+      const empStatus = formatEmployeeStatus(emp.status);
+      const matchesStatus = statusFilter === 'ALL' || empStatus === statusFilter;
 
-    return matchesSearch && matchesDept && matchesStatus;
-  });
+      return matchesSearch && matchesDept && matchesStatus;
+    });
+  }, [employees, searchTerm, deptFilter, statusFilter]);
+
+  const standardEmployees = useMemo(() => {
+    return filteredEmployees.filter(emp => !isExecutiveLeadership(emp));
+  }, [filteredEmployees]);
+
+  const executiveLeaders = useMemo(() => {
+    return employees.filter(emp => isExecutiveLeadership(emp));
+  }, [employees]);
 
   const getStatusIndicator = (status?: string) => {
     const s = formatEmployeeStatus(status);
@@ -97,6 +110,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
 
   return (
     <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
+      
       {/* Top Header Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -135,7 +149,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             placeholder="Search name, ID, email..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl focus:outline-none focus:border-blue-500 text-white placeholder-slate-500 transition-colors"
+            className="w-full pl-9 pr-4 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl focus:outline-hidden focus:border-blue-500 text-white placeholder-slate-500 transition-colors"
           />
         </div>
 
@@ -145,7 +159,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             <select
               value={deptFilter}
               onChange={e => setDeptFilter(e.target.value)}
-              className="px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500 cursor-pointer w-full"
+              className="px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 font-bold focus:outline-hidden focus:border-blue-500 cursor-pointer w-full"
             >
               <option value="ALL">All Departments</option>
               {departments.map(d => (
@@ -157,7 +171,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             <select
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value)}
-              className="px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 font-bold focus:outline-none focus:border-blue-500 cursor-pointer w-full"
+              className="px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 font-bold focus:outline-hidden focus:border-blue-500 cursor-pointer w-full"
             >
               <option value="ALL">All Statuses</option>
               <option value="Active">Active</option>
@@ -165,338 +179,233 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
               <option value="Terminated">Terminated</option>
             </select>
           </div>
-
-          {/* Grid vs Table View Toggle */}
-          <div className="flex items-center justify-center bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
-            <button
-              onClick={() => setViewMode('table')}
-              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 text-xs font-bold ${viewMode === 'table' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-              title="Table View"
-            >
-              <List className="w-4 h-4" />
-              <span className="sm:hidden">List</span>
-            </button>
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 text-xs font-bold ${viewMode === 'grid' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-              title="Grid View"
-            >
-              <LayoutGrid className="w-4 h-4" />
-              <span className="sm:hidden">Grid</span>
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Main Content Area */}
-      {filteredEmployees.length === 0 ? (
-        <div className="bg-slate-900 rounded-3xl border border-slate-800 p-12 text-center">
-          <Building2 className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-white">No employees match your search</h3>
-          <p className="text-xs text-slate-400 mt-1">Try resetting search filters or add a new employee profile.</p>
+      {/* ── 1. MAIN WORKFORCE TABLE (Top to Bottom) ──────────────── */}
+      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
+        <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex items-center justify-between">
+          <span className="text-xs font-black uppercase tracking-wider text-slate-400">
+            Workforce Personnel ({standardEmployees.length})
+          </span>
         </div>
-      ) : viewMode === 'table' ? (
-        /* TABLE VIEW (Mobile Card List on mobile, Desktop Table on md+) */
-        <div>
-          {/* Mobile Enterprise Card List (md:hidden) */}
-          <motion.div 
-            className="md:hidden space-y-3"
-            initial="hidden"
-            animate="show"
-            variants={{
-              hidden: { opacity: 0 },
-              show: { opacity: 1, transition: { staggerChildren: 0.04 } }
-            }}
-          >
-            {filteredEmployees.map(emp => {
-              const displayStatus = formatEmployeeStatus(emp.status);
-              const statusColorMap: Record<string, string> = {
-                'Active': 'var(--accent-emerald)',
-                'On Leave': 'var(--accent-amber)',
-                'Suspended': 'var(--accent-amber)',
-                'Terminated': 'var(--accent-rose)',
-              };
-              const statusColor = statusColorMap[displayStatus] || 'var(--accent-emerald)';
-              const statusGlow = statusColor.replace('accent', 'glow');
 
-              return (
-                <motion.div 
-                  key={emp.id} 
-                  variants={{
-                    hidden: { opacity: 0, x: -10 },
-                    show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
-                  }}
-                  className="relative overflow-hidden bg-[var(--bg-tertiary)] rounded-2xl border border-[var(--border-subtle)] p-5 shadow-[var(--shadow-sm)] h-full flex flex-col justify-between"
-                >
-                  <div className="absolute top-0 left-0 right-0 h-[40px] opacity-20 pointer-events-none" style={{ background: 'var(--gradient-card)' }} />
-                  
-                  {/* Top Section: Avatar & Identity */}
-                  <div className="flex items-start justify-between gap-3 relative z-10">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="relative">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-950/40 border-b border-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <th className="py-3.5 px-6">Employee</th>
+                <th className="py-3.5 px-6">ID Code</th>
+                <th className="py-3.5 px-6">Department &amp; Role</th>
+                <th className="py-3.5 px-6">Employment</th>
+                <th className="py-3.5 px-6">Status</th>
+                <th className="py-3.5 px-6 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40 text-[11px]">
+              {standardEmployees.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-500 font-medium">
+                    No workforce personnel match your search criteria.
+                  </td>
+                </tr>
+              ) : (
+                standardEmployees.map(emp => (
+                  <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group">
+                    <td className="py-3 px-6">
+                      <div className="flex items-center gap-3.5">
                         <img
-                          src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                          src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=0f172a&color=fff`}
                           alt={emp.fullName}
-                          className="w-12 h-12 rounded-full object-cover shrink-0"
-                          style={{ border: `2px solid ${statusColor}` }}
+                          className="w-8 h-8 rounded-full object-cover border border-slate-700/50"
                         />
-                        <span 
-                          className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-[var(--bg-tertiary)]"
-                          style={{ backgroundColor: statusColor, boxShadow: `0 0 10px ${statusColor}40` }}
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h4 
-                          onClick={() => onSelectEmployee(emp)}
-                          className="font-bold text-[var(--text-primary)] text-[15px] cursor-pointer truncate"
-                        >
-                          {emp.fullName}
-                        </h4>
-                        <p className="text-xs text-[var(--text-secondary)] font-medium truncate mt-0.5">
-                          {emp.designation} <span className="opacity-50 mx-1">•</span> {emp.department}
-                        </p>
-                      </div>
-                    </div>
-                    <button onClick={() => onSelectEmployee(emp)} className="w-8 h-8 flex items-center justify-center bg-[var(--bg-elevated)] rounded-full border border-[var(--border-subtle)] text-[var(--text-tertiary)] active:scale-95 transition-transform shrink-0">
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Middle Section: Meta Info */}
-                  <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[var(--border-subtle)] text-xs relative z-10">
-                    <span 
-                      className="px-2 py-0.5 rounded-md font-bold flex items-center gap-1.5"
-                      style={{ color: statusColor, backgroundColor: `${statusColor}15`, border: `1px solid ${statusColor}30` }}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
-                      {displayStatus}
-                    </span>
-                    <span className="font-mono font-bold text-[var(--text-secondary)]">
-                      {emp.employeeId}
-                    </span>
-                    <span className="text-[var(--text-tertiary)] truncate ml-auto">
-                      {emp.email}
-                    </span>
-                  </div>
-
-                  {/* Bottom Section: Actions */}
-                  <div className="grid grid-cols-3 gap-2 mt-4 relative z-10">
-                    <button
-                      onClick={() => onSelectEmployee(emp)}
-                      className="h-10 flex items-center justify-center gap-1.5 bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-xs font-semibold rounded-[10px] active:scale-95 transition-transform"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      Details
-                    </button>
-                    {isAdmin ? (
-                      <>
-                        <button
-                          onClick={() => onOpenIdCardModal(emp)}
-                          className="h-10 flex items-center justify-center gap-1.5 bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] text-xs font-semibold rounded-[10px] active:scale-95 transition-transform"
-                        >
-                          <CreditCard className="w-3.5 h-3.5" />
-                          ID Pass
-                        </button>
-                        <button
-                          onClick={() => onOpenEditModal(emp)}
-                          className="h-10 flex items-center justify-center gap-1.5 bg-[var(--bg-elevated)] text-[var(--text-secondary)] text-xs font-semibold rounded-[10px] active:scale-95 transition-transform"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                          Edit
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="h-10"></div>
-                        <div className="h-10"></div>
-                      </>
-                    )}
-                  </div>
-                </motion.div>
-              );
-            })}
-          </motion.div>
-
-          {/* Desktop Data Table (hidden md:block) */}
-          <div className="hidden md:block bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-950/60 border-b border-slate-800/60 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                    <th className="py-4 px-6">Employee</th>
-                    <th className="py-4 px-6">ID Code</th>
-                    <th className="py-4 px-6">Department & Role</th>
-                    <th className="py-4 px-6">Employment</th>
-                    <th className="py-4 px-6">Status</th>
-                    <th className="py-4 px-6 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40 text-[11px]">
-                  {filteredEmployees.map(emp => (
-                    <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group">
-                      <td className="py-3 px-6">
-                        <div className="flex items-center gap-4">
-                          <img
-                            src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                            alt={emp.fullName}
-                            className="w-8 h-8 rounded-full object-cover border border-slate-700/50"
-                          />
-                          <div>
-                            <div
-                              onClick={() => onSelectEmployee(emp)}
-                              className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
-                            >
-                              {emp.fullName}
-                            </div>
-                            <div className="text-[10px] font-medium text-slate-500">{emp.email}</div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-6">
-                        <span className="font-mono font-bold text-slate-400">
-                          {emp.employeeId}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-6">
-                        <div className="font-bold text-slate-300">{emp.department}</div>
-                        <div className="text-[10px] text-slate-500 font-medium">{emp.designation}</div>
-                      </td>
-
-                      <td className="py-3 px-6">
-                        <div className="text-slate-400 font-bold">{emp.employmentType}</div>
-                        <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift?.split(' ')[0] || 'General'}</div>
-                      </td>
-
-                      <td className="py-3 px-6">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
-                          <span className="text-slate-300 font-bold">{formatEmployeeStatus(emp.status)}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
+                        <div>
+                          <div
                             onClick={() => onSelectEmployee(emp)}
-                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                            title="View Full Profile"
+                            className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
                           >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {isAdmin && (
-                            <>
-                              <button
-                                onClick={() => setAttendanceModalEmp(emp)}
-                                className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                                title="View 30-Day Monthly Attendance History"
-                              >
-                                <Calendar className="w-4 h-4 text-blue-400" />
-                              </button>
-                              <button
-                                onClick={() => onOpenIdCardModal(emp)}
-                                className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                                title="Print / Export ID Badge Card"
-                              >
-                                <CreditCard className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => onOpenEditModal(emp)}
-                                className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                                title="Edit Employee Data"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                            </>
-                          )}
+                            {emp.fullName}
+                          </div>
+                          <div className="text-[10px] font-medium text-slate-500">{emp.email}</div>
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-6">
+                      <span className="font-mono font-bold text-slate-400">
+                        {emp.employeeId}
+                      </span>
+                    </td>
+
+                    <td className="py-3 px-6">
+                      <div className="font-bold text-slate-300">{emp.department}</div>
+                      <div className="text-[10px] text-slate-500 font-medium">{emp.designation}</div>
+                    </td>
+
+                    <td className="py-3 px-6">
+                      <div className="text-slate-400 font-bold">{emp.employmentType || 'Full Time'}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift?.split(' ')[0] || 'General'}</div>
+                    </td>
+
+                    <td className="py-3 px-6">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
+                        <span className="text-slate-300 font-bold">{formatEmployeeStatus(emp.status)}</span>
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-6 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => onSelectEmployee(emp)}
+                          className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                          title="View Full Profile"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        {isAdmin && (
+                          <>
+                            <button
+                              onClick={() => setAttendanceModalEmp(emp)}
+                              className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                              title="View Monthly Attendance History"
+                            >
+                              <Calendar className="w-4 h-4 text-blue-400" />
+                            </button>
+                            <button
+                              onClick={() => onOpenIdCardModal(emp)}
+                              className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                              title="Print ID Badge Card"
+                            >
+                              <CreditCard className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => onOpenEditModal(emp)}
+                              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                              title="Edit Employee Data"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
-      ) : (
-        /* GRID VIEW */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredEmployees.map(emp => (
-            <div key={emp.id} className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 shadow-sm hover:border-slate-700/80 hover:bg-slate-900 transition-all flex flex-col justify-between group cursor-pointer" onClick={() => onSelectEmployee(emp)}>
-              <div>
-                <div className="flex items-start justify-between mb-4">
-                  <span className="font-mono text-[10px] font-black bg-slate-950/50 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-800/50">
-                    {emp.employeeId}
-                  </span>
-                  <div className="flex items-center gap-2 bg-slate-950/50 px-2.5 py-1 rounded-lg border border-slate-800/50">
-                    <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
-                    <span className="text-[10px] text-slate-300 font-bold tracking-wide uppercase">{formatEmployeeStatus(emp.status)}</span>
-                  </div>
-                </div>
-                <div className="text-center my-4">
+      </div>
+
+      {/* ── 2. HIGHLIGHTED SEPARATION LINE ──────────────────────── */}
+      <div className="relative py-4">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t-2 border-gradient-to-r from-amber-500/20 via-blue-500/50 to-purple-500/20 shadow-lg shadow-blue-500/10" />
+        </div>
+        <div className="relative flex justify-center">
+          <span className="bg-slate-950 px-5 py-1.5 rounded-full border-2 border-blue-500/40 text-xs font-black text-blue-300 uppercase tracking-widest flex items-center gap-2 shadow-xl shadow-blue-950/60">
+            <Crown className="w-4 h-4 text-amber-400 fill-amber-400" />
+            <span>Executive Leadership &amp; Founders</span>
+          </span>
+        </div>
+      </div>
+
+      {/* ── 3. FIXED CEO & CTO FOOTER SECTION ────────────────────── */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900/90 to-purple-950/30 rounded-3xl border-2 border-amber-500/30 p-6 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+            <h3 className="text-sm font-black text-white uppercase tracking-wider">
+              Executive Directorate &amp; C-Suite Office
+            </h3>
+          </div>
+          <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 px-3 py-0.5 rounded-full">
+            Fixed Executive Directorate
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {executiveLeaders.map((exec) => (
+            <div
+              key={exec.id}
+              className="bg-slate-950/90 rounded-2xl border-2 border-amber-500/30 p-5 shadow-xl flex items-start justify-between gap-4 hover:border-amber-400 transition-all group"
+            >
+              <div className="flex items-start gap-4 min-w-0">
+                <div className="relative shrink-0">
                   <img
-                    src={emp.profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                    alt={emp.fullName}
-                    className="w-16 h-16 rounded-full object-cover border-2 border-slate-800/80 mx-auto group-hover:scale-105 transition-transform"
+                    src={exec.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(exec.fullName)}&background=1e1e2e&color=fff`}
+                    alt={exec.fullName}
+                    className="w-16 h-16 rounded-2xl object-cover border-2 border-amber-500/60 shadow-lg shadow-amber-950/50"
                   />
-                  <div className="mt-3">
-                    <h3 className="font-extrabold text-white text-sm group-hover:text-blue-400 transition-colors">{emp.fullName}</h3>
-                    <p className="text-[10px] text-slate-500 font-medium">{emp.designation}</p>
-                  </div>
+                  <span className="absolute -bottom-1 -right-1 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full p-1 shadow-md">
+                    <Star className="w-3 h-3 text-white fill-white" />
+                  </span>
                 </div>
 
-                <div className="space-y-2 mt-4 pt-4 border-t border-slate-800/60">
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <Building2 className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">{emp.department}</span>
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-base font-black text-white group-hover:text-amber-300 transition-colors truncate">
+                      {exec.fullName}
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                      {exec.designation || 'Executive Leadership'}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <Mail className="w-3.5 h-3.5" />
-                    <span className="text-[11px] truncate">{emp.email}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <Phone className="w-3.5 h-3.5" />
-                    <span className="text-[11px]">{emp.phone}</span>
+                  <p className="text-xs font-semibold text-slate-400 font-mono">
+                    {exec.employeeId || 'KSS-EXEC'} • {exec.department || 'Executive Office'}
+                  </p>
+
+                  <div className="space-y-1 text-xs text-slate-400 pt-1 font-medium">
+                    <div className="flex items-center gap-2 truncate">
+                      <Mail className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
+                      <span className="truncate">{exec.email}</span>
+                    </div>
+                    <div className="flex items-center gap-2 truncate">
+                      <Phone className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
+                      <span>{exec.phone || '+91 98765 43210'}</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-                  {isAdmin && (
-                    <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between gap-1">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setAttendanceModalEmp(emp); }}
-                        className="text-[10px] font-bold text-slate-400 hover:text-blue-400 flex items-center gap-1 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
-                        title="View 30-Day Monthly Attendance History"
-                      >
-                        <Calendar className="w-3 h-3 text-blue-400" /> Attendance History
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onOpenIdCardModal(emp); }}
-                        className="text-[10px] font-bold text-slate-400 hover:text-emerald-400 flex items-center gap-1 bg-slate-950/50 px-2 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
-                      >
-                        <CreditCard className="w-3 h-3" /> ID Pass
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onOpenEditModal(emp); }}
-                        className="text-[10px] font-bold text-slate-400 hover:text-amber-400 flex items-center gap-1 bg-slate-950/50 px-2 py-1.5 rounded-lg border border-slate-800/50 transition-colors"
-                      >
-                        <Edit className="w-3 h-3" /> Edit
-                      </button>
-                    </div>
-                  )}
+              {isAdmin && (
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  <button
+                    onClick={() => onSelectEmployee(exec)}
+                    className="p-2 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                    title="View Profile"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => onOpenIdCardModal(exec)}
+                    className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                    title="ID Badge"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => onOpenEditModal(exec)}
+                    className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                    title="Edit Profile"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
                 </div>
-              ))}
+              )}
             </div>
-          )}
-
-          {/* Render Employee Monthly Attendance Modal */}
-          {attendanceModalEmp && (
-            <EmployeeMonthlyAttendanceModal
-              employee={attendanceModalEmp}
-              onClose={() => setAttendanceModalEmp(null)}
-            />
-          )}
+          ))}
         </div>
-      );
-    };
+      </div>
+
+      {/* Render Employee Monthly Attendance Modal */}
+      {attendanceModalEmp && (
+        <EmployeeMonthlyAttendanceModal
+          employee={attendanceModalEmp}
+          onClose={() => setAttendanceModalEmp(null)}
+        />
+      )}
+    </div>
+  );
+};

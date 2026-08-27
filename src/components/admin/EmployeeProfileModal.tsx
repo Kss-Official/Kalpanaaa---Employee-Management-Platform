@@ -3,13 +3,14 @@ import { useAuth } from '../../context/AuthContext';
 import { Employee } from '../../types';
 import {
   X, User, Briefcase, MapPin, CreditCard,
-  Download, RotateCcw, Shield, Clock
+  Download, RotateCcw, Shield, Clock, Calendar, PieChart as PieChartIcon
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { generateEmployeeQrToken } from '../../lib/attendanceEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { triggerHaptic } from '../../hooks/useHaptic';
 import { animations } from '../../lib/animations';
+import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 
 interface EmployeeProfileModalProps {
   employee: Employee;
@@ -24,6 +25,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   const { attendance, auditLogs, regenerateQrToken, settings } = useAuth();
   const [activeTab, setActiveTab] = useState<'details' | 'qr' | 'attendance' | 'activity'>('details');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [isMonthlyModalOpen, setIsMonthlyModalOpen] = useState(false);
 
   const empAttendance = attendance.filter(a => a.employeeId === employee.id || a.employeeCode === employee.employeeId);
   const empLogs = auditLogs.filter(l => l.target.includes(employee.employeeId) || l.actorId === employee.id);
@@ -144,6 +146,13 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                 </button>
 
                 {/* Action Buttons */}
+                <button
+                  onClick={() => { triggerHaptic('medium'); setIsMonthlyModalOpen(true); }}
+                  className={`flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600/20 to-blue-600/20 hover:from-purple-600/30 hover:to-blue-600/30 text-purple-300 text-xs font-bold rounded-xl border border-purple-500/40 cursor-pointer outline-none w-full ${animations.tap}`}
+                >
+                  <Calendar className="w-4 h-4 text-purple-400" />
+                  Work Analytics
+                </button>
                 <button
                   onClick={() => { triggerHaptic('light'); onOpenIdCard(employee); }}
                   className={`flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--bg-secondary)] hover:bg-[var(--border-subtle)] text-[var(--text-primary)] text-xs font-bold rounded-xl border border-[var(--border-subtle)] cursor-pointer outline-none w-full ${animations.tap}`}
@@ -280,7 +289,22 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
             )}
 
             {activeTab === 'attendance' && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--bg-secondary)] p-4 rounded-2xl border border-[var(--border-subtle)]">
+                  <div>
+                    <h4 className="text-xs font-bold text-[var(--text-primary)]">Monthly Attendance &amp; Work Analytics</h4>
+                    <p className="text-[10px] text-[var(--text-tertiary)]">Interactive pie charts, task hours, breaks and calendar statement</p>
+                  </div>
+                  <button
+                    onClick={() => { triggerHaptic('medium'); setIsMonthlyModalOpen(true); }}
+                    className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white text-xs font-black rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md"
+                  >
+                    <Calendar className="w-4 h-4 text-purple-200" />
+                    <PieChartIcon className="w-4 h-4 text-blue-200" />
+                    <span>Open Month Calendar &amp; Day Pie</span>
+                  </button>
+                </div>
+
                 {empAttendance.length === 0 ? (
                   <div className="text-center py-12 text-[var(--text-tertiary)] text-sm">No attendance records found.</div>
                 ) : (
@@ -347,6 +371,14 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
           </div>
         </motion.div>
       </div>
+
+      {/* Employee Monthly Attendance & Work Analytics Modal */}
+      {isMonthlyModalOpen && (
+        <EmployeeMonthlyAttendanceModal
+          employee={employee}
+          onClose={() => setIsMonthlyModalOpen(false)}
+        />
+      )}
     </AnimatePresence>
   );
 };

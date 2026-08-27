@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const OUT = mkdtempSync(join(tmpdir(), 'kss-regression-'));
-const entries = ['errors', 'safeStorage', 'attendanceEngine'];
+const entries = ['errors', 'safeStorage', 'attendanceEngine', 'hierarchy'];
 
 for (const name of entries) {
   const res = spawnSync(
@@ -23,9 +23,10 @@ for (const name of entries) {
 }
 
 const testFiles = [
-  join('tests', 'regression.test.mjs'), 
+  join('tests', 'regression.test.mjs'),
   join('tests', 'fcm.test.mjs'),
-  join('tests', 'rtdb.test.mjs')
+  join('tests', 'rtdb.test.mjs'),
+  join('tests', 'hierarchy.test.mjs')
 ];
 
 const testRes = spawnSync(

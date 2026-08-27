@@ -38,6 +38,7 @@ const HRNotificationsView  = lazyWithRetry(() => import('./components/hr/HRNotif
 const PMDashboard          = lazyWithRetry(() => import('./components/pm/PMDashboard').then(m => ({ default: m.PMDashboard })), 'PMDashboard');
 const PMProjectsView       = lazyWithRetry(() => import('./components/pm/PMProjectsView').then(m => ({ default: m.PMProjectsView })), 'PMProjectsView');
 const PMTeamPerformance    = lazyWithRetry(() => import('./components/pm/PMTeamPerformance').then(m => ({ default: m.PMTeamPerformance })), 'PMTeamPerformance');
+const FeedbackHub          = lazyWithRetry(() => import('./components/feedback/FeedbackHub').then(m => ({ default: m.FeedbackHub })), 'FeedbackHub');
 const EmployeeTeamDirectory = lazyWithRetry(() => import('./components/employee/EmployeeTeamDirectory').then(m => ({ default: m.EmployeeTeamDirectory })), 'EmployeeTeamDirectory');
 const ExecutiveProfileView  = lazyWithRetry(() => import('./components/admin/ExecutiveProfileView').then(m => ({ default: m.ExecutiveProfileView })), 'ExecutiveProfileView');
 
@@ -161,12 +162,12 @@ const MainLayout: React.FC = () => {
         return 'emp_dashboard';
       }
     } else if (roleToUse === 'PROJECT_MANAGER') {
-      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees', 'emp_directory', 'company_rules'];
+      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'feedback_hub', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees', 'emp_directory', 'company_rules'];
       if (!allowedPMTabs.includes(tab) || (tab.startsWith('emp_') && tab !== 'emp_directory')) {
         return 'pm_dashboard';
       }
     } else if (roleToUse === 'HR_ADMIN') {
-      const allowedHRTabs = ['dashboard', 'hr_dashboard', 'hr_profile', 'employees', 'attendance', 'leave_approvals', 'hr_payroll', 'company_rules', 'notifications', 'reports', 'audit_logs', 'my_id_card', 'documents'];
+      const allowedHRTabs = ['dashboard', 'hr_dashboard', 'hr_profile', 'feedback_hub', 'employees', 'attendance', 'leave_approvals', 'hr_payroll', 'company_rules', 'notifications', 'reports', 'audit_logs', 'my_id_card', 'documents'];
       if (!allowedHRTabs.includes(tab) && !tab.startsWith('emp_') && !tab.startsWith('hr_')) {
         return 'dashboard';
       }
@@ -261,6 +262,7 @@ const MainLayout: React.FC = () => {
 
                 {currentTab === 'hr_profile' && <HRProfileView />}
                 {currentTab === 'hr_payroll' && <HRPayrollView />}
+                {currentTab === 'feedback_hub' && <FeedbackHub />}
                 {currentTab === 'company_rules' && <CompanyRulesView />}
                 {currentTab === 'notifications' && <HRNotificationsView />}
                 {currentTab === 'pm_dashboard' && <PMDashboard onNavigateTab={handleNavigateTab} />}

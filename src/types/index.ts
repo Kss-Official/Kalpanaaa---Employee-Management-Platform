@@ -113,7 +113,14 @@ export interface Employee {
   gender: 'Male' | 'Female' | 'Other' | 'Prefer not to say';
   dateOfBirth: string;
   profilePhotoUrl?: string;
+  // The resume blob now lives at employees/{id}/private/resume, not here — an
+  // uncompressed base64 PDF on this document was streamed to every client that
+  // listens to /employees (see src/lib/employeeResume.ts). Kept optional because
+  // historical records still carry it inline and the fallback path still reads it.
   resumeUrl?: string;
+  // Marks "a resume exists in the subcollection" so the admin form's required-field
+  // check passes without the parent document having to carry the bytes.
+  hasResume?: boolean;
 
   // Employment
   department: string;
@@ -126,7 +133,7 @@ export interface Employee {
   executiveRole?: 'CEO' | 'CTO';
   workLocation: string;
   status: EmployeeStatus;
-  shift: string; // e.g., 'Day Shift (09:00 - 18:00)'
+  shift: string; // e.g., 'Day Shift (10:00 AM – 7:00 PM)'
 
   // Personal & Profile
   permanentAddress: string;
@@ -221,6 +228,12 @@ export interface AuditLog {
   ipAddress?: string;
 }
 
+export interface CompanyHoliday {
+  date: string; // YYYY-MM-DD
+  name: string;
+  dayOfWeek: string;
+}
+
 export interface CompanySettings {
   companyName: string;
   logoUrl: string;
@@ -243,6 +256,7 @@ export interface CompanySettings {
   lunchBreakDurationMinutes: number; // 30
   wfhEnabled: boolean;
   companyWideWfhDates?: string[]; // Dates (YYYY-MM-DD) assigned by CEO or CTO for Office-Wide WFH
+  holidayDates?: string[]; // Declared Company Holiday Dates (YYYY-MM-DD)
   
   // QR settings
   qrTokenLifetimeMinutes: number;
@@ -323,4 +337,111 @@ export interface SalaryDisbursement {
   daysWorked: number;
   status: 'Draft' | 'Approved' | 'Paid';
   processedAt?: string;
+}
+
+export type FeedbackCategory = 
+  | 'Performance & Sprint Delivery'
+  | 'Technical & Code Quality'
+  | 'Behavioral & Teamwork'
+  | 'Appreciation & Recognition';
+
+export type FeedbackSentiment = 'EXCELLENT' | 'GOOD' | 'NEEDS_IMPROVEMENT' | 'CRITICAL';
+
+export interface PerformanceFeedback {
+  id: string;
+  targetEmployeeId: string;
+  targetEmployeeCode: string;
+  targetEmployeeName: string;
+  targetEmployeeRole: UserRole | string;
+  targetEmployeeDesignation?: string;
+  targetEmployeeDepartment?: string;
+  targetEmployeePhotoUrl?: string;
+
+  reviewerId: string;
+  reviewerName: string;
+  reviewerRole: UserRole | string;
+  reviewerDesignation?: string;
+  reviewerPhotoUrl?: string;
+
+  category: FeedbackCategory;
+  rating: number; // 1 to 5
+  sentiment: FeedbackSentiment;
+  strengths: string;
+  areasForImprovement: string;
+  actionItems: string[];
+
+  /**
+   * Whether a leadership note accompanies this review.
+   *
+   * The note TEXT is deliberately not on this interface. It lived here as
+   * `privateLeadershipNotes` and was hidden behind an `isExecutive &&` guard in
+   * the markup, but Firestore has no field-level read security and the subject
+   * must be able to read this document in order to acknowledge it -- so the
+   * "private" note was readable by the person it was written about. It now lives
+   * at /performanceFeedbacks/{id}/confidential/notes, restricted to HR and the
+   * board, and is fetched on demand (see fetchConfidentialNote).
+   *
+   * This flag stays on the parent so the UI knows whether a note exists without
+   * spending a read per card. The subject learns that leadership commented; they
+   * do not learn what was said.
+   */
+  hasConfidentialNote?: boolean;
+
+  /**
+   * The subject's organisational tier AT THE TIME OF WRITING (see
+   * src/lib/hierarchy.ts). Denormalised deliberately: firestore.rules cannot
+   * look up the target's role without a billed document read, and rules are
+   * capped at ten of those per request. This one number is what makes
+   * hierarchy-wise read access enforceable on the server rather than merely
+   * hidden in the UI.
+   */
+  subjectTier: number;
+
+  isAcknowledged: boolean;
+  acknowledgedAt?: string;
+
+  createdAt: string;
+  updatedAt: string;
+}
+
+
+// -- Feedback Quiz Scheduling Types --
+
+export interface QuizQuestion {
+  id: string;
+  text: string;
+  options: [string, string, string, string];
+}
+
+export type QuizStatus = 'draft' | 'scheduled' | 'active' | 'closed';
+
+export type QuizTargetAudience = 'ALL_EMPLOYEES' | string;
+
+export interface FeedbackQuiz {
+  id: string;
+  title: string;
+  description: string;
+  questions: QuizQuestion[];
+  targetAudience: QuizTargetAudience;
+  scheduledDate: string;
+  openTime: string;
+  closeTime: string;
+  repeatDaily: boolean;
+  createdBy: string;
+  createdByName: string;
+  createdByRole: UserRole;
+  status: QuizStatus;
+  responseCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QuizResponse {
+  id: string;
+  quizId: string;
+  employeeId: string;
+  employeeName: string;
+  employeeRole: UserRole | string;
+  answers: { questionId: string; selectedOption: number }[];
+  submittedAt: string;
 }

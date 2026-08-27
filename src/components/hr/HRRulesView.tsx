@@ -29,8 +29,9 @@ interface WorkplaceRule {
 }
 
 const DEFAULT_COMPANY_RULES: Array<Pick<WorkplaceRule, 'title' | 'description'>> = [
-  { title: 'Office Working Hours', description: 'Standard working hours are Monday to Friday, 09:00 AM to 06:00 PM with a 1 hour lunch break.' },
-  { title: 'Leave Approval Policy', description: 'All leave and work-from-home requests must be raised at least 24 hours in advance and approved by the reporting manager / HR.' },
+  { title: 'Office Working Hours', description: 'Standard working hours are Monday to Saturday, 10:00 AM to 07:00 PM IST with tea and meal breaks.' },
+  { title: 'Monthly Salary Cycle (27th to 26th)', description: 'The company salary calculation period runs strictly from the 27th of the previous month to the 26th of the current month (30-day accounting cycle). Attendance, leaves, and LOP cut-offs close on the 26th, and the new monthly cycle commences on the 27th.' },
+  { title: 'Leave Approval Policy', description: 'Paid leaves start at strictly 0 and 1 paid leave is credited on the 1st date of every month. All leave and work-from-home requests must be raised in advance and approved via the multi-stage hierarchy.' },
   { title: 'Attendance Discipline', description: 'Employees must mark attendance daily via the office QR terminal or biometric device. Late check-ins beyond the grace period are recorded as Late.' },
   { title: 'Confidentiality', description: 'Client data, project documents, and company records must not be shared with third parties or stored on personal devices.' }
 ];
