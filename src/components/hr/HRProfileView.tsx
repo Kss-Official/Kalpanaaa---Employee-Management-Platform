@@ -28,7 +28,7 @@ import {
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, resolveAttendanceRecord, safeGetTimestampMillis, isShiftComplete } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, isAttendanceForEmployee, resolveAttendanceRecord, safeGetTimestampMillis, isShiftComplete, isApprovedWfhForEmployee } from '../../lib/attendanceEngine';
 
 export const HRProfileView: React.FC = () => {
   const { triggerHaptic } = useHaptic();
@@ -37,6 +37,7 @@ export const HRProfileView: React.FC = () => {
     employees,
     attendance, 
     leaveRequests, 
+    companyWideWfhDates,
     checkIn, 
     checkOut, 
     startBreak, 
@@ -136,7 +137,12 @@ export const HRProfileView: React.FC = () => {
     // when the geofence is on and no fix can be obtained. Checking somebody ELSE
     // in stays coordinate-free — that is a legitimate admin correction.
     const isSelfCheckIn = !!activeEmployee && !!targetEmployee && targetEmployee.id === activeEmployee.id;
-    const geofenceOn = settings.gpsRequired !== false;
+    const isWfhApproved = isApprovedWfhForEmployee(targetEmployee, getEmployeeWorkDate(new Date()), {
+      leaveRequests,
+      companyWideWfhDates,
+      settings
+    });
+    const geofenceOn = settings.gpsRequired !== false && !isWfhApproved;
 
     let fix: { lat: number; lon: number; accuracy: number } | null = null;
     if (isSelfCheckIn && geofenceOn) {

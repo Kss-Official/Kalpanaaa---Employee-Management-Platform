@@ -31,6 +31,7 @@ import {
   validateCheckInEligibility,
   OFFICIAL_HOLIDAY_DATES_2026,
   calculateGpsDistanceMeters,
+  isApprovedWfhForEmployee,
   getWorkDate,
   getEmployeeWorkDate,
   getEmployeeKey,
@@ -2539,18 +2540,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    */
   const isApprovedWfhToday = (emp: Employee | undefined, todayStr: string): boolean => {
     if (!emp) return false;
-    return (companyWideWfhDates || []).includes(todayStr) ||
-      (settings.companyWideWfhDates || []).includes(todayStr) ||
-      (emp.approvedWfhDates || []).includes(todayStr) ||
-      leaveRequests.some(r =>
-        r.type === 'WFH' &&
-        r.status === 'Approved' &&
-        ((!!r.employeeId && (r.employeeId === emp.employeeId || r.employeeId === emp.id)) ||
-         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
-        todayStr >= (r.startDate || (r as any).fromDate) &&
-        todayStr <= (r.endDate || (r as any).toDate || r.startDate)
-      );
+    return isApprovedWfhForEmployee(emp, todayStr, {
+      leaveRequests,
+      companyWideWfhDates,
+      settings
+    });
   };
 
   /** One-shot position read, resolving to null rather than throwing, with graceful standard-accuracy fallback */

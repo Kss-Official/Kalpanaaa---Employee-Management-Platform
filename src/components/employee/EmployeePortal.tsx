@@ -88,7 +88,8 @@ import {
   SHIFT_LABEL,
   SHIFT_TOTAL_MINUTES,
   formatShiftTiming,
-  validateCheckInEligibility
+  validateCheckInEligibility,
+  isApprovedWfhForEmployee
 } from '../../lib/attendanceEngine';
 import { downloadElementAsPdf } from '../../lib/pdfGenerator';
 import kalpanaLogo from '../../assets/images/kalpana_logo.jpeg';
@@ -298,7 +299,17 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   // Break & WFH state
   const [activeBreak, setActiveBreak] = useState<{ type: string; startAt: string } | null>(null);
-  const [isWfh, setIsWfh] = useState(false);
+  
+  // Single authoritative WFH determination for today
+  const isApprovedWfhToday = React.useMemo(() => {
+    return isApprovedWfhForEmployee(activeEmployee, todayStr, {
+      leaveRequests,
+      companyWideWfhDates,
+      settings
+    });
+  }, [activeEmployee, todayStr, leaveRequests, companyWideWfhDates, settings]);
+
+  const [isWfh, setIsWfh] = useState<boolean>(() => isApprovedWfhToday);
 
   // ── BUG 7 FIX — Stable scalar derived from the open (in-progress) break. ──
   // Computing JSON of {startAt, endAt} pairs as the memo dep means this value
@@ -311,7 +322,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     return ob ? (ob.startAt || (ob as any).startTime || null) : null;
   }, [todayRecord?.breaks]);
 
-  // Sync activeBreak UI state instantly
+  // Sync activeBreak and WFH UI state instantly
   useEffect(() => {
     const breaks = todayRecord?.breaks ?? [];
     const ob = breaks.find((b) => !b.endAt && !(b as any).endTime);
@@ -321,8 +332,8 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     } else {
       setActiveBreak(null);
     }
-    setIsWfh(!!todayRecord?.isWfh || todayRecord?.status === 'Work From Home');
-  }, [todayRecord?.breaks, todayRecord?.isWfh, todayRecord?.status]);
+    setIsWfh(isApprovedWfhToday || !!todayRecord?.isWfh || todayRecord?.status === 'Work From Home');
+  }, [todayRecord?.breaks, todayRecord?.isWfh, todayRecord?.status, isApprovedWfhToday]);
 
   // ── Single live clock for the whole shift panel ──────────────────────────────
   // P2 FIX (proficiency timer accuracy): there used to be THREE independent
@@ -662,7 +673,8 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
     // Strict GPS Geofence Pre-Check on normal office days
     const isGpsEnforced = settings.gpsRequired !== false;
-    if (!isWfh && isGpsEnforced) {
+    const isWfhActive = isApprovedWfhToday || isWfh;
+    if (!isWfhActive && isGpsEnforced) {
       if (!gpsLocation) {
         triggerHaptic('error');
         setActionFeedback({
@@ -703,8 +715,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     setIsCheckingIn(true);
     setActionFeedback(null);
     
+    const isWfhActive = isApprovedWfhToday || isWfh;
     const res = await recordCheckIn(activeEmployee.id, gpsLocation?.lat, gpsLocation?.lon, gpsLocation?.accuracy);
-    if (res.success && res.record && isWfh) {
+    if (res.success && res.record && isWfhActive) {
       // B25 FIX: never downgrade an evaluated 'Late' to 'Work From Home'. WFH is a
       // location attribute (kept on isWfh), not a substitute for punctuality — a late
       // WFH check-in must still read 'Late'. Only on-time check-ins take the WFH label.
@@ -822,9 +835,9 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
   const handleToggleWfh = () => {
     const todayStr = todayInIST();
-    const approvedDates = activeEmployee.approvedWfhDates || [];
+    const isApproved = isApprovedWfhToday || (activeEmployee.approvedWfhDates || []).includes(todayStr);
     
-    if (!approvedDates.includes(todayStr)) {
+    if (!isApproved) {
       setActionFeedback({ success: false, message: 'Work From Home requires prior approval. Please submit a request in the "My Leave & WFH" tab.' });
       return;
     }
@@ -1105,19 +1118,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                 {/* Hero Check-In Button */}
                 <div className="flex flex-col items-center justify-center py-6 w-full relative">
                   {(() => {
-                    const todayStr = todayInIST();
                     const isOfficeWfh = companyWideWfhDates.includes(todayStr);
-                    const isApprovedWfhToday = isOfficeWfh ||
-                      (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
-                      leaveRequests.some(r =>
-                        r.type === 'WFH' &&
-                        r.status === 'Approved' &&
-                        ((!!r.employeeId && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id)) ||
-                         (!!r.employeeUid && (r.employeeUid === activeEmployee.uid || r.employeeUid === activeEmployee.id)) ||
-                         (!!r.employeeName && !!activeEmployee.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())) &&
-                        todayStr >= (r.startDate || (r as any).fromDate) &&
-                        todayStr <= (r.endDate || (r as any).toDate || r.startDate)
-                      );
 
                     return isApprovedWfhToday ? (
                       <div className="mb-3 px-3.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[11px] font-extrabold flex items-center gap-1.5 shadow-sm">
@@ -1340,18 +1341,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   <button
                     onClick={handleToggleWfh}
                     className={`w-full max-w-[240px] py-2 rounded-xl text-xs font-semibold transition-all border ${
-                      !(companyWideWfhDates.includes(todayStr) ||
-                        (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
-                        leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && ((!!r.employeeId && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id)) || (!!r.employeeUid && (r.employeeUid === activeEmployee.uid || r.employeeUid === activeEmployee.id)) || (!!r.employeeName && !!activeEmployee.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate)))
+                      !isApprovedWfhToday
                         ? 'bg-transparent border-[var(--border-subtle)] text-[var(--text-muted)] cursor-not-allowed'
                         : isWfh
                           ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
                           : 'bg-transparent border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-sky-500/30'
                     } ${animations.tap}`}
                   >
-                    {!(companyWideWfhDates.includes(todayStr) ||
-                       (activeEmployee.approvedWfhDates || []).includes(todayStr) ||
-                       leaveRequests.some(r => r.type === 'WFH' && r.status === 'Approved' && ((!!r.employeeId && (r.employeeId === activeEmployee.employeeId || r.employeeId === activeEmployee.id)) || (!!r.employeeUid && (r.employeeUid === activeEmployee.uid || r.employeeUid === activeEmployee.id)) || (!!r.employeeName && !!activeEmployee.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())) && todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate)))
+                    {!isApprovedWfhToday
                       ? '🔒 WFH Locked (Requires Approval)'
                       : companyWideWfhDates.includes(todayStr)
                         ? '🏢 Office-Wide WFH Active'

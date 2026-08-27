@@ -1027,7 +1027,7 @@ export function evaluateAttendanceScan(
 
     // Grace period: On-time up to 10:15 AM (15 mins past 10:00 AM)
     const isLateArrival = currentHourIST > 10 || (currentHourIST === 10 && currentMinIST > 15);
-    let status: AttendanceStatus = isLateArrival ? 'Late' : 'Present';
+    let status: AttendanceStatus = isLateArrival ? 'Late' : (isApprovedWfh ? 'Work From Home' : 'Present');
 
     // ── Strict GPS enforcement on normal office days (RESTORED) ───────────────
     // Commit e61335b ("Allow web check-in for Kuruva Mahesh and fix geofence
@@ -1232,17 +1232,44 @@ export function hasApprovedLeaveOn(
 ): boolean {
   if (!Array.isArray(leaveRequests) || !emp) return false;
   return leaveRequests.some(r => {
-    if (!r || r.status !== 'Approved') return false;
+    if (!r) return false;
+    const isApproved = r.status === 'Approved' ||
+      ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') &&
+       (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') &&
+       (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') &&
+       (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'));
+    if (!isApproved) return false;
     if (types && !types.includes(r.type)) return false;
     const matchesEmployee =
-      (!!r.employeeId && (r.employeeId === emp.employeeId || r.employeeId === emp.id)) ||
-      (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+      (!!r.employeeId && (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeId === emp.uid)) ||
+      (!!(r as any).employeeCode && ((r as any).employeeCode === emp.employeeId || (r as any).employeeCode === emp.id)) ||
+      (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id || r.employeeUid === emp.employeeId)) ||
       (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
     if (!matchesEmployee) return false;
     const start = r.startDate || r.fromDate;
     const end = r.endDate || r.toDate || start;
     return !!start && dateStr >= start && dateStr <= end;
   });
+}
+
+/**
+ * Single source of truth: is dateStr an approved Work From Home day for this employee?
+ * Checks company-wide WFH dates, employee approvedWfhDates list, and approved WFH leave requests.
+ */
+export function isApprovedWfhForEmployee(
+  emp: any,
+  dateStr: string,
+  opts: {
+    leaveRequests?: any[];
+    companyWideWfhDates?: string[];
+    settings?: any;
+  } = {}
+): boolean {
+  if (!emp) return false;
+  const companyWideDates = opts.companyWideWfhDates || opts.settings?.companyWideWfhDates || [];
+  if (companyWideDates.includes(dateStr)) return true;
+  if ((emp.approvedWfhDates || []).includes(dateStr)) return true;
+  return hasApprovedLeaveOn(opts.leaveRequests, emp, dateStr, ['WFH']);
 }
 
 export function buildDailyRoster(

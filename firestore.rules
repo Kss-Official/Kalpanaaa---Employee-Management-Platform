@@ -346,8 +346,8 @@ service cloud.firestore {
           'network','route','appVersion','buildVersion','userAgent',
           'operationType','path'
         ]) &&
-        request.resource.data.get('message','') is string &&
-        request.resource.data.get('message','').size() <= 500;
+        request.resource.data.get('message', '') is string &&
+        request.resource.data.get('message', '').size() <= 500;
       allow update, delete: if false;
     }
 
@@ -362,7 +362,7 @@ service cloud.firestore {
       }
       function isAcknowledgementOnly() {
         return request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['isAcknowledged','acknowledgedAt','updatedAt']) &&
+                 .hasOnly(['isAcknowledged', 'acknowledgedAt', 'updatedAt']) &&
                request.resource.data.isAcknowledged == true;
       }
       function isAuthor() {
