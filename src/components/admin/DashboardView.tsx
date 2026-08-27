@@ -113,8 +113,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       );
 
       const isCompanyWfh = (companyWideWfhDates || []).includes(todayStr) || ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
+      // Individual WFH approval: must have an explicit approved WFH leave request or entry in approvedWfhDates
       const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
-      const isWfh = isCompanyWfh || isApprovedEmpWfh;
+      // True WFH = individual approval OR company-wide WFH (but NOT overriding an actual office check-in)
+      // If the employee has a real attendance record with a check-in and NO individual WFH approval,
+      // they physically came to office (or checked in genuinely) — treat as Present/Late, not WFH.
+      const hasRealCheckIn = !!(rec?.checkInAt) && !isApprovedEmpWfh;
+      const isWfh = isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn);
 
       // Active break detection
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
@@ -128,6 +133,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
+      } else if (rec?.checkInAt && !isApprovedEmpWfh) {
+        // Real check-in record without individual WFH approval → Present/Late (office attendance)
+        computedStatus = 'Present';
       } else if (isWfh) {
         computedStatus = 'Work From Home';
       } else if (rec) {

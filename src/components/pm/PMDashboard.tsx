@@ -147,7 +147,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
       const isCompanyWfh = ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
       const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
-      const isWfh = isCompanyWfh || isApprovedEmpWfh;
+      const hasRealCheckIn = !!(rec?.checkInAt) && !isApprovedEmpWfh;
+      const isWfh = isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn);
 
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
       const isComplete = isShiftComplete(rec);
@@ -158,6 +159,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
+      } else if (rec?.checkInAt && !isApprovedEmpWfh) {
+        computedStatus = 'Present';
       } else if (isWfh) {
         computedStatus = 'Work From Home';
       } else if (rec) {
