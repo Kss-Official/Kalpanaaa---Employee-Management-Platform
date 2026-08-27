@@ -46,7 +46,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { db } from '../../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete, safeGetTimestampMillis, isExecutiveOrLeadership, isLateCheckIn } from '../../lib/attendanceEngine';
@@ -58,8 +58,39 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onOpenAddEmployee }) => {
-  const { employees, attendance, settings, activeEmployee, auditLogs, companyWideWfhDates, addAuditLog, leaveRequests } = useAuth();
+  const { employees, attendance, settings, activeEmployee, auditLogs, companyWideWfhDates, addAuditLog, leaveRequests, updateAttendanceRecord } = useAuth();
   const { triggerHaptic } = useHaptic();
+
+  // Override: admin manually removes WFH flag from an attendance record
+  const removeWfhOverride = async (rec: AttendanceRecord, emp: Employee, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!rec?.id) return;
+    try {
+      let realStatus: string = 'Present';
+      if (rec.checkInAt) {
+        try {
+          const iso = typeof rec.checkInAt === 'string'
+            ? rec.checkInAt
+            : (rec.checkInAt as any)?.toDate?.()?.toISOString?.() || new Date((rec.checkInAt as any)?.seconds * 1000).toISOString();
+          const d = new Date(iso);
+          const istMins = (d.getUTCHours() * 60 + d.getUTCMinutes() + 330) % (24 * 60);
+          const h = Math.floor(istMins / 60);
+          const m = istMins % 60;
+          realStatus = (h > 10 || (h === 10 && m > 15)) ? 'Late' : 'Present';
+        } catch { realStatus = 'Present'; }
+      }
+      await setDoc(doc(db, 'attendance', rec.id), {
+        isWfh: false,
+        status: realStatus,
+        updatedAt: serverTimestamp(),
+        notes: ((rec.notes || '') + ' [Admin override: WFH removed]').trim()
+      }, { merge: true });
+      addAuditLog('ADMIN_WFH_OVERRIDE', emp.employeeId, `Removed WFH flag for ${emp.fullName} on ${rec.date}. Status set to ${realStatus}`);
+      triggerHaptic('success');
+    } catch (err) {
+      console.error('[WFH Override] Failed:', err);
+    }
+  };
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month'>('today');
   
   // Loading state for restore logs
@@ -848,17 +879,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
 
                             {/* Status Badge */}
                             <td className="py-3 px-4">
-                              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold border ${getStatusBadgeClass(item.status)}`}>
-                                {item.status === 'On Break' && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
-                                {item.status === 'Present' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
-                                {item.status === 'Work From Home' && <Home className="w-3 h-3 text-sky-400" />}
-                                {item.status === 'On Leave' && <Palmtree className="w-3 h-3 text-purple-400" />}
-                                {item.status === 'Absent' && <UserX className="w-3 h-3 text-rose-400" />}
-                                <span>{item.status}</span>
-                                {item.activeBreak && (
-                                  <span className="font-mono text-amber-300 ml-1">({item.activeBreak.type})</span>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold border ${getStatusBadgeClass(item.status)}`}>
+                                  {item.status === 'On Break' && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+                                  {item.status === 'Present' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                                  {item.status === 'Work From Home' && <Home className="w-3 h-3 text-sky-400" />}
+                                  {item.status === 'On Leave' && <Palmtree className="w-3 h-3 text-purple-400" />}
+                                  {item.status === 'Absent' && <UserX className="w-3 h-3 text-rose-400" />}
+                                  <span>{item.status}</span>
+                                  {item.activeBreak && (
+                                    <span className="font-mono text-amber-300 ml-1">({item.activeBreak.type})</span>
+                                  )}
+                                </span>
+                                {/* Admin WFH Override Button — always visible when status is WFH but employee has a real check-in */}
+                                {item.status === 'Work From Home' && item.record?.checkInAt && (
+                                  <button
+                                    onClick={(e) => removeWfhOverride(item.record!, item.employee, e)}
+                                    title="Remove WFH — mark as Present/Late based on check-in time"
+                                    className="ml-1 px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 font-bold text-[10px] rounded-lg inline-flex items-center gap-1 transition-all"
+                                  >
+                                    <X className="w-2.5 h-2.5" /> Remove WFH
+                                  </button>
                                 )}
-                              </span>
+                                {/* Fix DB button — record has isWfh=true but display already shows correct status */}
+                                {item.record?.isWfh && item.status !== 'Work From Home' && (
+                                  <button
+                                    onClick={(e) => removeWfhOverride(item.record!, item.employee, e)}
+                                    title="Fix WFH flag in database"
+                                    className="ml-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[10px] rounded-lg inline-flex items-center gap-1 transition-all"
+                                  >
+                                    <ShieldCheck className="w-2.5 h-2.5" /> Fix DB
+                                  </button>
+                                )}
+                              </div>
                             </td>
 
                             {/* Check In / Out */}
