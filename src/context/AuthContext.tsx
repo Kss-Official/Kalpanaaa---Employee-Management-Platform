@@ -1746,6 +1746,79 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => { cancelled = true; };
   }, [isAuthenticated, authUid, role]);
 
+  // ── Auto-heal unapproved WFH attendance records in Firestore ─────────────────
+  // If any attendance record has isWfh=true or status='Work From Home' but the
+  // employee has NO approved WFH leave request for that date, patch Firestore now.
+  // This corrects backend data (e.g. Akash SB's record) so ALL views reflect truth.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!attendance.length || !employees.length) return;
+
+    const companyWfhDates: string[] = (settings as any)?.companyWideWfhDates || companyWideWfhDates || [];
+
+    const badRecords = attendance.filter(rec => {
+      if (!rec.isWfh && rec.status !== 'Work From Home') return false;
+      if (!rec.id || !rec.date) return false;
+
+      const emp = employees.find(e =>
+        (!!rec.employeeId && (rec.employeeId === e.id || rec.employeeId === e.employeeId)) ||
+        (!!rec.employeeCode && rec.employeeCode === e.employeeId) ||
+        ((rec as any).employeeUid && ((rec as any).employeeUid === e.uid || (rec as any).employeeUid === e.id)) ||
+        (!!rec.employeeName && !!e.fullName && rec.employeeName.trim().toLowerCase() === e.fullName.trim().toLowerCase())
+      );
+      if (!emp) return false;
+
+      // Skip if date is covered by company-wide WFH
+      if (companyWfhDates.includes(rec.date)) return false;
+      // Skip if covered by employee's personal approved WFH dates
+      if ((emp.approvedWfhDates || []).includes(rec.date)) return false;
+
+      // Check for an approved WFH leave request
+      const hasApprovedWfhLeave = leaveRequests.some(r =>
+        r.type === 'WFH' &&
+        r.status === 'Approved' &&
+        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        rec.date >= (r.startDate || (r as any).fromDate) &&
+        rec.date <= (r.endDate || (r as any).toDate || r.startDate)
+      );
+
+      return !hasApprovedWfhLeave;
+    });
+
+    if (!badRecords.length) return;
+
+    badRecords.forEach(rec => {
+      let realStatus: string = 'Absent';
+      if (rec.checkInAt) {
+        try {
+          const iso = formatTimestampToISO(rec.checkInAt);
+          if (iso) {
+            const d = new Date(iso);
+            const totalMinutesUTC = d.getUTCHours() * 60 + d.getUTCMinutes();
+            const istMinutes = (totalMinutesUTC + 330) % (24 * 60); // +5:30
+            const h = Math.floor(istMinutes / 60);
+            const m = istMinutes % 60;
+            realStatus = (h > 10 || (h === 10 && m > 15)) ? 'Late' : 'Present';
+          }
+        } catch { realStatus = 'Present'; }
+      }
+
+      const payload = cleanFirestorePayload({
+        isWfh: false,
+        status: realStatus,
+        updatedAt: serverTimestamp(),
+        notes: (((rec.notes || '') + ' [Auto-healed: WFH flag removed — no approved WFH request]').trim())
+      });
+
+      setDoc(doc(db, 'attendance', rec.id), payload, { merge: true })
+        .then(() => console.info(`[WFH Heal] ${rec.employeeName} ${rec.date} → ${realStatus}`))
+        .catch(err => console.warn(`[WFH Heal] Failed ${rec.id}:`, err));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, attendance, leaveRequests, employees, settings, companyWideWfhDates]);
+
   // ── One-time resume backfill, exposed to admin sessions only ─────────────────
   // Deliberately NOT auto-run: it rewrites every employee document, so an operator
   // triggers it explicitly, once, after firestore.rules has been deployed. Attached
