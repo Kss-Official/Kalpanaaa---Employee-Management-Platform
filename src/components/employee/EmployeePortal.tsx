@@ -1163,7 +1163,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                               <Palmtree className="w-10 h-10 mb-1.5 text-purple-400" />
                               <span className="font-extrabold text-sm tracking-wide text-white">On Approved Leave</span>
                               <span className="text-[10px] font-bold text-purple-300 mt-1 bg-purple-500/20 px-2.5 py-0.5 rounded-full border border-purple-500/30 truncate max-w-[150px]">
-                                {checkInEligibility.leaveType || 'Paid Leave'}
+                                {checkInEligibility.leaveType || 'Earn Leave'}
                               </span>
                             </>
                           ) : checkInEligibility.reason === 'OFFICIAL_HOLIDAY' ? (

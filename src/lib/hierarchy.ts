@@ -46,6 +46,40 @@ export function tierOf(emp: any): number {
 }
 
 /**
+ * Explicitly checks if the employee is one of the designated Tech Leads authorized
+ * to provide feedback for any employee across the organization:
+ * 1. Satya Ranjan Das
+ * 2. Jason Kenneth N
+ */
+export function isAuthorizedTechLead(emp: any): boolean {
+  if (!emp) return false;
+  const id = String(emp.id || '');
+  const uid = String(emp.uid || '');
+  const employeeId = String(emp.employeeId || '').toUpperCase();
+  const email = String(emp.email || '').toLowerCase().trim();
+  const name = String(emp.fullName || emp.name || '').toLowerCase().trim();
+
+  const isSatya = 
+    email.includes('satya.ranjan.dash') || 
+    email.includes('satya.ranjan.das') ||
+    name.includes('satya ranjan') || 
+    employeeId === 'KSS2407012' || 
+    id === 'emp-KSS2407012' || 
+    uid === 'QpDtyS6Jp5OqNu3klvfWGoWHfmS2' ||
+    id === 'QpDtyS6Jp5OqNu3klvfWGoWHfmS2';
+
+  const isJason = 
+    email.includes('jasonkennethn') || 
+    email.includes('jason.kenneth') ||
+    name.includes('jason kenneth') || 
+    employeeId === 'KSS2407014' || 
+    id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || 
+    uid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2';
+
+  return isSatya || isJason;
+}
+
+/**
  * May `reviewer` file a performance review about `subject`?
  *
  * Strictly-below, which yields exactly the intended matrix:
@@ -54,15 +88,18 @@ export function tierOf(emp: any): number {
  *   PM      (2) → Employee              but NOT another PM
  *   Employee(1) → nobody
  *
- * The identity guard is separate from the tier test because two people can share
- * a tier: without it a PM could review a peer PM, and the tier test alone would
- * not stop someone from reviewing themselves if they were ever the only person
- * on a tier above another.
+ * Exception: Designated Tech Leads (Satya Ranjan Das and Jason Kenneth N)
+ * are explicitly authorized to review ANY employee in the organization.
  */
 export function canReview(reviewer: any, subject: any): boolean {
   if (!reviewer || !subject) return false;
   if (isSamePerson(reviewer, subject)) return false;
   if (String(subject.status || '') === 'Terminated') return false;
+
+  if (isAuthorizedTechLead(reviewer)) {
+    return true;
+  }
+
   return tierOf(subject) < tierOf(reviewer);
 }
 
@@ -76,7 +113,8 @@ export function canReview(reviewer: any, subject: any): boolean {
  * Authorship and subjecthood are handled by the caller: they are properties of
  * the specific document, not of the tier relationship.
  */
-export function canViewTier(viewerTier: number, subjectTier: number): boolean {
+export function canViewTier(viewerTier: number, subjectTier: number, viewer?: any): boolean {
+  if (viewer && isAuthorizedTechLead(viewer)) return true;
   // Executive board and HR hold the full appraisal record for compliance.
   if (viewerTier >= TIER_HR) return true;
   // A PM sees the workforce they manage, and no peer or superior.

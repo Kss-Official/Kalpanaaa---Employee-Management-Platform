@@ -28,7 +28,11 @@ import {
   GraduationCap,
   Zap,
   MapPin,
-  Edit3
+  Edit3,
+  LogOut,
+  CheckCheck,
+  SlidersHorizontal,
+  ShieldCheck
 } from 'lucide-react';
 import { Project, LeaveRequest, Employee, AttendanceRecord } from '../../types';
 import { db, subscribeWithRecovery } from '../../lib/firebase';
@@ -107,7 +111,7 @@ const DEFAULT_PROJECTS: Project[] = [
 ];
 
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
-  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings } = useAuth();
+  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings, applyAttendanceCorrection } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const todayStr = getWorkDate(new Date());
@@ -203,8 +207,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   const lateCount = dailyRoster.filter(r => r.isLate && !r.isWfh).length;
   const wfhCount = dailyRoster.filter(r => r.status === 'Work From Home').length;
   const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
-  const lopCount = dailyRoster.filter(r => r.status === 'LOP').length;
-  const absentCount = dailyRoster.filter(r => r.status === 'Absent').length;
+  const lopCount = dailyRoster.filter(r => r.status === 'LOP' || r.status === 'Absent').length;
+  const absentCount = lopCount;
 
   // Real unique active working employees today (strictly 1 per person)
   const totalActiveWorkingToday = dailyRoster.filter(r => r.status === 'Present' || r.status === 'On Break' || r.status === 'Work From Home').length;
@@ -213,14 +217,13 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   const statusDistributionData = useMemo(() => {
     return [
       { name: 'Present (On-Time)', value: onTimePresentCount, color: '#10b981' },
-      { name: 'Late Check-In', value: lateCount, color: '#f59e0b' },
-      { name: 'On Break', value: onBreakCount, color: '#06b6d4' },
+      { name: 'Late Check-In', value: lateCount, color: '#f97316' },
+      { name: 'On Break', value: onBreakCount, color: '#eab308' },
       { name: 'Work From Home', value: wfhCount, color: '#0ea5e9' },
-      { name: 'On Leave', value: onLeaveCount, color: '#a855f7' },
-      { name: 'LOP', value: lopCount, color: '#ec4899' },
-      { name: 'Absent', value: absentCount, color: '#f43f5e' },
+      { name: 'Leave (PL/EL)', value: onLeaveCount, color: '#a855f7' },
+      { name: 'LOP', value: lopCount, color: '#f43f5e' },
     ].filter(d => d.value > 0);
-  }, [onTimePresentCount, lateCount, onBreakCount, wfhCount, onLeaveCount, lopCount, absentCount]);
+  }, [onTimePresentCount, lateCount, onBreakCount, wfhCount, onLeaveCount, lopCount]);
 
   // Modals
   const [isRosterModalOpen, setIsRosterModalOpen] = useState(false);
@@ -233,6 +236,210 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   } | null>(null);
 
   const [monthlyAttendanceEmp, setMonthlyAttendanceEmp] = useState<Employee | null>(null);
+
+  // Time & ISO String formatting helpers for PM Overrides
+  const getCurrentIstTimeInput = (): string => {
+    const d = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(d.getTime() + istOffset);
+    const hh = istDate.getUTCHours().toString().padStart(2, '0');
+    const mm = istDate.getUTCMinutes().toString().padStart(2, '0');
+    return `${hh}:${mm}`;
+  };
+
+  const makeIstIsoString = (dateStr: string, timeStr: string): string => {
+    const parts = (timeStr || '10:00').split(':');
+    const hours = parseInt(parts[0] || '10', 10);
+    const minutes = parseInt(parts[1] || '0', 10);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${dateStr}T${pad(hours)}:${pad(minutes)}:00+05:30`;
+  };
+
+  // Active checked-in personnel who can be checked out
+  const activeCheckedInEmployees = useMemo(() => {
+    return dailyRoster.filter(r => r.isCheckedIn && !r.isShiftComplete);
+  }, [dailyRoster]);
+
+  // ── Bulk Checkout State & Handlers ──
+  const [isBulkCheckoutModalOpen, setIsBulkCheckoutModalOpen] = useState(false);
+  const [bulkCheckoutTime, setBulkCheckoutTime] = useState<string>(() => getCurrentIstTimeInput());
+  const [bulkCheckoutNotes, setBulkCheckoutNotes] = useState('End of Day Bulk Check-Out by Project Manager');
+  const [bulkCheckoutLoading, setBulkCheckoutLoading] = useState(false);
+  const [bulkCheckoutProgress, setBulkCheckoutProgress] = useState<{ current: number; total: number } | null>(null);
+
+  const handleExecuteBulkCheckout = async () => {
+    if (activeCheckedInEmployees.length === 0) {
+      alert('No active checked-in employees to check out.');
+      setIsBulkCheckoutModalOpen(false);
+      return;
+    }
+    setBulkCheckoutLoading(true);
+    setBulkCheckoutProgress({ current: 0, total: activeCheckedInEmployees.length });
+
+    try {
+      const checkoutIso = makeIstIsoString(todayStr, bulkCheckoutTime || getCurrentIstTimeInput());
+      const checkoutMs = new Date(checkoutIso).getTime();
+
+      let successCount = 0;
+      for (let i = 0; i < activeCheckedInEmployees.length; i++) {
+        const item = activeCheckedInEmployees[i];
+        setBulkCheckoutProgress({ current: i + 1, total: activeCheckedInEmployees.length });
+        
+        const rec = item.record;
+        const targetRecord = rec || {
+          id: `synthetic_${item.employee.id}_${todayStr}`,
+          employeeId: item.employee.id,
+          employeeCode: item.employee.employeeId || '',
+          employeeName: item.employee.fullName || '',
+          department: item.employee.department || '',
+          date: todayStr,
+          checkInAt: makeIstIsoString(todayStr, '10:00'),
+          checkOutAt: null,
+          workingMinutes: 0,
+          status: item.status,
+          attendanceMethod: 'PM_BULK_CHECKOUT' as any,
+          locationVerified: false,
+          breaks: [],
+          totalBreakMinutes: 0,
+          isSynthetic: true
+        };
+
+        const checkInIso = targetRecord.checkInAt || makeIstIsoString(todayStr, '10:00');
+        const checkInMs = new Date(checkInIso).getTime();
+
+        // Close any active breaks
+        const breaks = (targetRecord.breaks || []).map((b: any) => {
+          if (!b.endAt && !b.endTime) {
+            const startMs = new Date(b.startAt || b.startTime).getTime();
+            const dur = Math.max(1, Math.floor((checkoutMs - startMs) / 60000));
+            return {
+              ...b,
+              endAt: checkoutIso,
+              endTime: checkoutIso,
+              durationMinutes: dur
+            };
+          }
+          return b;
+        });
+
+        const totalBreakMinutes = breaks.reduce((sum: number, b: any) => sum + (Number(b.durationMinutes) || 0), 0);
+        const grossMinutes = Math.max(0, Math.floor((checkoutMs - checkInMs) / 60000));
+        const workingMinutes = Math.max(0, grossMinutes - totalBreakMinutes);
+
+        const res = await applyAttendanceCorrection(targetRecord, {
+          checkOutAt: checkoutIso,
+          workingMinutes,
+          breaks,
+          totalBreakMinutes,
+          notes: targetRecord.notes 
+            ? `${targetRecord.notes} | ${bulkCheckoutNotes}` 
+            : bulkCheckoutNotes
+        });
+
+        if (res.success) successCount++;
+      }
+
+      alert(`✓ Successfully checked out ${successCount} of ${activeCheckedInEmployees.length} active employees!`);
+      setIsBulkCheckoutModalOpen(false);
+    } catch (err: any) {
+      console.error('Bulk checkout error:', err);
+      alert('Error during bulk checkout: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setBulkCheckoutLoading(false);
+      setBulkCheckoutProgress(null);
+    }
+  };
+
+  // ── Override Check-In Time State & Handlers ──
+  const [overrideModalTarget, setOverrideModalTarget] = useState<{
+    employee: Employee;
+    record?: AttendanceRecord | null;
+  } | null>(null);
+
+  const [overrideCheckInTime, setOverrideCheckInTime] = useState('10:00');
+  const [overrideStatus, setOverrideStatus] = useState<'Present' | 'Late' | 'Work From Home'>('Present');
+  const [overrideReasonPreset, setOverrideReasonPreset] = useState('Software / App Check-In Glitch');
+  const [overrideCustomReason, setOverrideCustomReason] = useState('');
+  const [overrideLoading, setOverrideLoading] = useState(false);
+
+  const openCheckInOverride = (employee: Employee, record?: AttendanceRecord | null) => {
+    let initialTime = '10:00';
+    if (record?.checkInAt) {
+      const d = new Date(record.checkInAt);
+      if (!isNaN(d.getTime())) {
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istDate = new Date(d.getTime() + istOffset);
+        const hh = istDate.getUTCHours().toString().padStart(2, '0');
+        const mm = istDate.getUTCMinutes().toString().padStart(2, '0');
+        initialTime = `${hh}:${mm}`;
+      }
+    }
+
+    setOverrideModalTarget({ employee, record });
+    setOverrideCheckInTime(initialTime);
+    setOverrideStatus(record?.status === 'Work From Home' ? 'Work From Home' : record?.status === 'Late' || (record?.checkInAt && isLateCheckIn(record.checkInAt)) ? 'Late' : 'Present');
+    setOverrideReasonPreset('Software / App Check-In Glitch');
+    setOverrideCustomReason('');
+  };
+
+  const handleSaveCheckInOverride = async () => {
+    if (!overrideModalTarget) return;
+    setOverrideLoading(true);
+    try {
+      const { employee, record } = overrideModalTarget;
+      const targetRecord = record || {
+        id: `synthetic_${employee.id}_${todayStr}`,
+        employeeId: employee.id,
+        employeeCode: employee.employeeId || '',
+        employeeName: employee.fullName || '',
+        department: employee.department || '',
+        date: todayStr,
+        checkInAt: null,
+        checkOutAt: null,
+        workingMinutes: 0,
+        status: overrideStatus,
+        attendanceMethod: 'PM_OVERRIDE' as any,
+        locationVerified: false,
+        breaks: [],
+        totalBreakMinutes: 0,
+        isSynthetic: true
+      };
+
+      const newCheckInIso = makeIstIsoString(todayStr, overrideCheckInTime);
+      const newCheckInMs = new Date(newCheckInIso).getTime();
+
+      let workingMinutes = targetRecord.workingMinutes || 0;
+      if (targetRecord.checkOutAt) {
+        const checkOutMs = new Date(targetRecord.checkOutAt).getTime();
+        const totalBreakMinutes = targetRecord.totalBreakMinutes || 0;
+        const grossMinutes = Math.max(0, Math.floor((checkOutMs - newCheckInMs) / 60000));
+        workingMinutes = Math.max(0, grossMinutes - totalBreakMinutes);
+      }
+
+      const reason = overrideCustomReason.trim() ? `${overrideReasonPreset} - ${overrideCustomReason.trim()}` : overrideReasonPreset;
+      const pmName = activeEmployee?.fullName || 'Project Manager';
+      const auditNote = `Check-In time overridden to ${overrideCheckInTime} (${reason}) by ${pmName}`;
+
+      const res = await applyAttendanceCorrection(targetRecord, {
+        checkInAt: newCheckInIso,
+        status: overrideStatus,
+        workingMinutes,
+        notes: targetRecord.notes ? `${targetRecord.notes} | ${auditNote}` : auditNote
+      });
+
+      if (res.success) {
+        alert(`✓ Check-in time for ${employee.fullName} updated to ${toISTTimeString(newCheckInIso)}!`);
+        setOverrideModalTarget(null);
+      } else {
+        alert(`Failed to update check-in time: ${res.message}`);
+      }
+    } catch (err: any) {
+      console.error('Error saving check-in override:', err);
+      alert('Error updating check-in time: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setOverrideLoading(false);
+    }
+  };
 
   // PM's own live attendance record
   const pmTodayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
@@ -363,12 +570,10 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         if (r.status !== 'On Break') return false;
       } else if (rosterFilter === 'Work From Home') {
         if (r.status !== 'Work From Home') return false;
-      } else if (rosterFilter === 'On Leave') {
+      } else if (rosterFilter === 'On Leave' || rosterFilter === 'Leave') {
         if (r.status !== 'On Leave') return false;
-      } else if (rosterFilter === 'LOP') {
-        if (r.status !== 'LOP') return false;
-      } else if (rosterFilter === 'Absent') {
-        if (r.status !== 'Absent') return false;
+      } else if (rosterFilter === 'LOP' || rosterFilter === 'Absent') {
+        if (r.status !== 'LOP' && r.status !== 'Absent') return false;
       } else if (r.status !== rosterFilter) {
         return false;
       }
@@ -403,6 +608,20 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Bulk Check-Out All Active Button */}
+          <button
+            onClick={() => {
+              triggerHaptic();
+              setBulkCheckoutTime(getCurrentIstTimeInput());
+              setIsBulkCheckoutModalOpen(true);
+            }}
+            className="px-4 py-2.5 bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-xs rounded-xl shadow-lg shadow-rose-950/40 flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
+            title="Bulk Check-Out all active employees at shift end"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Check Out All ({activeCheckedInEmployees.length})</span>
+          </button>
+
           {/* PM Break Toggle */}
           <button
             onClick={handlePmBreakToggle}
@@ -482,24 +701,24 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
           <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">Remote Staff</span>
         </div>
 
-        {/* On Leave */}
+        {/* On Leave (PL/EL) */}
         <div
           onClick={() => { triggerHaptic(); setRosterFilter('On Leave'); setIsRosterModalOpen(true); }}
           className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 shadow-md hover:border-purple-500/50 transition-all cursor-pointer"
         >
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">On Leave</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Leave</span>
           <span className="text-2xl font-black text-purple-400 font-mono mt-1 block">{onLeaveCount}</span>
-          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">Approved</span>
+          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">Sanctioned Leave (PL/EL)</span>
         </div>
 
-        {/* Absent */}
+        {/* LOP (Loss of Pay / Not Checked In) */}
         <div
-          onClick={() => { triggerHaptic(); setRosterFilter('Absent'); setIsRosterModalOpen(true); }}
+          onClick={() => { triggerHaptic(); setRosterFilter('LOP'); setIsRosterModalOpen(true); }}
           className="bg-slate-900/90 rounded-2xl p-4 border border-slate-800 shadow-md hover:border-rose-500/50 transition-all cursor-pointer"
         >
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Absent</span>
-          <span className="text-2xl font-black text-rose-400 font-mono mt-1 block">{absentCount}</span>
-          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">No Check-in</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">LOP</span>
+          <span className="text-2xl font-black text-rose-400 font-mono mt-1 block">{lopCount}</span>
+          <span className="text-[9px] text-slate-500 font-semibold block mt-0.5">Loss of Pay (Unexcused)</span>
         </div>
       </div>
 
@@ -783,18 +1002,33 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                 </p>
               </div>
 
-              <button
-                onClick={() => setIsRosterModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer self-end sm:self-auto"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-3 self-end sm:self-auto">
+                <button
+                  onClick={() => {
+                    triggerHaptic();
+                    setBulkCheckoutTime(getCurrentIstTimeInput());
+                    setIsBulkCheckoutModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all hover:scale-[1.02] cursor-pointer"
+                  title="Bulk Check-Out all active employees"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Check Out All ({activeCheckedInEmployees.length})</span>
+                </button>
+
+                <button
+                  onClick={() => setIsRosterModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Filter Tabs & Search */}
             <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3">
               <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
-                {['ALL', 'Present', 'On Break', 'Late', 'Work From Home', 'On Leave', 'LOP', 'Absent'].map(st => {
+                {['ALL', 'Present', 'On Break', 'Late', 'Work From Home', 'On Leave', 'LOP'].map(st => {
                   let count = 0;
                   if (st === 'ALL') count = dailyRoster.length;
                   else if (st === 'Present') count = presentCount;
@@ -803,7 +1037,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                   else if (st === 'Work From Home') count = wfhCount;
                   else if (st === 'On Leave') count = onLeaveCount;
                   else if (st === 'LOP') count = lopCount;
-                  else if (st === 'Absent') count = absentCount;
 
                   return (
                     <button
@@ -815,7 +1048,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                           : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
                       }`}
                     >
-                      <span>{st === 'Work From Home' ? 'WFH' : st}</span>
+                      <span>{st === 'Work From Home' ? 'WFH' : st === 'On Leave' ? 'Leave' : st}</span>
                       <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                         rosterFilter === st ? 'bg-white/20 text-white' : st === 'Late' && lateCount > 0 ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-slate-800 text-slate-500'
                       }`}>
@@ -901,7 +1134,12 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                               ) : r.status === 'On Leave' ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30">
                                   <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                                  <span>On Leave</span>
+                                  <span>Leave {r.leaveReq?.reason ? `(${r.leaveReq.reason})` : '(PL / EL)'}</span>
+                                </span>
+                              ) : r.status === 'LOP' || r.status === 'Absent' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                                  <span>LOP (Unexcused)</span>
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30">
@@ -913,19 +1151,28 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
                             {/* Check-In */}
                             <td className="py-3.5 px-4 font-mono font-bold">
-                              {r.record?.checkInAt ? (
-                                <span className={`inline-flex items-center gap-1.5 ${r.isLate ? 'text-orange-500 font-black' : 'text-slate-200'}`}>
-                                  <span className={`w-2 h-2 rounded-full ${r.isLate ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.9)] animate-pulse' : 'bg-emerald-400'}`} />
-                                  <span className={r.isLate ? 'text-orange-500 font-black tracking-wide' : ''}>{toISTTimeString(r.record.checkInAt)}</span>
-                                  {r.isLate && (
-                                    <span className="text-[9px] font-sans font-bold text-orange-400 bg-orange-500/15 border border-orange-500/30 px-1 py-0.2 rounded ml-1">
-                                      LATE
-                                    </span>
-                                  )}
-                                </span>
-                              ) : (
-                                <span className="text-slate-600 font-bold">—</span>
-                              )}
+                              <div className="flex items-center gap-1.5 group/in">
+                                {r.record?.checkInAt ? (
+                                  <span className={`inline-flex items-center gap-1.5 ${r.isLate ? 'text-orange-500 font-black' : 'text-slate-200'}`}>
+                                    <span className={`w-2 h-2 rounded-full ${r.isLate ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.9)] animate-pulse' : 'bg-emerald-400'}`} />
+                                    <span className={r.isLate ? 'text-orange-500 font-black tracking-wide' : ''}>{toISTTimeString(r.record.checkInAt)}</span>
+                                    {r.isLate && (
+                                      <span className="text-[9px] font-sans font-bold text-orange-400 bg-orange-500/15 border border-orange-500/30 px-1 py-0.2 rounded ml-1">
+                                        LATE
+                                      </span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-600 font-bold">—</span>
+                                )}
+                                <button
+                                  onClick={() => openCheckInOverride(r.employee, r.record)}
+                                  className="opacity-0 group-hover/in:opacity-100 p-1 hover:bg-blue-500/20 text-blue-400 rounded-md transition-all cursor-pointer"
+                                  title="Override / Correct Check-In Time"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                </button>
+                              </div>
                             </td>
 
                             {/* Check-Out */}
@@ -946,6 +1193,15 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                             {/* Actions */}
                             <td className="py-3.5 px-4 text-right">
                               <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => openCheckInOverride(r.employee, r.record)}
+                                  className="px-2.5 py-1.5 bg-blue-600/15 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer transition-all"
+                                  title="Override / Correct Check-In Time (Software glitch / Edge cases)"
+                                >
+                                  <Clock className="w-3.5 h-3.5 text-blue-400" />
+                                  <span>Override In</span>
+                                </button>
+
                                 <button
                                   onClick={() => setSelectedEmployeeActivity({ employee: r.employee, record: r.record })}
                                   className="px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer"
@@ -1189,6 +1445,277 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                 className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-md"
               >
                 Confirm Conflict Flag
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 8. BULK CHECKOUT ALL PERSONNEL MODAL ── */}
+      {isBulkCheckoutModalOpen && (
+        <div className="fixed inset-0 z-[170] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-2xl">
+                  <LogOut className="w-5 h-5 text-rose-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">Bulk Check-Out All Personnel</h3>
+                  <p className="text-xs text-slate-400">Shift End Closure by Project Manager</p>
+                </div>
+              </div>
+              <button
+                onClick={() => !bulkCheckoutLoading && setIsBulkCheckoutModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {activeCheckedInEmployees.length === 0 ? (
+              <div className="py-8 text-center space-y-2">
+                <CheckCheck className="w-10 h-10 text-emerald-400 mx-auto" />
+                <p className="text-sm font-bold text-white">All Employees Already Checked Out</p>
+                <p className="text-xs text-slate-400">There are 0 active personnel remaining in shift today.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-medium">Active Personnel to Check Out:</span>
+                    <span className="font-mono font-bold text-rose-400">{activeCheckedInEmployees.length} Employees</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pt-1">
+                    {activeCheckedInEmployees.map(e => (
+                      <span key={e.employee.id} className="text-[10px] font-bold px-2 py-0.5 bg-slate-900 text-slate-300 border border-slate-800 rounded-lg">
+                        {e.employee.fullName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1.5 flex items-center justify-between">
+                      <span>Check-Out Time (IST)</span>
+                      <span className="text-[10px] text-slate-500 font-mono">24h format</span>
+                    </label>
+                    <input
+                      type="time"
+                      value={bulkCheckoutTime}
+                      onChange={e => setBulkCheckoutTime(e.target.value)}
+                      disabled={bulkCheckoutLoading}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono text-sm focus:outline-hidden focus:border-rose-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1.5">
+                      PM Closing Reason / Audit Notes
+                    </label>
+                    <input
+                      type="text"
+                      value={bulkCheckoutNotes}
+                      onChange={e => setBulkCheckoutNotes(e.target.value)}
+                      disabled={bulkCheckoutLoading}
+                      placeholder="e.g. End of Day Shift Closure"
+                      className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-hidden focus:border-rose-500"
+                    />
+                  </div>
+                </div>
+
+                {bulkCheckoutProgress && (
+                  <div className="space-y-1.5 pt-2">
+                    <div className="flex justify-between text-xs text-slate-400 font-mono">
+                      <span>Checking out personnel...</span>
+                      <span>{bulkCheckoutProgress.current} / {bulkCheckoutProgress.total}</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                      <div
+                        className="h-full bg-gradient-to-r from-rose-500 to-amber-500 transition-all duration-200"
+                        style={{ width: `${(bulkCheckoutProgress.current / bulkCheckoutProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsBulkCheckoutModalOpen(false)}
+                disabled={bulkCheckoutLoading}
+                className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              {activeCheckedInEmployees.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleExecuteBulkCheckout}
+                  disabled={bulkCheckoutLoading}
+                  className="px-5 py-2.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-black rounded-xl shadow-lg shadow-rose-950/50 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {bulkCheckoutLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+                  <span>Confirm Bulk Check-Out ({activeCheckedInEmployees.length})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 9. PM CHECK-IN TIMING OVERRIDE MODAL ── */}
+      {overrideModalTarget && (
+        <div className="fixed inset-0 z-[170] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <img
+                  src={overrideModalTarget.employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(overrideModalTarget.employee.fullName)}&background=0f172a&color=fff`}
+                  alt={overrideModalTarget.employee.fullName}
+                  className="w-11 h-11 rounded-2xl object-cover border-2 border-blue-500/40 shadow-md"
+                />
+                <div>
+                  <h3 className="text-sm font-black text-white">{overrideModalTarget.employee.fullName}</h3>
+                  <p className="text-xs text-slate-400 font-mono">
+                    {overrideModalTarget.employee.employeeId} • {overrideModalTarget.employee.department}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => !overrideLoading && setOverrideModalTarget(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-3 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-blue-300">
+                <strong>Project Manager Override:</strong> Correct the check-in time for this employee if impacted by software glitches, network lags, or biometric camera edge cases.
+              </p>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block">Work Date</span>
+                  <span className="font-mono font-bold text-slate-300">{todayStr}</span>
+                </div>
+                <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block">Current Recorded Time</span>
+                  <span className="font-mono font-bold text-amber-400">
+                    {overrideModalTarget.record?.checkInAt ? toISTTimeString(overrideModalTarget.record.checkInAt) : 'Not Checked In'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1.5">
+                  Corrected Check-In Time (IST)
+                </label>
+                <input
+                  type="time"
+                  value={overrideCheckInTime}
+                  onChange={e => setOverrideCheckInTime(e.target.value)}
+                  disabled={overrideLoading}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono text-sm focus:outline-hidden focus:border-blue-500"
+                />
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 mt-2 overflow-x-auto pb-1">
+                  {['09:30', '09:45', '10:00', '10:15', '10:30'].map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setOverrideCheckInTime(t)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                        overrideCheckInTime === t
+                          ? 'bg-blue-600 text-white border-blue-500'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1.5">
+                  Attendance Status
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'Present', label: 'Present (On-Time)' },
+                    { id: 'Late', label: 'Late Arrival' },
+                    { id: 'Work From Home', label: 'WFH' }
+                  ].map(st => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => setOverrideStatus(st.id as any)}
+                      className={`py-2 px-1 text-center rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                        overrideStatus === st.id
+                          ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/50 shadow-md'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1.5">
+                  Reason for Override
+                </label>
+                <select
+                  value={overrideReasonPreset}
+                  onChange={e => setOverrideReasonPreset(e.target.value)}
+                  disabled={overrideLoading}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-hidden focus:border-blue-500 mb-2"
+                >
+                  <option value="Software / App Check-In Glitch">Software / App Check-In Glitch</option>
+                  <option value="Biometric / Face Scanner Timeout">Biometric / Face Scanner Timeout</option>
+                  <option value="GPS Location / Geofence Delay">GPS Location / Geofence Delay</option>
+                  <option value="Manager Approved On-Time Entry">Manager Approved On-Time Entry</option>
+                  <option value="Network / Device Battery Failure">Network / Device Battery Failure</option>
+                  <option value="Custom Reason">Custom Reason</option>
+                </select>
+
+                <textarea
+                  rows={2}
+                  value={overrideCustomReason}
+                  onChange={e => setOverrideCustomReason(e.target.value)}
+                  placeholder="Optional details or reference note..."
+                  disabled={overrideLoading}
+                  className="w-full p-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setOverrideModalTarget(null)}
+                disabled={overrideLoading}
+                className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCheckInOverride}
+                disabled={overrideLoading}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {overrideLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                <span>Save Check-In Correction</span>
               </button>
             </div>
           </div>

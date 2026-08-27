@@ -50,7 +50,7 @@ const DEFAULT_RULES: CompanyRuleItem[] = [
     id: 'rule-5',
     category: 'Employee Rules',
     title: 'Paid Time Off (PTO), Holidays & Weekly Offs',
-    description: 'Every Sunday is an official Weekly Off. In addition, 17 declared Indian National, State (Karnataka Rajyotsava), and Festival Holidays are recognized as paid non-working days. Attendance check-in is strictly disabled on Sundays, official holidays, and during approved employee leaves.',
+    description: 'Every Sunday is an official Weekly Off. In addition, 6 declared Indian National, State (Karnataka Rajyotsava), and Festival Holidays are recognized as paid non-working days. Attendance check-in is strictly disabled on Sundays, official holidays, and during approved employee leaves.',
     effectiveDate: '2026-01-01',
     isMandatory: true
   },
@@ -58,7 +58,7 @@ const DEFAULT_RULES: CompanyRuleItem[] = [
     id: 'rule-6',
     category: 'Company Rules',
     title: 'Monthly Salary Calculation Cycle (27th to 26th)',
-    description: 'The company salary calculation cycle runs from the 27th of the previous month to the 26th of the current month (30-day accounting period). The 26th is the monthly payroll cut-off date. All working days, attendance, paid leaves, and Loss of Pay (LOP) are calculated on this cycle. A new cycle begins on the 27th of every month.',
+    description: 'The company salary calculation cycle runs from the 27th of the previous month to the 26th of the current month (30-day accounting period). The 26th is the monthly payroll cut-off date. All working days, attendance, Earn Leaves, and Loss of Pay (LOP) are calculated on this cycle. A new cycle begins on the 27th of every month.',
     effectiveDate: '2026-01-01',
     isMandatory: true
   }
@@ -239,11 +239,11 @@ export const CompanyRulesView: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-sm font-bold text-white">Kalpanaaa Software Solutions — 2026 Declared Holidays</h3>
-                <p className="text-xs text-slate-400">Sundays are standard weekly off days. The following 17 dates are recognized as paid public &amp; state holidays.</p>
+                <p className="text-xs text-slate-400">Sundays are standard weekly off days. The following {OFFICIAL_COMPANY_HOLIDAYS_2026.length} dates are recognized as paid public &amp; state holidays.</p>
               </div>
             </div>
             <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-indigo-300 font-mono text-xs font-bold shrink-0">
-              17 Official Holidays
+              {OFFICIAL_COMPANY_HOLIDAYS_2026.length} Official Holidays
             </div>
           </div>
 

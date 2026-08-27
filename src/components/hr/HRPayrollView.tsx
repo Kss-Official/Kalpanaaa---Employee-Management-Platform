@@ -178,13 +178,13 @@ export const HRPayrollView: React.FC = () => {
   const getBenchmarkSalary = (emp: Employee): number => {
     if ((emp as any).baseSalary && Number((emp as any).baseSalary) > 0) return Number((emp as any).baseSalary);
     if ((emp as any).salary && Number((emp as any).salary) > 0) return Number((emp as any).salary);
-    const desig = (emp.designation || '').toLowerCase();
-    if (desig.includes('manager') || desig.includes('lead')) return 65000;
-    if (desig.includes('senior') || desig.includes('architect')) return 60000;
-    if (desig.includes('backend') || desig.includes('full stack')) return 48000;
-    if (desig.includes('frontend') || desig.includes('engineer')) return 45000;
-    if (desig.includes('designer') || desig.includes('ui')) return 42000;
-    if (desig.includes('intern')) return 20000;
+    const titleText = (emp.designation || '').toLowerCase();
+    if (titleText.includes('manager') || titleText.includes('lead')) return 65000;
+    if (titleText.includes('senior') || titleText.includes('architect')) return 60000;
+    if (titleText.includes('backend') || titleText.includes('full stack')) return 48000;
+    if (titleText.includes('frontend') || titleText.includes('engineer')) return 45000;
+    if (titleText.includes('designer') || titleText.includes('ui')) return 42000;
+    if (titleText.includes('intern')) return 20000;
     return 45000;
   };
 
@@ -305,7 +305,7 @@ export const HRPayrollView: React.FC = () => {
               className="px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-white focus:outline-hidden w-full sm:w-auto cursor-pointer"
             >
               {payrollMonths.map(m => (
-                <option key={m.key} value={m.key}>{m.label}</option>
+                <option key={m.key} value={m.key}>{m.label} ({m.cycleLabel})</option>
               ))}
             </select>
 

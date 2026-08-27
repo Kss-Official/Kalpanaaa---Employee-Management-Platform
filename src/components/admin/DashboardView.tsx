@@ -257,8 +257,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   const lateTodayCount = dailyRoster.filter(r => r.isLate).length;
   const wfhTodayCount = dailyRoster.filter(r => r.status === 'Work From Home').length;
   const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
-  const lopCount = dailyRoster.filter(r => r.status === 'LOP').length;
-  const absentTodayCount = dailyRoster.filter(r => r.status === 'Absent').length;
+  const lopCount = dailyRoster.filter(r => r.status === 'LOP' || r.status === 'Absent').length;
+  const absentTodayCount = lopCount;
 
   // Filtered Roster for Modal Table
   const filteredRoster = useMemo(() => {
@@ -275,9 +275,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       if (rosterFilter === 'On Break') return item.status === 'On Break';
       if (rosterFilter === 'Late') return item.isLate;
       if (rosterFilter === 'Work From Home') return item.status === 'Work From Home';
-      if (rosterFilter === 'On Leave') return item.status === 'On Leave';
-      if (rosterFilter === 'LOP') return item.status === 'LOP';
-      if (rosterFilter === 'Absent') return item.status === 'Absent';
+      if (rosterFilter === 'On Leave' || rosterFilter === 'Leave') return item.status === 'On Leave';
+      if (rosterFilter === 'LOP' || rosterFilter === 'Absent') return item.status === 'LOP' || item.status === 'Absent';
       return true;
     });
   }, [dailyRoster, rosterFilter, rosterSearch]);
@@ -371,14 +370,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   const statusPieData = useMemo(() => {
     return [
       { name: 'Present', value: presentTodayCount - onBreakCount, color: '#10b981' },
-      { name: 'On Break (Live)', value: onBreakCount, color: '#f59e0b' },
-      { name: 'Late', value: lateTodayCount, color: '#fbbf24' },
+      { name: 'On Break (Live)', value: onBreakCount, color: '#eab308' },
+      { name: 'Late', value: lateTodayCount, color: '#f97316' },
       { name: 'Work From Home', value: wfhTodayCount, color: '#38bdf8' },
-      { name: 'On Leave', value: onLeaveCount, color: '#c084fc' },
-      { name: 'LOP', value: lopCount, color: '#e11d48' },
-      { name: 'Absent', value: absentTodayCount, color: '#64748b' }
+      { name: 'Leave (PL/EL)', value: onLeaveCount, color: '#c084fc' },
+      { name: 'LOP', value: lopCount, color: '#e11d48' }
     ].filter(d => d.value > 0);
-  }, [presentTodayCount, onBreakCount, lateTodayCount, wfhTodayCount, onLeaveCount, lopCount, absentTodayCount]);
+  }, [presentTodayCount, onBreakCount, lateTodayCount, wfhTodayCount, onLeaveCount, lopCount]);
 
   // Compute 7-day attendance trend chart data
   const trendData = Array.from({ length: 7 }).map((_, idx) => {
@@ -550,7 +548,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Approved remote duty</p>
         </div>
 
-        {/* Card 5: On Leave / LOP */}
+        {/* Card 5: Leave (Earn Leave / EL / SL) */}
         <div 
           onClick={() => {
             triggerHaptic();
@@ -560,28 +558,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           className="cursor-pointer group relative bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-md hover:border-purple-500/40 transition-all hover:scale-[1.02]"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-purple-400 uppercase tracking-wider">Leave & LOP</span>
+            <span className="text-[10px] font-black text-purple-400 uppercase tracking-wider">Leave</span>
             <Palmtree className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="mt-2 text-2xl font-black text-purple-300">{onLeaveCount + lopCount}</div>
-          <p className="text-[10px] text-slate-400 font-semibold mt-0.5">{lopCount > 0 ? `${lopCount} LOP • ${onLeaveCount} Leave` : 'Sanctioned time-off'}</p>
+          <div className="mt-2 text-2xl font-black text-purple-300">{onLeaveCount}</div>
+          <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Sanctioned Earn Leave</p>
         </div>
 
-        {/* Card 6: Absent Today */}
+        {/* Card 6: LOP (Loss of Pay / Not Checked In) */}
         <div 
           onClick={() => {
             triggerHaptic();
-            setRosterFilter('Absent');
+            setRosterFilter('LOP');
             setIsRosterModalOpen(true);
           }}
           className="cursor-pointer group relative bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-md hover:border-rose-500/40 transition-all hover:scale-[1.02]"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-rose-400 uppercase tracking-wider">Absent</span>
+            <span className="text-[10px] font-black text-rose-400 uppercase tracking-wider">LOP</span>
             <UserX className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="mt-2 text-2xl font-black text-rose-400">{absentTodayCount}</div>
-          <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Unexcused missing</p>
+          <div className="mt-2 text-2xl font-black text-rose-400">{lopCount}</div>
+          <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Unexcused / Loss of Pay</p>
         </div>
 
       </div>
@@ -852,8 +850,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                     { key: 'Late', label: 'Late', count: lateTodayCount },
                     { key: 'Work From Home', label: 'WFH', count: wfhTodayCount },
                     { key: 'On Leave', label: 'Leave', count: onLeaveCount },
-                    { key: 'LOP', label: 'LOP', count: lopCount },
-                    { key: 'Absent', label: 'Absent', count: absentTodayCount }
+                    { key: 'LOP', label: 'LOP', count: lopCount }
                   ].map(tab => (
                     <button
                       key={tab.key}
@@ -934,8 +931,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                                   {item.status === 'Present' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
                                   {item.status === 'Work From Home' && <Home className="w-3 h-3 text-sky-400" />}
                                   {item.status === 'On Leave' && <Palmtree className="w-3 h-3 text-purple-400" />}
-                                  {item.status === 'Absent' && <UserX className="w-3 h-3 text-rose-400" />}
-                                  <span>{item.status}</span>
+                                  {(item.status === 'Absent' || item.status === 'LOP') && <UserX className="w-3 h-3 text-rose-400" />}
+                                  <span>{item.status === 'On Leave' ? `Leave ${item.leaveReq?.reason ? `(${item.leaveReq.reason})` : '(PL / EL)'}` : (item.status === 'Absent' || item.status === 'LOP') ? 'LOP (Unexcused)' : item.status}</span>
                                   {item.activeBreak && (
                                     <span className="font-mono text-amber-300 ml-1">({item.activeBreak.type})</span>
                                   )}

@@ -155,6 +155,43 @@ test('isSamePerson matches across uid, synthetic doc id and employee code', () =
   assert.equal(isSamePerson({ id: undefined }, { id: undefined }), false);
 });
 
+test('isAuthorizedTechLead authorizes Satya Ranjan Das and Jason Kenneth N for cross-organization review', () => {
+  const { isAuthorizedTechLead, canReview, canViewTier } = hierarchy;
+  
+  const satya = {
+    id: 'emp-KSS2407012',
+    employeeId: 'KSS2407012',
+    fullName: 'Satya Ranjan Das',
+    email: 'satya.ranjan.dash@kalpanaaa.in',
+    role: 'EMPLOYEE'
+  };
+
+  const jason = {
+    id: 'KfAB95lpbJOeylpKQaWX4GXOPGt2',
+    employeeId: 'KSS2407014',
+    fullName: 'Jason Kenneth N',
+    email: 'jasonkennethn@kalpanaaa.in',
+    role: 'EMPLOYEE'
+  };
+
+  assert.equal(isAuthorizedTechLead(satya), true);
+  assert.equal(isAuthorizedTechLead(jason), true);
+  assert.equal(isAuthorizedTechLead(EMP), false);
+
+  // Authorized tech leads can review any other employee across the organization
+  for (const subject of [EMP, PM, HR, CTO, CEO]) {
+    assert.equal(canReview(satya, subject), true, `Satya must be able to review ${subject.role || subject.designation}`);
+    assert.equal(canReview(jason, subject), true, `Jason must be able to review ${subject.role || subject.designation}`);
+  }
+
+  // But neither can review themselves
+  assert.equal(canReview(satya, satya), false, 'Satya must not be able to self-review');
+  assert.equal(canReview(jason, jason), false, 'Jason must not be able to self-review');
+
+  // Can view tier policy
+  assert.equal(canViewTier(hierarchy.TIER_EMPLOYEE, hierarchy.TIER_EXECUTIVE, satya), true);
+});
+
 // ── The enforceable boundary ─────────────────────────────────────────────────
 
 test('each listener satisfies exactly one disjunct of the read rule', async () => {

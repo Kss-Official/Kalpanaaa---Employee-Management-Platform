@@ -1,7 +1,7 @@
 import { PerformanceFeedback, UserRole, Employee } from '../types';
 import { db, cleanFirestorePayload, subscribeWithRecovery } from './firebase';
 import { collection, setDoc, doc, getDoc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
-import { tierOf, canViewTier, isSamePerson, TIER_EMPLOYEE, TIER_PM } from './hierarchy';
+import { tierOf, canViewTier, isSamePerson, isAuthorizedTechLead, TIER_EMPLOYEE, TIER_PM } from './hierarchy';
 
 /**
  * There is deliberately no seeded feedback list.
@@ -26,7 +26,7 @@ const LOCAL_STORAGE_KEY = 'kss_performance_feedbacks';
  * query can't quietly widen visibility.
  *
  * Tier policy (src/lib/hierarchy.ts):
- *   CTO ⇄ CEO (5) and HR (3) hold the whole appraisal record.
+ *   CTO ⇄ CEO (5), HR (3), and Authorized Tech Leads hold the appraisal record.
  *   PM (2) sees tier-1 employees, reviews it authored, and reviews about itself.
  *   Employee (1) sees only reviews about itself.
  */
@@ -36,6 +36,11 @@ export function filterFeedbacksByRole(
   role: UserRole | string
 ): PerformanceFeedback[] {
   if (!activeEmployee) return [];
+
+  // Tech leads have authorized cross-employee feedback access
+  if (isAuthorizedTechLead(activeEmployee)) {
+    return feedbacks;
+  }
 
   // `role` is the session's effective role and wins when the directory record
   // has not loaded a role yet; tierOf reads the employee record itself.
@@ -58,7 +63,7 @@ export function filterFeedbacksByRole(
     // Legacy rows written before subjectTier existed fail CLOSED: an unknown
     // subject tier must not be treated as the most permissive one.
     const subjectTier = typeof fb.subjectTier === 'number' ? fb.subjectTier : Number.MAX_SAFE_INTEGER;
-    return canViewTier(viewerTier, subjectTier);
+    return canViewTier(viewerTier, subjectTier, activeEmployee);
   });
 }
 
@@ -223,6 +228,11 @@ export function getStoredFeedbacks(): PerformanceFeedback[] {
 export function feedbackQueriesFor(activeEmployee: Employee | null, role: UserRole | string) {
   const base = collection(db, 'performanceFeedbacks');
   if (!activeEmployee) return [];
+
+  // Authorized Tech Leads hold full cross-workforce review access
+  if (isAuthorizedTechLead(activeEmployee)) {
+    return [base];
+  }
 
   const viewerTier = Math.max(
     tierOf(activeEmployee),

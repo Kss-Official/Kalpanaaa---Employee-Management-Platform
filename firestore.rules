@@ -57,6 +57,18 @@ service cloud.firestore {
          get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('role', '') == 'PROJECT_MANAGER')
       );
     }
+    function isAuthorizedTechLead() {
+      return isSignedIn() && (
+        request.auth.uid in ['QpDtyS6Jp5OqNu3klvfWGoWHfmS2', 'KfAB95lpbJOeylpKQaWX4GXOPGt2'] ||
+        (request.auth.token.get('email', null) != null && (
+          request.auth.token.email == 'satya.ranjan.dash@kalpanaaa.in' ||
+          request.auth.token.email == 'satya.ranjan.das@kalpanaaa.in' ||
+          request.auth.token.email == 'jasonkennethn@kalpanaaa.in'
+        )) ||
+        (getEmployeeId() != null && (getEmployeeId() == 'KSS2407012' || getEmployeeId() == 'KSS2407014')) ||
+        (getEmployeeDocId() != null && (getEmployeeDocId() == 'emp-KSS2407012' || getEmployeeDocId() == 'KfAB95lpbJOeylpKQaWX4GXOPGt2'))
+      );
+    }
     function isConfigAdmin() { return isHrAdmin() || isSuperAdmin(); }
     function isSelf(uid) { return isSignedIn() && request.auth.uid == uid; }
     function unchanged(f) {
@@ -374,9 +386,9 @@ service cloud.firestore {
       function callerTier() {
         return isSuperAdmin() ? 5 : (isHrAdmin() ? 3 : (isProjectManager() ? 2 : 1));
       }
-      allow read: if isConfigAdmin() || isSubject() || isAuthor() ||
+      allow read: if isConfigAdmin() || isSubject() || isAuthor() || isAuthorizedTechLead() ||
         (isProjectManager() && resource.data.subjectTier == 1);
-      allow create: if (isConfigAdmin() || isProjectManager()) &&
+      allow create: if (isConfigAdmin() || isProjectManager() || isAuthorizedTechLead()) &&
         request.resource.data.reviewerId is string &&
         (request.resource.data.reviewerId == request.auth.uid || request.resource.data.reviewerId == getEmployeeDocId()) &&
         request.resource.data.targetEmployeeId is string &&
@@ -387,10 +399,10 @@ service cloud.firestore {
         request.resource.data.isAcknowledged == false &&
         request.resource.data.subjectTier is number &&
         request.resource.data.subjectTier >= 1 &&
-        request.resource.data.subjectTier < callerTier();
+        (isAuthorizedTechLead() || request.resource.data.subjectTier < callerTier());
       allow update: if
         (isConfigAdmin() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
-        (isProjectManager() && isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
+        ((isProjectManager() || isAuthorizedTechLead()) && isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
         (isSubject() && isAcknowledgementOnly());
       allow delete: if isConfigAdmin() ||
         (isAuthor() && resource.data.get('isAcknowledged', false) == false);

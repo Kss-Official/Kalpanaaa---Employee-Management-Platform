@@ -69,59 +69,105 @@ export function formatShiftTiming(shift?: string | null): string {
 }
 
 /**
- * Computes an employee's paid leave balance according to strict zero-base policy:
- * - Base paid leaves start strictly at ZERO (0) for all employees (no legacy historical accrual).
- * - 1 paid leave is credited on the 1st date of each month.
+ * Computes an employee's Earn Leave monthly credit history from joining date to refDate:
+ * - Base Earn Leaves start strictly at ZERO (0) for all employees (zero-base policy).
+ * - 1 Earn Leave is credited on the 1st date of each month.
  * - If an employee joins in the current month AFTER the 1st date, they have 0 credited leaves
  *   until the 1st of the next month.
- * - Approved leaves of type 'Leave' taken during the active month/period deduct from this balance.
  */
-export function computeEmployeeLeaveBalance(
-  emp: Employee, 
-  leaveRequests: any[] = [], 
+export function computeEarnLeaveMonthlyCreditHistory(
+  emp: any,
   refDate: Date = new Date()
-): { credited: number; taken: number; balance: number } {
-  if (!emp) return { credited: 0, taken: 0, balance: 0 };
+): { monthKey: string; monthLabel: string; creditedDays: number; creditedDate: string; status: 'Credited' | 'Not Eligible' }[] {
+  if (!emp) return [];
 
   const joinDate = emp.joiningDate ? new Date(emp.joiningDate) : null;
   const currentYear = refDate.getFullYear();
-  const currentMonth = refDate.getMonth(); // 0-indexed (0=Jan, 7=Aug)
-  const currentDay = refDate.getDate();
+  const currentMonth = refDate.getMonth(); // 0-indexed (0=Jan, 11=Dec)
 
-  // Determine if the employee is eligible for the current month's credit (credited on the 1st).
-  let isCreditedForCurrentMonth = false;
-  if (currentDay >= 1) {
-    if (!joinDate || isNaN(joinDate.getTime())) {
-      isCreditedForCurrentMonth = true;
-    } else {
-      const joinYear = joinDate.getFullYear();
-      const joinMonth = joinDate.getMonth();
-      const joinDay = joinDate.getDate();
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
 
-      // If joined before current month OR joined on or before 1st of current month
-      if (
-        joinYear < currentYear ||
-        (joinYear === currentYear && joinMonth < currentMonth) ||
-        (joinYear === currentYear && joinMonth === currentMonth && joinDay <= 1)
-      ) {
-        isCreditedForCurrentMonth = true;
+  const startYear = joinDate && !isNaN(joinDate.getTime()) 
+    ? Math.min(joinDate.getFullYear(), currentYear)
+    : currentYear;
+
+  const history: { monthKey: string; monthLabel: string; creditedDays: number; creditedDate: string; status: 'Credited' | 'Not Eligible' }[] = [];
+
+  for (let year = startYear; year <= currentYear; year++) {
+    const endMonth = year === currentYear ? currentMonth : 11;
+    const startMonth = (joinDate && !isNaN(joinDate.getTime()) && year === joinDate.getFullYear())
+      ? joinDate.getMonth()
+      : 0;
+
+    for (let month = startMonth; month <= endMonth; month++) {
+      const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+      const monthLabel = `${monthNames[month]} ${year}`;
+      const creditedDate = `${monthKey}-01`;
+
+      let isCredited = false;
+      if (!joinDate || isNaN(joinDate.getTime())) {
+        isCredited = true;
+      } else {
+        const jYear = joinDate.getFullYear();
+        const jMonth = joinDate.getMonth();
+        const jDay = joinDate.getDate();
+
+        if (
+          jYear < year ||
+          (jYear === year && jMonth < month) ||
+          (jYear === year && jMonth === month && jDay <= 1)
+        ) {
+          isCredited = true;
+        }
       }
+
+      history.push({
+        monthKey,
+        monthLabel,
+        creditedDays: isCredited ? 1 : 0,
+        creditedDate,
+        status: isCredited ? 'Credited' : 'Not Eligible'
+      });
     }
   }
 
-  const credited = isCreditedForCurrentMonth ? 1 : 0;
+  return history;
+}
 
-  // Filter approved leaves taken in the current month
-  const currentMonthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-  const approvedLeavesTaken = leaveRequests.filter(l => {
+/**
+ * Computes an employee's Earn Leave balance according to strict zero-base policy:
+ * - 1 Earn Leave is credited on the 1st date of each month.
+ * - Approved leaves of type 'Leave' or 'Earn Leave' taken during the active month deduct from this balance.
+ */
+export function computeEmployeeLeaveBalance(
+  emp: any, 
+  leaveRequests: any[] = [], 
+  refDate: Date = new Date()
+): { credited: number; taken: number; balance: number; history: { monthKey: string; monthLabel: string; creditedDays: number; creditedDate: string; status: 'Credited' | 'Not Eligible' }[] } {
+  if (!emp) return { credited: 0, taken: 0, balance: 0, history: [] };
+
+  const history = computeEarnLeaveMonthlyCreditHistory(emp, refDate);
+  const currentMonthPrefix = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}`;
+  const currentEntry = history.find(h => h.monthKey === currentMonthPrefix);
+  const credited = currentEntry ? currentEntry.creditedDays : 0;
+
+  // Filter approved leaves taken in the current month (supports legacy 'Leave' and 'Earn Leave')
+  const approvedLeavesTaken = (leaveRequests || []).filter(l => {
+    if (!l) return false;
     const isEmp = 
       (!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
       (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
       (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
-    const isApproved = l.status === 'Approved';
-    const isLeave = l.type === 'Leave';
+    const isApproved = l.status === 'Approved' ||
+      ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
+       (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
+       l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
+    const isEarnLeave = l.type === 'Leave' || l.type === 'Earn Leave' || (l as any).leaveCategory === 'Earn Leave';
     const isInMonth = l.startDate ? l.startDate.startsWith(currentMonthPrefix) : true;
-    return isEmp && isApproved && isLeave && isInMonth;
+    return isEmp && isApproved && isEarnLeave && isInMonth;
   }).length;
 
   const balance = Math.max(0, credited - approvedLeavesTaken);
@@ -129,7 +175,103 @@ export function computeEmployeeLeaveBalance(
   return {
     credited,
     taken: approvedLeavesTaken,
-    balance
+    balance,
+    history
+  };
+}
+
+/**
+ * Computes Sick Leave credit periods for an employee:
+ * - 1 Sick Leave day during the 3-month traineeship period.
+ * - 1 Sick Leave day every 3 months thereafter (recurring entitlement).
+ */
+export function computeSickLeaveCreditHistory(
+  emp: any,
+  refDate: Date = new Date()
+): { periodKey: string; periodLabel: string; startDate: string; endDate: string; creditedDays: number; isTraineeship: boolean; status: 'Credited' | 'Upcoming' }[] {
+  if (!emp) return [];
+
+  const joinDate = emp.joiningDate ? new Date(emp.joiningDate) : new Date(refDate.getFullYear(), 0, 1);
+  if (isNaN(joinDate.getTime())) return [];
+
+  const history: { periodKey: string; periodLabel: string; startDate: string; endDate: string; creditedDays: number; isTraineeship: boolean; status: 'Credited' | 'Upcoming' }[] = [];
+  const nowTime = refDate.getTime();
+
+  let pIndex = 1;
+  let pStart = new Date(joinDate);
+
+  while (true) {
+    const pEnd = new Date(pStart);
+    pEnd.setMonth(pEnd.getMonth() + 3);
+
+    const startStr = pStart.toISOString().split('T')[0];
+    const endStr = new Date(pEnd.getTime() - 86400000).toISOString().split('T')[0];
+    const isTraineeship = pIndex === 1;
+    const isCredited = pStart.getTime() <= nowTime;
+
+    const periodLabel = isTraineeship
+      ? 'Months 1–3 (Traineeship Period)'
+      : `Months ${(pIndex - 1) * 3 + 1}–${pIndex * 3} (Entitlement Q${pIndex})`;
+
+    history.push({
+      periodKey: `SL-P${pIndex}`,
+      periodLabel,
+      startDate: startStr,
+      endDate: endStr,
+      creditedDays: 1,
+      isTraineeship,
+      status: isCredited ? 'Credited' : 'Upcoming'
+    });
+
+    if (pStart.getTime() > nowTime || pIndex >= 30) {
+      break;
+    }
+
+    pStart = pEnd;
+    pIndex++;
+  }
+
+  return history;
+}
+
+/**
+ * Computes Sick Leave balance:
+ * - Calculates total credited Sick Leave from 3-month recurring entitlements.
+ * - Deducts all approved Sick Leave requests.
+ */
+export function computeSickLeaveBalance(
+  emp: any,
+  leaveRequests: any[] = [],
+  refDate: Date = new Date()
+): { credited: number; taken: number; balance: number; history: { periodKey: string; periodLabel: string; startDate: string; endDate: string; creditedDays: number; isTraineeship: boolean; status: 'Credited' | 'Upcoming' }[] } {
+  if (!emp) return { credited: 0, taken: 0, balance: 0, history: [] };
+
+  const history = computeSickLeaveCreditHistory(emp, refDate);
+  const credited = history
+    .filter(h => h.status === 'Credited')
+    .reduce((acc, h) => acc + h.creditedDays, 0);
+
+  const approvedLeavesTaken = (leaveRequests || []).filter(l => {
+    if (!l) return false;
+    const isEmp = 
+      (!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
+      (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
+      (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+    const isApproved = l.status === 'Approved' ||
+      ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
+       (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
+       l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
+    const isSickLeave = l.type === 'Sick Leave' || (l as any).leaveCategory === 'Sick Leave';
+    return isEmp && isApproved && isSickLeave;
+  }).length;
+
+  const balance = Math.max(0, credited - approvedLeavesTaken);
+
+  return {
+    credited,
+    taken: approvedLeavesTaken,
+    balance,
+    history
   };
 }
 
@@ -137,27 +279,26 @@ export interface CompanyHolidayItem {
   date: string; // YYYY-MM-DD
   name: string;
   dayOfWeek: string;
+  type?: string;
 }
 
-/** Official Company & Declared Public Holidays (2026) */
+/**
+ * Official Company & Declared Public Holidays (2026)
+ * Configured per official company holiday calendar:
+ * 1. 14 September 2026 - Ganesh Chaturthi (Festival Holiday)
+ * 2. 02 October 2026   - Gandhi Jayanti (National Holiday)
+ * 3. 20 October 2026   - Dussehra / Vijayadashami (Company Holiday)
+ * 4. 01 November 2026  - Karnataka Rajyotsava (Karnataka State Holiday)
+ * 5. 08 November 2026  - Diwali / Deepavali (Festival Holiday)
+ * 6. 25 December 2026  - Christmas (Company Holiday)
+ */
 export const OFFICIAL_COMPANY_HOLIDAYS_2026: CompanyHolidayItem[] = [
-  { date: '2026-01-01', name: "New Year's Day", dayOfWeek: 'Thursday' },
-  { date: '2026-01-26', name: 'Republic Day', dayOfWeek: 'Monday' },
-  { date: '2026-03-04', name: 'Holi', dayOfWeek: 'Wednesday' },
-  { date: '2026-03-21', name: 'Id-ul-Fitr (Ramzan Eid)', dayOfWeek: 'Saturday' },
-  { date: '2026-04-03', name: 'Good Friday', dayOfWeek: 'Friday' },
-  { date: '2026-04-14', name: 'Ambedkar Jayanti', dayOfWeek: 'Tuesday' },
-  { date: '2026-05-01', name: 'Buddha Purnima', dayOfWeek: 'Friday' },
-  { date: '2026-05-28', name: 'Id-ul-Zuha (Bakrid)', dayOfWeek: 'Thursday' },
-  { date: '2026-06-26', name: 'Muharram', dayOfWeek: 'Friday' },
-  { date: '2026-08-15', name: 'Independence Day', dayOfWeek: 'Saturday' },
-  { date: '2026-08-26', name: 'Milad-un-Nabi (Id-E-Milad)', dayOfWeek: 'Wednesday' },
-  { date: '2026-10-02', name: 'Mahatma Gandhi Jayanti', dayOfWeek: 'Friday' },
-  { date: '2026-10-20', name: 'Dussehra (Vijayadashami)', dayOfWeek: 'Tuesday' },
-  { date: '2026-11-01', name: 'Karnataka Rajyotsava', dayOfWeek: 'Sunday' },
-  { date: '2026-11-08', name: 'Diwali (Deepavali)', dayOfWeek: 'Sunday' },
-  { date: '2026-11-24', name: "Guru Nanak's Birthday", dayOfWeek: 'Tuesday' },
-  { date: '2026-12-25', name: 'Christmas Day', dayOfWeek: 'Friday' },
+  { date: '2026-09-14', name: 'Ganesh Chaturthi', dayOfWeek: 'Monday', type: 'Festival Holiday' },
+  { date: '2026-10-02', name: 'Gandhi Jayanti', dayOfWeek: 'Friday', type: 'National Holiday' },
+  { date: '2026-10-20', name: 'Dussehra / Vijayadashami', dayOfWeek: 'Tuesday', type: 'Company Holiday' },
+  { date: '2026-11-01', name: 'Karnataka Rajyotsava', dayOfWeek: 'Sunday', type: 'Karnataka State Holiday' },
+  { date: '2026-11-08', name: 'Diwali / Deepavali', dayOfWeek: 'Sunday', type: 'Festival Holiday' },
+  { date: '2026-12-25', name: 'Christmas', dayOfWeek: 'Friday', type: 'Company Holiday' },
 ];
 
 export const OFFICIAL_HOLIDAY_DATES_2026: string[] = OFFICIAL_COMPANY_HOLIDAYS_2026.map(h => h.date);
@@ -997,31 +1138,32 @@ export function evaluateAttendanceScan(
     // Perform CHECK_IN
     const now = new Date();
 
-    // MORNING TIME WINDOW RULE: Check-in opens from 08:00 AM IST onwards.
+    // MORNING TIME WINDOW RULE: Check-in opens from 09:30 AM IST onwards.
     const currentHourIST = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }).format(now), 10);
     const currentMinIST = parseInt(new Intl.DateTimeFormat('en-US', { minute: 'numeric', timeZone: 'Asia/Kolkata' }).format(now), 10);
+    const totalMinutesIST = currentHourIST * 60 + currentMinIST;
 
-    if (currentHourIST < 8) {
-      const minRemaining = (8 - currentHourIST) * 60 - currentMinIST;
+    if (totalMinutesIST < 9 * 60 + 30) {
+      const minRemaining = (9 * 60 + 30) - totalMinutesIST;
       return {
         allowed: false,
         action: 'CHECK_IN',
         status: 'Present',
         locationVerified: false,
         distanceMeters: 0,
-        message: `Check-In Restricted: Morning check-in opens at 08:00 AM IST. Please wait until 08:00 AM to check in (${minRemaining} mins remaining).`
+        message: `Check-In Restricted: Morning check-in opens at 09:30 AM IST. Please wait until 09:30 AM to check in (${minRemaining} mins remaining).`
       };
     }
 
-    // EVENING TIME WINDOW RULE: Check-in and check-out allowed until 11:00 PM IST (23:00 IST cutoff).
-    if (currentHourIST >= 23) {
+    // EVENING TIME WINDOW RULE: Check-in allowed until 07:30 PM IST (19:30 IST cutoff).
+    if (totalMinutesIST >= 19 * 60 + 30) {
       return {
         allowed: false,
         action: 'CHECK_IN',
         status: 'Present',
         locationVerified: false,
         distanceMeters: 0,
-        message: `Check-In Blocked: Today's check-in window closed at 11:00 PM IST. New check-ins are not permitted after 11:00 PM.`
+        message: `Check-In Blocked: Today's shift check-in window has ended (closed at 07:30 PM IST). New check-ins are not permitted after shift hours.`
       };
     }
 
@@ -1221,7 +1363,7 @@ export function isNonWorkingDay(
  * `hasApprovedLeaveOn` also matches WFH and silently forgives real absences.
  */
 export const EXCUSED_LEAVE_TYPES = [
-  'Leave', 'Sick Leave', 'Casual Leave', 'Earned Leave', 'Comp Off', 'Maternity', 'Paternity'
+  'Leave', 'Earn Leave', 'Earned Leave', 'Paid Leave', 'Sick Leave', 'Casual Leave', 'Comp Off', 'Maternity', 'Paternity'
 ] as const;
 
 export function hasApprovedLeaveOn(
@@ -1315,11 +1457,12 @@ export function buildDailyRoster(
       continue;
     }
 
-    const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']) ||
+    const existing = resolveAttendanceRecord(records, emp, dateStr);
+    const isWfhApproved = (existing && (existing.isWfh || existing.status === 'Work From Home')) ||
+      hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']) ||
       (emp.approvedWfhDates || []).includes(dateStr) ||
       (opts.companyWideWfhDates || []).includes(dateStr);
 
-    const existing = resolveAttendanceRecord(records, emp, dateStr);
     if (existing) {
       if (isWfhApproved && !existing.isWfh && existing.status !== 'On Leave') {
         roster.push({
@@ -2384,7 +2527,7 @@ export function buildPayrollAttendanceBasis(
     cycleLabel,
     startDate,
     endDate,
-    workingDays,
+    workingDays: Math.max(0, workingDays - onLeave),
     rosteredDays,
     presentDays: present,
     lateDays: late,
@@ -2416,7 +2559,7 @@ export function listPayrollMonths(
     const { cycleLabel } = getPayrollCycleDates(key);
     out.push({
       key,
-      label: `${formatMonthKey(key)} (${cycleLabel})`,
+      label: formatMonthKey(key),
       cycleLabel,
       isCurrent: key === currentKey
     });

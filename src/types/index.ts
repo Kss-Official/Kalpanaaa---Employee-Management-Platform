@@ -33,6 +33,8 @@ export interface BreakEntry {
   durationMinutes: number;
 }
 
+export type LeaveCategory = 'Earn Leave' | 'Sick Leave' | 'WFH';
+
 export interface LeaveRequest {
   id: string;
   employeeUid?: string; // Canonical Firebase Auth UID anchor
@@ -41,7 +43,8 @@ export interface LeaveRequest {
   department?: string;
   employeeRole?: UserRole | string;
   pmUid?: string;       // Assigned Project Manager Auth UID for scoped routing
-  type: 'Leave' | 'WFH';
+  type: 'Leave' | 'WFH' | 'Earn Leave' | 'Sick Leave';
+  leaveCategory?: LeaveCategory;
   startDate: string;    // YYYY-MM-DD
   endDate: string;      // YYYY-MM-DD
   reason: string;
@@ -80,12 +83,44 @@ export interface LeaveRequest {
   overrideReason?: string;
 }
 
+export interface EarnLeaveCreditEntry {
+  monthKey: string;     // e.g. "2026-01"
+  monthLabel: string;   // e.g. "January 2026"
+  creditedDays: number; // e.g. 1
+  creditedDate: string; // e.g. "2026-01-01"
+  status: 'Credited' | 'Not Eligible';
+}
+
+export interface SickLeaveCreditEntry {
+  periodKey: string;    // e.g. "P1-2026"
+  periodLabel: string;  // e.g. "Months 1-3 (Traineeship Period)"
+  startDate: string;    // YYYY-MM-DD
+  endDate: string;      // YYYY-MM-DD
+  creditedDays: number; // 1
+  isTraineeship: boolean;
+  status: 'Credited' | 'Upcoming';
+}
+
+export interface SickLeaveSummary {
+  credited: number;
+  taken: number;
+  balance: number;
+  history: SickLeaveCreditEntry[];
+}
+
+export interface EarnLeaveSummary {
+  credited: number;
+  taken: number;
+  balance: number;
+  history: EarnLeaveCreditEntry[];
+}
+
 export interface LeaveLockEntry {
   id: string; // YYYY-MM-DD
   requestId: string;
   employeeUid: string;
   employeeId: string;
-  type: 'Leave' | 'WFH';
+  type: 'Leave' | 'WFH' | 'Earn Leave' | 'Sick Leave';
   active: boolean;
   reservedAt: string;
 }
@@ -232,6 +267,7 @@ export interface CompanyHoliday {
   date: string; // YYYY-MM-DD
   name: string;
   dayOfWeek: string;
+  type?: string; // e.g. "Festival Holiday", "National Holiday", "Company Holiday", "Karnataka State Holiday"
 }
 
 export interface CompanySettings {
