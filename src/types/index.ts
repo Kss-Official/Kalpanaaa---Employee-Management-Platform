@@ -392,12 +392,16 @@ export interface PerformanceFeedback {
   targetEmployeeDesignation?: string;
   targetEmployeeDepartment?: string;
   targetEmployeePhotoUrl?: string;
+  targetEmployeeEmail?: string;
+  targetEmployeeUid?: string;
 
   reviewerId: string;
   reviewerName: string;
   reviewerRole: UserRole | string;
   reviewerDesignation?: string;
   reviewerPhotoUrl?: string;
+  reviewerEmail?: string;
+  reviewerUid?: string;
 
   category: FeedbackCategory;
   rating: number; // 1 to 5

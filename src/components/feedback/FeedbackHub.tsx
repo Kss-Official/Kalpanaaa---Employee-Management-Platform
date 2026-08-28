@@ -38,6 +38,7 @@ import {
   filterFeedbacksByRole,
   savePerformanceFeedback,
   deletePerformanceFeedback,
+  acknowledgePerformanceFeedback,
   subscribeToFeedbacks,
   saveConfidentialNote,
   fetchConfidentialNote
@@ -110,6 +111,7 @@ export const FeedbackHub: React.FC = () => {
   const [privateNotes, setPrivateNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<string | null>(null);
+  const [processingAckId, setProcessingAckId] = useState<string | null>(null);
 
   // Who this reviewer may write about at all: strictly below their own tier.
   //
@@ -126,8 +128,20 @@ export const FeedbackHub: React.FC = () => {
   const displayFeedbacks = useMemo(() => {
     return visibleFeedbacks.filter(fb => {
       // Tab filter
-      if (activeViewTab === 'sent_by_me' && fb.reviewerId !== activeEmployee?.id) return false;
-      if (activeViewTab === 'received' && fb.targetEmployeeId !== activeEmployee?.id && fb.targetEmployeeCode !== activeEmployee?.employeeId) return false;
+      if (activeViewTab === 'sent_by_me') {
+        const isAuthored = fb.reviewerId === activeEmployee?.id ||
+          (Boolean(activeEmployee?.uid) && (fb.reviewerId === activeEmployee?.uid || fb.reviewerUid === activeEmployee?.uid)) ||
+          (Boolean(fb.reviewerEmail) && Boolean(activeEmployee?.email) && fb.reviewerEmail?.toLowerCase() === activeEmployee?.email?.toLowerCase()) ||
+          (Boolean(fb.reviewerName) && Boolean(activeEmployee?.fullName) && fb.reviewerName.trim().toLowerCase() === activeEmployee?.fullName?.trim().toLowerCase());
+        if (!isAuthored) return false;
+      }
+      if (activeViewTab === 'received') {
+        const isTarget = fb.targetEmployeeId === activeEmployee?.id ||
+          fb.targetEmployeeCode === activeEmployee?.employeeId ||
+          (Boolean(activeEmployee?.uid) && (fb.targetEmployeeId === activeEmployee?.uid || fb.targetEmployeeUid === activeEmployee?.uid)) ||
+          (Boolean(fb.targetEmployeeEmail) && Boolean(activeEmployee?.email) && fb.targetEmployeeEmail?.toLowerCase() === activeEmployee?.email?.toLowerCase());
+        if (!isTarget) return false;
+      }
 
       // Category filter
       if (selectedCategoryFilter !== 'ALL' && fb.category !== selectedCategoryFilter) return false;
@@ -205,16 +219,12 @@ export const FeedbackHub: React.FC = () => {
       targetEmployeeRole: targetEmp.role,
       targetEmployeeDesignation: targetEmp.designation,
       targetEmployeeDepartment: targetEmp.department,
-      // COST FIX: targetEmployeePhotoUrl / reviewerPhotoUrl are deliberately NOT
-      // stamped here any more. They copied ~30-50KB of base64 image onto every
-      // review document (~80KB per doc for the pair), and that blob was then
-      // re-streamed to every reader of the collection. Both render sites now
-      // resolve the avatar from the `employees` directory already in context,
-      // falling back to the stored field for historical documents. Dropping the
-      // copy also fixes a staleness bug: a review used to keep showing whatever
-      // photo the person had on the day it was written.
+      targetEmployeeEmail: targetEmp.email?.toLowerCase(),
+      targetEmployeeUid: targetEmp.uid || '',
 
       reviewerId: activeEmployee.id,
+      reviewerUid: activeEmployee.uid || '',
+      reviewerEmail: activeEmployee.email?.toLowerCase() || '',
       reviewerName: activeEmployee.fullName,
       reviewerRole: activeEmployee.role,
       reviewerDesignation: activeEmployee.designation || (isSuperAdmin ? 'Executive Leadership' : isPm ? 'Project Manager' : 'Reviewer'),
@@ -466,7 +476,9 @@ export const FeedbackHub: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {displayFeedbacks.map(fb => {
-            const isAuthor = fb.reviewerId === activeEmployee?.id;
+            const isAuthor = fb.reviewerId === activeEmployee?.id ||
+              (Boolean(activeEmployee?.uid) && (fb.reviewerId === activeEmployee?.uid || fb.reviewerUid === activeEmployee?.uid)) ||
+              (Boolean(fb.reviewerEmail) && Boolean(activeEmployee?.email) && fb.reviewerEmail?.toLowerCase() === activeEmployee?.email?.toLowerCase());
             const canDelete = isAuthor || isSuperAdmin;
 
             return (
@@ -601,16 +613,36 @@ export const FeedbackHub: React.FC = () => {
                 </div>
 
                 {/* Footer Bar: Acknowledgment Status + Actions */}
-                <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
-                  <div>
+                <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {Boolean(fb.isAcknowledged) ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                        <CheckCircle2 className="w-3 h-3" /> Acknowledged by Employee
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/20">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Acknowledged by Employee
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
-                        <Clock className="w-3 h-3" /> Awaiting Employee Sign-off
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20">
+                          <Clock className="w-3.5 h-3.5" /> Awaiting Employee Sign-off
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            triggerHaptic();
+                            setProcessingAckId(fb.id);
+                            const ok = await acknowledgePerformanceFeedback(fb.id);
+                            if (ok) {
+                              setAllFeedbacks(prev => prev.map(f => f.id === fb.id ? { ...f, isAcknowledged: true, acknowledgedAt: new Date().toISOString() } : f));
+                            }
+                            setProcessingAckId(null);
+                          }}
+                          disabled={processingAckId === fb.id}
+                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-md shadow-blue-900/30"
+                          title="Confirm and mark this review as acknowledged in cloud"
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>{processingAckId === fb.id ? 'Saving...' : 'Mark Sign-off'}</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 

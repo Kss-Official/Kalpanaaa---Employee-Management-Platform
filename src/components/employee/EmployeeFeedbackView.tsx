@@ -86,7 +86,8 @@ export const EmployeeFeedbackView: React.FC = () => {
     return allFeedbacks.filter(fb => 
       fb.targetEmployeeId === activeEmployee?.id ||
       fb.targetEmployeeCode === activeEmployee?.employeeId ||
-      (activeEmployee?.uid && fb.targetEmployeeId === activeEmployee.uid)
+      (Boolean(activeEmployee?.uid) && (fb.targetEmployeeId === activeEmployee.uid || fb.targetEmployeeUid === activeEmployee.uid)) ||
+      (Boolean(activeEmployee?.email) && Boolean(fb.targetEmployeeEmail) && fb.targetEmployeeEmail?.toLowerCase() === activeEmployee.email?.toLowerCase())
     );
   }, [allFeedbacks, activeEmployee]);
 
@@ -94,8 +95,9 @@ export const EmployeeFeedbackView: React.FC = () => {
   const givenByMe = useMemo(() => {
     return allFeedbacks.filter(fb => 
       fb.reviewerId === activeEmployee?.id ||
-      (activeEmployee?.uid && fb.reviewerId === activeEmployee.uid) ||
-      (fb.reviewerName && activeEmployee?.fullName && fb.reviewerName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())
+      (Boolean(activeEmployee?.uid) && (fb.reviewerId === activeEmployee.uid || fb.reviewerUid === activeEmployee.uid)) ||
+      (Boolean(activeEmployee?.email) && Boolean(fb.reviewerEmail) && fb.reviewerEmail?.toLowerCase() === activeEmployee.email?.toLowerCase()) ||
+      (Boolean(fb.reviewerName) && Boolean(activeEmployee?.fullName) && fb.reviewerName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())
     );
   }, [allFeedbacks, activeEmployee]);
 
@@ -109,7 +111,10 @@ export const EmployeeFeedbackView: React.FC = () => {
     setAcknowledgingId(fbId);
     const nowIso = new Date().toISOString();
     setAllFeedbacks(prev => prev.map(f => f.id === fbId ? { ...f, isAcknowledged: true, acknowledgedAt: nowIso, updatedAt: nowIso } : f));
-    await acknowledgePerformanceFeedback(fbId);
+    const ok = await acknowledgePerformanceFeedback(fbId);
+    if (!ok) {
+      setAllFeedbacks(getStoredFeedbacks());
+    }
     setAcknowledgingId(null);
   };
 
@@ -174,7 +179,11 @@ export const EmployeeFeedbackView: React.FC = () => {
         targetEmployeeRole: targetEmp.role,
         targetEmployeeDesignation: targetEmp.designation,
         targetEmployeeDepartment: targetEmp.department || 'Engineering',
+        targetEmployeeEmail: targetEmp.email?.toLowerCase(),
+        targetEmployeeUid: targetEmp.uid || '',
         reviewerId: activeEmployee?.id || activeEmployee?.uid || 'emp-KSS2407012',
+        reviewerUid: activeEmployee?.uid || '',
+        reviewerEmail: activeEmployee?.email?.toLowerCase() || '',
         reviewerName: activeEmployee?.fullName || 'Satya Ranjan Das',
         reviewerRole: activeEmployee?.role || 'EMPLOYEE',
         reviewerDesignation: activeEmployee?.designation || 'Technical Lead',

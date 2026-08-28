@@ -50,9 +50,13 @@ export function filterFeedbacksByRole(
   );
 
   const isMine = (fb: PerformanceFeedback) =>
-    isSamePerson(activeEmployee, { id: fb.targetEmployeeId, employeeId: fb.targetEmployeeCode });
+    isSamePerson(activeEmployee, { id: fb.targetEmployeeId, employeeId: fb.targetEmployeeCode }) ||
+    (Boolean(fb.targetEmployeeEmail) && Boolean(activeEmployee.email) && fb.targetEmployeeEmail?.toLowerCase() === activeEmployee.email?.toLowerCase()) ||
+    (Boolean(activeEmployee.uid) && (fb.targetEmployeeId === activeEmployee.uid || fb.targetEmployeeUid === activeEmployee.uid));
   const isAuthoredByMe = (fb: PerformanceFeedback) =>
-    isSamePerson(activeEmployee, { id: fb.reviewerId });
+    isSamePerson(activeEmployee, { id: fb.reviewerId }) ||
+    (Boolean(fb.reviewerEmail) && Boolean(activeEmployee.email) && fb.reviewerEmail?.toLowerCase() === activeEmployee.email?.toLowerCase()) ||
+    (Boolean(activeEmployee.uid) && (fb.reviewerId === activeEmployee.uid || fb.reviewerUid === activeEmployee.uid));
 
   return feedbacks.filter(fb => {
     // A review about you is always yours to read, whatever tier you are on.
@@ -177,6 +181,9 @@ export async function acknowledgePerformanceFeedback(feedbackId: string): Promis
       acknowledgedAt: ackDate,
       updatedAt: ackDate
     });
+    try {
+      window.dispatchEvent(new CustomEvent('kss_feedback_updated', { detail: { feedbackId, isAcknowledged: true, acknowledgedAt: ackDate } }));
+    } catch {}
     return true;
   } catch (err: any) {
     console.warn('[Feedback] updateDoc note, trying setDoc fallback:', err);
@@ -186,11 +193,14 @@ export async function acknowledgePerformanceFeedback(feedbackId: string): Promis
         acknowledgedAt: ackDate,
         updatedAt: ackDate
       }, { merge: true });
+      try {
+        window.dispatchEvent(new CustomEvent('kss_feedback_updated', { detail: { feedbackId, isAcknowledged: true, acknowledgedAt: ackDate } }));
+      } catch {}
       return true;
     } catch (fallbackErr) {
-      console.warn('[Feedback] Fallback setDoc note:', fallbackErr);
+      console.error('[Feedback] Fallback setDoc note:', fallbackErr);
+      return false;
     }
-    return true;
   }
 }
 
@@ -257,6 +267,8 @@ export function feedbackQueriesFor(
 
   const code = activeEmployee.employeeId;
   const selfId = activeEmployee.id;
+  const selfUid = activeEmployee.uid;
+  const selfEmail = activeEmployee.email?.toLowerCase();
   const qs: Query<DocumentData>[] = [];
 
   if (viewerTier === TIER_PM) {
@@ -264,11 +276,14 @@ export function feedbackQueriesFor(
     qs.push(query(base, where('subjectTier', '==', TIER_EMPLOYEE)));
     // Satisfies `isAuthor()`.
     if (selfId) qs.push(query(base, where('reviewerId', '==', selfId)));
+    if (selfUid && selfUid !== selfId) qs.push(query(base, where('reviewerId', '==', selfUid)));
   }
 
-  // Satisfies `isSubject()` via the bare employee code, which is the key
-  // firestore.rules resolves through getEmployeeId().
+  // Satisfies `isSubject()` via code, id, uid, or email
   if (code) qs.push(query(base, where('targetEmployeeCode', '==', code)));
+  if (selfId && selfId !== code) qs.push(query(base, where('targetEmployeeId', '==', selfId)));
+  if (selfUid && selfUid !== selfId && selfUid !== code) qs.push(query(base, where('targetEmployeeId', '==', selfUid)));
+  if (selfEmail) qs.push(query(base, where('targetEmployeeEmail', '==', selfEmail)));
 
   return qs;
 }
@@ -300,19 +315,10 @@ export function subscribeToFeedbacks(
 
   const emit = () => {
     const byId = new Map<string, PerformanceFeedback>();
-    // First preserve any locally stored feedbacks
-    for (const fb of getStoredFeedbacks()) {
-      if (fb?.id) byId.set(fb.id, fb);
-    }
     for (const bucket of buckets) {
       for (const fb of bucket) {
         if (fb?.id) {
-          const local = byId.get(fb.id);
-          if (local && local.isAcknowledged && !fb.isAcknowledged) {
-            byId.set(fb.id, { ...fb, isAcknowledged: true, acknowledgedAt: local.acknowledgedAt || new Date().toISOString() });
-          } else {
-            byId.set(fb.id, fb);
-          }
+          byId.set(fb.id, fb);
         }
       }
     }

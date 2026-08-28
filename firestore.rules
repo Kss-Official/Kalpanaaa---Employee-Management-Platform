@@ -379,6 +379,7 @@ service cloud.firestore {
       function isSubject() {
         return isRealUser() && (
           resource.data.targetEmployeeId == request.auth.uid ||
+          resource.data.get('targetEmployeeUid', '') == request.auth.uid ||
           (getEmployeeDocId() != null && resource.data.targetEmployeeId == getEmployeeDocId()) ||
           (getEmployeeId() != null && resource.data.targetEmployeeCode == getEmployeeId()) ||
           (request.auth.token.get('email', null) != null && (
@@ -407,6 +408,7 @@ service cloud.firestore {
       function isAuthor() {
         return isRealUser() && (
           resource.data.reviewerId == request.auth.uid ||
+          resource.data.get('reviewerUid', '') == request.auth.uid ||
           (getEmployeeDocId() != null && resource.data.reviewerId == getEmployeeDocId()) ||
           (getEmployeeId() != null && resource.data.reviewerId == getEmployeeId()) ||
           isAuthorizedTechLead() ||
@@ -442,11 +444,10 @@ service cloud.firestore {
         request.resource.data.subjectTier >= 1 &&
         (isAuthorizedTechLead() || isConfigAdmin() || request.resource.data.subjectTier < callerTier());
       allow update: if
-        (isConfigAdmin() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
-        ((isProjectManager() || isAuthorizedTechLead()) && isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
+        ((isConfigAdmin() || isAuthorizedTechLead() || isProjectManager()) && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
+        (isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
         (isSubject() && isAcknowledgementOnly()) ||
-        request.resource.data.isAcknowledged == true ||
-        request.resource.data.get('isAcknowledged', false) == true;
+        (isRealUser() && isAcknowledgementOnly() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier'));
       allow delete: if isConfigAdmin() ||
         (isAuthor() && resource.data.get('isAcknowledged', false) == false);
 
