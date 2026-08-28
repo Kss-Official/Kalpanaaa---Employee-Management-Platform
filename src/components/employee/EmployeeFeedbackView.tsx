@@ -426,7 +426,7 @@ export const EmployeeFeedbackView: React.FC = () => {
               {/* Footer / Acknowledge */}
               <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
                 <div>
-                  {fb.isAcknowledged ? (
+                  {Boolean(fb.isAcknowledged) ? (
                     <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-500/20">
                       <CheckCircle2 className="w-3.5 h-3.5" /> Acknowledged on {new Date(fb.acknowledgedAt || fb.updatedAt).toLocaleDateString('en-GB')}
                     </span>
@@ -558,7 +558,7 @@ export const EmployeeFeedbackView: React.FC = () => {
                 {/* Footer */}
                 <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
                   <div>
-                    {fb.isAcknowledged ? (
+                    {Boolean(fb.isAcknowledged) ? (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
                         <CheckCircle2 className="w-3 h-3" /> Acknowledged by {fb.targetEmployeeName}
                       </span>

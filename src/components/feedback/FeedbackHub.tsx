@@ -153,7 +153,7 @@ export const FeedbackHub: React.FC = () => {
   const avgRating = totalGiven > 0 
     ? (visibleFeedbacks.reduce((acc, f) => acc + (f.rating || 0), 0) / totalGiven).toFixed(1)
     : '5.0';
-  const acknowledgedCount = visibleFeedbacks.filter(f => f.isAcknowledged).length;
+  const acknowledgedCount = visibleFeedbacks.filter(f => Boolean(f.isAcknowledged)).length;
   const ackRate = totalGiven > 0 ? Math.round((acknowledgedCount / totalGiven) * 100) : 100;
 
   // Add Action Item helper
@@ -603,7 +603,7 @@ export const FeedbackHub: React.FC = () => {
                 {/* Footer Bar: Acknowledgment Status + Actions */}
                 <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
                   <div>
-                    {fb.isAcknowledged ? (
+                    {Boolean(fb.isAcknowledged) ? (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
                         <CheckCircle2 className="w-3 h-3" /> Acknowledged by Employee
                       </span>
