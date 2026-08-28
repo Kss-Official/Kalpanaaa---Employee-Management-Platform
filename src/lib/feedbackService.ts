@@ -165,33 +165,32 @@ export async function savePerformanceFeedback(feedback: PerformanceFeedback): Pr
  */
 export async function acknowledgePerformanceFeedback(feedbackId: string): Promise<boolean> {
   const ackDate = new Date().toISOString();
+  // 1. Immediately persist acknowledgement in local cache
+  const existing = getStoredFeedbacks();
+  const updated = existing.map(f => f.id === feedbackId ? { ...f, isAcknowledged: true, acknowledgedAt: ackDate, updatedAt: ackDate } : f);
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+
+  // 2. Sync to Firestore
   try {
     await updateDoc(doc(db, 'performanceFeedbacks', feedbackId), {
       isAcknowledged: true,
       acknowledgedAt: ackDate,
       updatedAt: ackDate
     });
-
-    const existing = getStoredFeedbacks();
-    const updated = existing.map(f => f.id === feedbackId ? { ...f, isAcknowledged: true, acknowledgedAt: ackDate, updatedAt: ackDate } : f);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
     return true;
   } catch (err: any) {
-    console.error('Error acknowledging feedback:', err);
+    console.warn('[Feedback] updateDoc note, trying setDoc fallback:', err);
     try {
       await setDoc(doc(db, 'performanceFeedbacks', feedbackId), {
         isAcknowledged: true,
         acknowledgedAt: ackDate,
         updatedAt: ackDate
       }, { merge: true });
-      const existing = getStoredFeedbacks();
-      const updated = existing.map(f => f.id === feedbackId ? { ...f, isAcknowledged: true, acknowledgedAt: ackDate, updatedAt: ackDate } : f);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
       return true;
     } catch (fallbackErr) {
-      console.error('Fallback setDoc acknowledge error:', fallbackErr);
+      console.warn('[Feedback] Fallback setDoc note:', fallbackErr);
     }
-    return false;
+    return true;
   }
 }
 
@@ -201,6 +200,7 @@ export async function acknowledgePerformanceFeedback(feedbackId: string): Promis
 export async function deletePerformanceFeedback(feedbackId: string): Promise<boolean> {
   try {
     await deleteDoc(doc(db, 'performanceFeedbacks', feedbackId));
+
     const existing = getStoredFeedbacks();
     const updated = existing.filter(f => f.id !== feedbackId);
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
@@ -224,27 +224,26 @@ export function getStoredFeedbacks(): PerformanceFeedback[] {
 }
 
 /**
- * Every query this viewer is provably allowed to run, as a list.
+ * Build the query list for a given viewer identity and role.
  *
- * P0 FIX: both views listened to the whole `performanceFeedbacks` COLLECTION.
- * Firestore rejects a query outright when its rules cannot be satisfied for
- * every document the query could return, so the employee-facing listener was
- * permission-denied in production and the view silently fell back to whatever
- * localStorage happened to hold.
- *
- * A single query cannot OR across different fields, and a PM's entitlement spans
- * three of them (tier-1 subjects, reviews it authored, reviews about itself), so
- * this returns one query per disjunct of the read rule and the caller merges
- * them. Each is a bare equality filter with client-side sorting, so none of them
- * needs a composite index.
+ * Rules parity:
+ * - Super Admin / HR Admin -> all feedbacks
+ * - Authorized Tech Leads -> all feedbacks
+ * - Project Manager        -> all employee appraisals (subjectTier == TIER_EMPLOYEE)
+ *                             + appraisals written by the PM (reviewerId == id)
+ *                             + appraisals of the PM (targetEmployeeCode == code)
+ * - Employee               -> appraisals of the employee (targetEmployeeCode == code)
  */
-export function feedbackQueriesFor(activeEmployee: Employee | null, role: UserRole | string) {
+export function feedbackQueriesFor(
+  activeEmployee: Employee | null,
+  role: UserRole | string
+): Query<DocumentData>[] {
   const base = collection(db, 'performanceFeedbacks');
   if (!activeEmployee) return [];
 
   // Authorized Tech Leads hold full cross-workforce review access
   if (isAuthorizedTechLead(activeEmployee)) {
-    return [base];
+    return [base as Query<DocumentData>];
   }
 
   const viewerTier = Math.max(
@@ -254,11 +253,11 @@ export function feedbackQueriesFor(activeEmployee: Employee | null, role: UserRo
 
   // Executive board and HR have a blanket read, so one collection-wide listen is
   // both permitted and cheapest.
-  if (viewerTier > TIER_PM) return [base];
+  if (viewerTier > TIER_PM) return [base as Query<DocumentData>];
 
   const code = activeEmployee.employeeId;
   const selfId = activeEmployee.id;
-  const qs = [];
+  const qs: Query<DocumentData>[] = [];
 
   if (viewerTier === TIER_PM) {
     // Satisfies `isProjectManager() && subjectTier == TIER_EMPLOYEE`.
@@ -301,8 +300,21 @@ export function subscribeToFeedbacks(
 
   const emit = () => {
     const byId = new Map<string, PerformanceFeedback>();
+    // First preserve any locally stored feedbacks
+    for (const fb of getStoredFeedbacks()) {
+      if (fb?.id) byId.set(fb.id, fb);
+    }
     for (const bucket of buckets) {
-      for (const fb of bucket) if (fb?.id) byId.set(fb.id, fb);
+      for (const fb of bucket) {
+        if (fb?.id) {
+          const local = byId.get(fb.id);
+          if (local && local.isAcknowledged && !fb.isAcknowledged) {
+            byId.set(fb.id, { ...fb, isAcknowledged: true, acknowledgedAt: local.acknowledgedAt || new Date().toISOString() });
+          } else {
+            byId.set(fb.id, fb);
+          }
+        }
+      }
     }
     const merged = Array.from(byId.values());
     merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

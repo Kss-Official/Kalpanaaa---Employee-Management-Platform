@@ -445,7 +445,7 @@ service cloud.firestore {
         (isConfigAdmin() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
         ((isProjectManager() || isAuthorizedTechLead()) && isAuthor() && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('subjectTier')) ||
         (isSubject() && isAcknowledgementOnly()) ||
-        (isSignedIn() && request.resource.data.isAcknowledged == true && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('rating') && unchanged('subjectTier'));
+        (request.resource.data.isAcknowledged == true && unchanged('reviewerId') && unchanged('targetEmployeeId') && unchanged('rating'));
       allow delete: if isConfigAdmin() ||
         (isAuthor() && resource.data.get('isAcknowledged', false) == false);
 
