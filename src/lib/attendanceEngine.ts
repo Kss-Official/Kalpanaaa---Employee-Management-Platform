@@ -6,6 +6,13 @@ import { CompanySettings, Employee, AttendanceRecord, AttendanceStatus } from '.
 export const COMPANY_TIMEZONE = 'Asia/Kolkata';
 
 /**
+ * Official Company Launch / Inception Start Date: 27 July 2026.
+ * Attendance cannot be marked for any date prior to 27th July 2026.
+ */
+export const COMPANY_START_DATE = '2026-07-27';
+export const COMPANY_INCEPTION_DATE = '2026-07-27';
+
+/**
  * B14 FIX: single anti-fraud cap for one break's stored duration.
  * The break-close paths previously clamped at 120 (startBreak auto-close) and 180
  * (endBreak), so the SAME forgotten-open break was stored as a different length
@@ -816,9 +823,11 @@ export function resolveAttendanceRecord(
   if (!Array.isArray(attendance) || attendance.length === 0 || !employeeOrUid) return undefined;
 
   const date = targetDate ? getWorkDate(targetDate) : undefined;
+  if (date && date < COMPANY_START_DATE) return undefined;
+
   const canonicalUid = getCanonicalEmployeeUid(employeeOrUid);
 
-  const matches = attendance.filter(rec => isAttendanceForEmployee(rec, employeeOrUid, date));
+  const matches = attendance.filter(rec => isAttendanceForEmployee(rec, employeeOrUid, date) && (!rec.date || rec.date >= COMPANY_START_DATE));
 
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0];
@@ -1023,6 +1032,15 @@ export function validateCheckInEligibility(
 ): CheckInEligibility {
   if (!employee || !dateStr) {
     return { allowed: false, reason: 'NONE', message: 'Employee or date information is missing.' };
+  }
+
+  // 0. Pre-Flight Root Rule Check: Inception Date (27 July 2026)
+  if (dateStr < COMPANY_START_DATE) {
+    return {
+      allowed: false,
+      reason: 'BEFORE_OPEN',
+      message: 'Check-In Disabled: Company operations officially started on 27 July 2026. Attendance cannot be recorded prior to this date.'
+    };
   }
 
   // 1. Check if employee is on Approved Leave (excluding approved WFH)
@@ -1458,7 +1476,7 @@ export function buildDailyRoster(
   dateStr: string,
   opts: DailyRosterOptions = {}
 ): RosterRecord[] {
-  if (!Array.isArray(employees) || !dateStr) return [];
+  if (!Array.isArray(employees) || !dateStr || dateStr < COMPANY_START_DATE) return [];
 
   const {
     leaveRequests = [],

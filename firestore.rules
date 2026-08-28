@@ -250,14 +250,14 @@ service cloud.firestore {
       allow create: if isRealUser() && (
         isHrAdmin() || isSuperAdmin() || isProjectManager() ||
         ((recordId.split('_')[0] == request.auth.uid || ownsAttendanceData(request.resource.data)) && validAttendanceShape())
-      );
+      ) && (request.resource.data.get('date', '') >= '2026-07-27');
       allow update: if isRealUser() && (
         isHrAdmin() || isSuperAdmin() || isProjectManager() ||
         recordId.split('_')[0] == request.auth.uid ||
         ownsAttendanceData(resource.data) ||
         ownsAttendanceData(request.resource.data)
-      );
-      allow delete: if isSuperAdmin();
+      ) && (request.resource.data.get('date', '') == '' || request.resource.data.get('date', '') >= '2026-07-27');
+      allow delete: if isSuperAdmin() || (resource != null && resource.data.get('date', '') < '2026-07-27');
     }
 
     // ── 4. Leave & WFH Requests ──────────────────────────────────────────────

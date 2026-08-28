@@ -43,6 +43,7 @@ import {
   calculateTotalBreakMinutes,
   MAX_BREAK_MINUTES,
   COMPANY_TIMEZONE,
+  COMPANY_START_DATE,
   isWfhType
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
@@ -1303,6 +1304,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const employeeId = matchedEmp?.id || data.employeeId || canonicalUid;
 
               const dateStr = getWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (recId.includes('_') ? recId.split('_')[1] : new Date()));
+              if (dateStr < COMPANY_START_DATE) {
+                // Root-level auto-cleanup of pre-inception attendance records
+                deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
+                return;
+              }
               let checkInISO = formatTimestampToISO(data.checkInAt);
               if (!checkInISO && data.checkInAt && typeof data.checkInAt === 'object') {
                 checkInISO = formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.updatedAt);

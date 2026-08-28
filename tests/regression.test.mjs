@@ -1121,20 +1121,20 @@ test('#17 payroll basis is scoped to its own month, not to all history', () => {
     checkOutAt: new Date(ist(dateStr, 19, 0)).toISOString()
   });
 
-  // Two July days and two August days. The old view filtered by employee but
-  // never by month, so August payroll counted all four.
-  const attendance = [day('2026-07-20'), day('2026-07-21'), day('2026-08-17'), day('2026-08-18')];
-  const now = ist('2026-08-20', 15, 0);
+  // Two August cycle days (28, 29 Jul) and two September cycle days (27, 28 Aug). The old view filtered by employee but
+  // never by cycle, so one payroll counted all four.
+  const attendance = [day('2026-07-28'), day('2026-07-29'), day('2026-08-27'), day('2026-08-28')];
+  const now = ist('2026-08-30', 15, 0);
 
   const aug = engine.buildPayrollAttendanceBasis(emp, attendance, '2026-08', { nowMs: now });
-  assert.equal(aug.presentDays, 2, 'July must not leak into August');
+  assert.equal(aug.presentDays, 2, 'September cycle must not leak into August');
   assert.equal(aug.payableDays, 2);
   assert.equal(aug.monthKey, '2026-08');
 
-  const jul = engine.buildPayrollAttendanceBasis(emp, attendance, '2026-07', { nowMs: now });
-  assert.equal(jul.presentDays, 2);
-  assert.equal(jul.isPartialMonth, false, 'a month that has ended is final');
-  assert.equal(aug.isPartialMonth, true, 'the current month is still provisional');
+  const sep = engine.buildPayrollAttendanceBasis(emp, attendance, '2026-09', { nowMs: now });
+  assert.equal(sep.presentDays, 2);
+  assert.equal(aug.isPartialMonth, false, 'a cycle that has ended is final');
+  assert.equal(sep.isPartialMonth, true, 'the current cycle is still provisional');
 });
 
 test('#17 an employee with no records is never credited with days', () => {

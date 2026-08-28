@@ -1,6 +1,6 @@
 import { collection, getDocs, getDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, formatTimestampToISO, isFabricatedCheckoutOnly, isFabricatedShiftPair } from './attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, formatTimestampToISO, isFabricatedCheckoutOnly, isFabricatedShiftPair, COMPANY_START_DATE } from './attendanceEngine';
 import { AttendanceRecord, Employee } from '../types';
 
 export interface MigrationResult {
@@ -153,6 +153,11 @@ export async function runAttendanceMigration(): Promise<MigrationResult> {
       const canonicalUid = resolveTrueEmpUid(data, legacyId, employeesByCode, employeesById, employeesByName);
 
       const dateStr = getEmployeeWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (legacyId.includes('_') ? legacyId.split('_')[1] : new Date()));
+      if (dateStr < COMPANY_START_DATE) {
+        // Attendance before company start date (27 July 2026) is invalid and purged at root level
+        await deleteDoc(doc(db, 'attendance', legacyId)).catch(() => {});
+        continue;
+      }
       const targetCanonicalId = getAttendanceDocId(canonicalUid, dateStr);
 
       // ── P0 repair pass: undo previously fabricated shifts (any doc, incl. canonical)
