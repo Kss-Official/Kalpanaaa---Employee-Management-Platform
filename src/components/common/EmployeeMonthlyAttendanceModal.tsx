@@ -33,13 +33,15 @@ import { useHaptic } from '../../hooks/useHaptic';
 interface EmployeeMonthlyAttendanceModalProps {
   employee: Employee;
   initialSelectedRecord?: AttendanceRecord | null;
-  onClose: () => void;
+  onClose?: () => void;
+  isInline?: boolean;
 }
 
 export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceModalProps> = ({ 
   employee, 
   initialSelectedRecord, 
-  onClose 
+  onClose,
+  isInline = false
 }) => {
   const { attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection, updateEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
@@ -478,61 +480,63 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     }
   };
 
-  return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96vh] sm:max-h-[90vh]"
-        >
-          {/* Header */}
-          <div className="bg-slate-950 p-4 sm:p-6 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-            <div className="flex items-center gap-3.5">
-              <img
-                src={employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(employee.fullName)}&background=0f172a&color=fff`}
-                alt={employee.fullName}
-                className="w-11 h-11 rounded-2xl object-cover border-2 border-blue-500/50 shadow-md shrink-0"
-              />
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base sm:text-lg font-black text-white truncate">{employee.fullName}</h2>
-                  <span className="text-[10px] font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
-                    {employee.employeeId}
-                  </span>
-                  {canEditAttendance && (
-                    <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-md">
-                      PM / Admin Editable
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400 font-medium truncate">
-                  {employee.designation} • <span className="text-slate-300">{employee.department}</span>
-                </p>
-              </div>
+  const innerContent = (
+    <motion.div 
+      initial={{ opacity: 0, scale: isInline ? 1 : 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className={`bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl w-full overflow-hidden flex flex-col ${
+        isInline ? 'min-h-[600px]' : 'max-w-5xl max-h-[96vh] sm:max-h-[90vh]'
+      }`}
+    >
+      {/* Header */}
+      <div className="bg-slate-950 p-4 sm:p-6 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3.5">
+          <img
+            src={employee.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(employee.fullName)}&background=0f172a&color=fff`}
+            alt={employee.fullName}
+            className="w-11 h-11 rounded-2xl object-cover border-2 border-blue-500/50 shadow-md shrink-0"
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base sm:text-lg font-black text-white truncate">{employee.fullName}</h2>
+              <span className="text-[10px] font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
+                {employee.employeeId}
+              </span>
+              {canEditAttendance && (
+                <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                  PM / Admin Editable
+                </span>
+              )}
             </div>
-
-            <div className="flex items-center justify-between sm:justify-end gap-2.5">
-              <button
-                onClick={() => generateAttendanceReportPdf(empRecords, settings, `Monthly Attendance Statement — ${employee.fullName} (${selectedYearMonth})`)}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40"
-              >
-                <FileDown className="w-4 h-4" />
-                <span>Export PDF</span>
-              </button>
-
-              <button
-                onClick={onClose}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+            <p className="text-xs text-slate-400 font-medium truncate">
+              {employee.designation} • <span className="text-slate-300">{employee.department}</span>
+            </p>
           </div>
+        </div>
 
-          {/* Body */}
-          <div className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1">
+        <div className="flex items-center justify-between sm:justify-end gap-2.5">
+          <button
+            onClick={() => generateAttendanceReportPdf(empRecords, settings, `Monthly Attendance Statement — ${employee.fullName} (${selectedYearMonth})`)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40 active:scale-95"
+          >
+            <FileDown className="w-4 h-4" />
+            <span>Export PDF</span>
+          </button>
+
+          {!isInline && onClose && (
+            <button
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className={`p-4 sm:p-6 space-y-6 flex-1 ${isInline ? '' : 'overflow-y-auto'}`}>
 
             {/* Month Switcher & Controls */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-950/80 p-4 rounded-3xl border border-slate-800">
@@ -921,7 +925,21 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
           </div>
         </motion.div>
-      </div>
+  );
+
+  return (
+    <>
+      {isInline ? (
+        <div className="w-full space-y-6 animate-in fade-in duration-200">
+          {innerContent}
+        </div>
+      ) : (
+        <AnimatePresence>
+          <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
+            {innerContent}
+          </div>
+        </AnimatePresence>
+      )}
 
       {/* Attendance Day Correction Modal (For PM & Admin) */}
       {isEditingAttendance && selectedDateStr && (
@@ -948,68 +966,72 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
               <div>
                 <label className="block text-slate-300 font-bold mb-1.5">Attendance Status:</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['Present', 'Late', 'Work From Home', 'On Leave', 'Half Day', 'Absent'] as AttendanceStatus[]).map(st => (
+                  {(['Present', 'Late', 'Work From Home', 'Half Day', 'On Leave', 'Absent'] as AttendanceStatus[]).map((st) => (
                     <button
                       key={st}
                       type="button"
                       onClick={() => setEditStatus(st)}
-                      className={`p-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      className={`py-2 px-2 rounded-xl font-bold border transition-all cursor-pointer text-center text-xs truncate ${
                         editStatus === st
-                          ? 'bg-blue-600 text-white border-blue-500 shadow-md'
-                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-white'
+                          ? 'bg-blue-600 border-blue-500 text-white shadow-md'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
                       }`}
                     >
-                      {st === 'Work From Home' ? 'WFH' : st}
+                      {st}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Timings */}
-              {editStatus !== 'Absent' && editStatus !== 'On Leave' && (
+              {/* Timing Controls (only for Present / Late / Half Day / WFH) */}
+              {editStatus !== 'Absent' && editStatus !== 'On Leave' && editStatus !== 'Holiday' && (
                 <div className="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Check-In Time:</label>
+                    <label className="block text-[11px] text-slate-400 font-bold mb-1 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                      Check In Time:
+                    </label>
                     <input
                       type="time"
                       value={editCheckInTime}
-                      onChange={e => setEditCheckInTime(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-blue-500"
+                      onChange={(e) => setEditCheckInTime(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:outline-hidden focus:border-blue-500"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Check-Out Time:</label>
+                    <label className="block text-[11px] text-slate-400 font-bold mb-1 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-blue-400" />
+                      Check Out Time:
+                    </label>
                     <input
                       type="time"
                       value={editCheckOutTime}
-                      onChange={e => setEditCheckOutTime(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-blue-500"
+                      onChange={(e) => setEditCheckOutTime(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:outline-hidden focus:border-blue-500"
                     />
                   </div>
                 </div>
               )}
 
-              {/* Notes / Reason */}
+              {/* Notes */}
               <div>
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Override Reason / PM Remark:</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Approved by Project Manager (Client Deployment)"
+                <label className="block text-slate-300 font-bold mb-1">Correction / Audit Note:</label>
+                <textarea
                   value={editNotes}
-                  onChange={e => setEditNotes(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white font-medium focus:outline-hidden focus:border-blue-500"
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="e.g., Punch miss corrected after PM verification..."
+                  rows={2}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white placeholder-slate-600 focus:outline-hidden focus:border-blue-500 text-xs resize-none"
                 />
               </div>
 
               {saveFeedback && (
-                <div className={`p-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 ${
-                  saveFeedback.startsWith('✓') 
-                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-                    : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                <div className={`p-2.5 rounded-xl text-xs font-bold ${
+                  saveFeedback.startsWith('Error') || saveFeedback.startsWith('Failed')
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                 }`}>
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{saveFeedback}</span>
+                  {saveFeedback}
                 </div>
               )}
 
@@ -1035,6 +1057,6 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
           </div>
         </div>
       )}
-    </AnimatePresence>
+    </>
   );
 };
