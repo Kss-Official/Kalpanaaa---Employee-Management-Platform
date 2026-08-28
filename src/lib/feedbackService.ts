@@ -164,8 +164,8 @@ export async function savePerformanceFeedback(feedback: PerformanceFeedback): Pr
  * Acknowledge feedback by the target employee
  */
 export async function acknowledgePerformanceFeedback(feedbackId: string): Promise<boolean> {
+  const ackDate = new Date().toISOString();
   try {
-    const ackDate = new Date().toISOString();
     await updateDoc(doc(db, 'performanceFeedbacks', feedbackId), {
       isAcknowledged: true,
       acknowledgedAt: ackDate,
@@ -173,11 +173,24 @@ export async function acknowledgePerformanceFeedback(feedbackId: string): Promis
     });
 
     const existing = getStoredFeedbacks();
-    const updated = existing.map(f => f.id === feedbackId ? { ...f, isAcknowledged: true, acknowledgedAt: ackDate } : f);
+    const updated = existing.map(f => f.id === feedbackId ? { ...f, isAcknowledged: true, acknowledgedAt: ackDate, updatedAt: ackDate } : f);
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
     return true;
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error acknowledging feedback:', err);
+    try {
+      await setDoc(doc(db, 'performanceFeedbacks', feedbackId), {
+        isAcknowledged: true,
+        acknowledgedAt: ackDate,
+        updatedAt: ackDate
+      }, { merge: true });
+      const existing = getStoredFeedbacks();
+      const updated = existing.map(f => f.id === feedbackId ? { ...f, isAcknowledged: true, acknowledgedAt: ackDate, updatedAt: ackDate } : f);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      return true;
+    } catch (fallbackErr) {
+      console.error('Fallback setDoc acknowledge error:', fallbackErr);
+    }
     return false;
   }
 }
