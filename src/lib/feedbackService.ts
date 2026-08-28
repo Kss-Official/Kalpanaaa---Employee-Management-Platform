@@ -1,6 +1,6 @@
 import { PerformanceFeedback, UserRole, Employee } from '../types';
 import { db, cleanFirestorePayload, subscribeWithRecovery } from './firebase';
-import { collection, setDoc, doc, getDoc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, setDoc, doc, getDoc, deleteDoc, updateDoc, query, where, Query, DocumentData } from 'firebase/firestore';
 import { tierOf, canViewTier, isSamePerson, isAuthorizedTechLead, TIER_EMPLOYEE, TIER_PM } from './hierarchy';
 
 /**
