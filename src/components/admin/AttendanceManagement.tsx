@@ -23,7 +23,7 @@ import {
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeEmployeeLeaveBalance, isLateCheckIn } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeEmployeeLeaveBalance, isLateCheckIn, isWfhType } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface AttendanceManagementProps {
@@ -397,15 +397,22 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                   const leaveReq = leaveRequests.find(l => 
                     ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
                      (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
-                     (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+                     (!!l.employeeName && !!emp.fullName && (
+                       l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+                       l.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+                     ))) &&
                     (l.status === 'Approved' || ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') && (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') && (l.ceoStatus === 'Approved' || l.ceoStatus === 'N/A' || l.ceoStatus === 'Bypassed') && (l.ctoStatus === 'Approved' || l.ctoStatus === 'N/A' || l.ctoStatus === 'Bypassed'))) &&
                     todayStr >= (l.startDate || (l as any).fromDate) && 
                     todayStr <= (l.endDate || (l as any).toDate || l.startDate)
                   );
 
-                  const hasApprovedLeave = !!leaveReq && (leaveReq.type || '').toUpperCase() !== 'WFH';
+                  const hasApprovedLeave = !!leaveReq && !isWfhType(leaveReq.type) && !isWfhType(leaveReq.leaveCategory);
                   const isCompanyWfh = ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
-                  const isApprovedEmpWfh = !hasApprovedLeave && ((emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && (leaveReq.type || '').toUpperCase() === 'WFH'));
+                  const isApprovedEmpWfh = !hasApprovedLeave && (
+                    (emp.approvedWfhDates || []).includes(todayStr) || 
+                    (!!leaveReq && (isWfhType(leaveReq.type) || isWfhType(leaveReq.leaveCategory))) ||
+                    (todayRec && (todayRec.isWfh === true || todayRec.status === 'Work From Home'))
+                  );
 
                   let todayStatusLabel: 'Present' | 'Late' | 'WFH' | 'On Leave' | 'Absent' = 'Absent';
                   let todayStatusBadge = 'bg-rose-500/10 text-rose-400 border-rose-500/20';

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useHaptic } from '../../hooks/useHaptic';
 import { LeaveRequest } from '../../types';
 import { todayInIST } from '../../lib/absoluteTime';
-import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, isWfhType } from '../../lib/attendanceEngine';
 
 /**
  * Whole-word title test against an UPPERCASED designation.
@@ -476,7 +476,7 @@ export const LeaveApprovalsView: React.FC = () => {
 
           {(activeTab === 'pending' ? pendingRequests : pastRequests).map((req, i) => {
             const emp = employees.find(e => e.id === req.employeeId || e.employeeId === req.employeeId);
-            const isWfh = req.type === 'WFH';
+            const isWfh = isWfhType(req.type) || isWfhType(req.leaveCategory);
             const statusColor = req.status === 'Approved' ? 'var(--accent-emerald)' : req.status === 'Rejected' ? 'var(--accent-rose)' : 'var(--accent-amber)';
 
             const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' ||

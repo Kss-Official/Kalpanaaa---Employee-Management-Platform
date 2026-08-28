@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
-import { isNonWorkingDay, getHolidayInfo, isLateCheckIn } from '../../lib/attendanceEngine';
+import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType } from '../../lib/attendanceEngine';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { useHaptic } from '../../hooks/useHaptic';
 
@@ -282,9 +282,9 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     const nonWorking = isNonWorkingDay(dateFormatted, holidayDates);
     const isFuture = dateFormatted > todayStr;
 
-    const wfhReq = empLeaveRequests.find(l => (l.type || '').toUpperCase() === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-    const hasLeave = empLeaveRequests.some(l => (l.type || '').toUpperCase() !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-    const isApprovedWfh = !hasLeave && (!!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted));
+    const wfhReq = empLeaveRequests.find(l => (isWfhType(l.type) || isWfhType(l.leaveCategory)) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+    const hasLeave = empLeaveRequests.some(l => !isWfhType(l.type) && !isWfhType(l.leaveCategory) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+    const isApprovedWfh = !hasLeave && (!!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted) || (rec && (rec.isWfh === true || rec.status === 'Work From Home')));
 
     if (rec) {
       if (hasLeave || rec.status === 'On Leave') {
@@ -735,9 +735,9 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   const dayNum = i + 1;
                   const dateFormatted = `${selectedYearMonth}-${String(dayNum).padStart(2, '0')}`;
                   const rec = recordsByDate.get(dateFormatted);
-                  const wfhReq = empLeaveRequests.find(l => (l.type || '').toUpperCase() === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-                  const isApprovedLeave = empLeaveRequests.some(l => (l.type || '').toUpperCase() !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-                  const isApprovedWfh = !isApprovedLeave && (!!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted));
+                  const wfhReq = empLeaveRequests.find(l => (isWfhType(l.type) || isWfhType(l.leaveCategory)) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+                  const isApprovedLeave = empLeaveRequests.some(l => !isWfhType(l.type) && !isWfhType(l.leaveCategory) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+                  const isApprovedWfh = !isApprovedLeave && (!!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted) || (rec && (rec.isWfh === true || rec.status === 'Work From Home')));
                   const isNonWorking = isNonWorkingDay(dateFormatted, holidayDates);
                   const holidayInfo = getHolidayInfo(dateFormatted);
                   const isFuture = dateFormatted > todayStr;

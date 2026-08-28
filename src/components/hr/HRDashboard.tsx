@@ -29,7 +29,9 @@ import {
   resolveAttendanceRecord, 
   isExecutiveOrLeadership,
   buildPayrollAttendanceBasis,
-  getCurrentPayrollCycleMonth
+  getCurrentPayrollCycleMonth,
+  isWfhType,
+  isApprovedWfhForEmployee
 } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
@@ -58,77 +60,78 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     targetEmployee?.employeeId === 'CEO001' ||
     targetEmployee?.employeeId === 'CTO001';
 
-  // Filter operational employees (exclude CEO, CTO, COO Rahul Pathak, Founders)
-  const operationalEmployees = employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
+  // Filter out Leadership/Executives (CEO, CTO, Founder, COO Rahul Pathak) from HR attendance metrics
+  const operationalEmployees = useMemo(() => {
+    return employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
+  }, [employees]);
 
-  // Canonical resolution of each employee's today record
-  const employeeTodayRecords = operationalEmployees.map(emp => ({
-    emp,
-    rec: resolveAttendanceRecord(attendance, emp, todayStr)
-  }));
+  // Map operational employees to their resolved today's attendance record (if any)
+  const employeeTodayRecords = useMemo(() => {
+    return operationalEmployees.map(emp => {
+      const rec = attendance.find(a => 
+        a.date === todayStr && (
+          a.employeeId === emp.id || 
+          a.employeeCode === emp.employeeId || 
+          (a.employeeName && emp.fullName && (
+            a.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+            a.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+          ))
+        )
+      );
+      const isWfh = isApprovedWfhForEmployee(emp, todayStr, {
+        leaveRequests,
+        companyWideWfhDates,
+        settings,
+        record: rec
+      });
+      return { emp, rec, isWfh };
+    });
+  }, [operationalEmployees, attendance, todayStr, leaveRequests, companyWideWfhDates, settings]);
 
-  const todayAttendance = employeeTodayRecords
-    .map(({ rec }) => rec)
+  const checkedInToday = employeeTodayRecords
+    .map(x => x.rec)
     .filter((rec): rec is NonNullable<typeof rec> => !!rec && !!rec.checkInAt);
 
   const totalEmployees = operationalEmployees.length;
-  const wfhCount = employeeTodayRecords.filter(({ emp }) => {
-    const hasApprovedLeave = leaveRequests.some(r => 
-      (r.type || '').toUpperCase() !== 'WFH' && 
-      (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
-      ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
-       (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-       (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
-      todayStr >= (r.startDate || (r as any).fromDate) && 
-      todayStr <= (r.endDate || (r as any).toDate || r.startDate)
-    );
-    if (hasApprovedLeave) return false;
+  const wfhCount = employeeTodayRecords.filter(({ emp, rec, isWfh }) => {
+    if (rec && (rec.isWfh === true || rec.status === 'Work From Home')) return true;
+    return isWfh;
+  }).length;
 
-    return (emp.approvedWfhDates || []).includes(todayStr) ||
+  const onLeaveCount = employeeTodayRecords.filter(({ emp, rec, isWfh }) => {
+    if (isWfh) return false;
+    return rec?.status === 'On Leave' || rec?.status === 'Leave' ||
       leaveRequests.some(r => 
-        (r.type || '').toUpperCase() === 'WFH' && 
+        !isWfhType(r.type) && !isWfhType(r.leaveCategory) && 
         (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) && 
         ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
          (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
+         (!!r.employeeName && !!emp.fullName && (
+           r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+           r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+         ))) && 
         todayStr >= (r.startDate || (r as any).fromDate) && 
         todayStr <= (r.endDate || (r as any).toDate || r.startDate)
       );
   }).length;
 
-  const onLeaveCount = employeeTodayRecords.filter(({ emp, rec }) => 
-    rec?.status === 'On Leave' || rec?.status === 'Leave' ||
-    leaveRequests.some(r => 
-      (r.type || '').toUpperCase() !== 'WFH' && 
-      (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) && 
-      ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
-       (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-       (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
-      todayStr >= (r.startDate || (r as any).fromDate) && 
-      todayStr <= (r.endDate || (r as any).toDate || r.startDate)
-    )
-  ).length;
-
-  const presentCount = employeeTodayRecords.filter(({ emp, rec }) => {
+  const presentCount = employeeTodayRecords.filter(({ emp, rec, isWfh }) => {
+    if (isWfh) return false;
     const hasApprovedLeave = leaveRequests.some(r => 
-      (r.type || '').toUpperCase() !== 'WFH' && 
+      !isWfhType(r.type) && !isWfhType(r.leaveCategory) && 
       r.status === 'Approved' && 
       ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
        (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-       (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) && 
+       (!!r.employeeName && !!emp.fullName && (
+         r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+         r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+       ))) && 
       todayStr >= (r.startDate || (r as any).fromDate) && 
       todayStr <= (r.endDate || (r as any).toDate || r.startDate)
     );
     if (hasApprovedLeave) return false;
 
-    const isWfhApproved = (emp.approvedWfhDates || []).includes(todayStr) ||
-      leaveRequests.some(r => (r.type || '').toUpperCase() === 'WFH' && r.status === 'Approved' &&
-        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
-         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
-        todayStr >= (r.startDate || (r as any).fromDate) && todayStr <= (r.endDate || (r as any).toDate || r.startDate)
-      );
-    return !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave' && !isWfhApproved;
+    return !!rec?.checkInAt && rec.status !== 'Absent' && rec.status !== 'On Leave';
   }).length;
   const onDutyCount = employeeTodayRecords.filter(({ rec }) => !!rec?.checkInAt && !isShiftComplete(rec)).length;
   const lateCount = employeeTodayRecords.filter(({ rec }) => rec?.status === 'Late').length;

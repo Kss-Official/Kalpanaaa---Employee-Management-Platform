@@ -2,6 +2,7 @@
 // Transpiles the pure-logic libs with the repo's esbuild, then executes the
 // node:test suite against them. Zero new dependencies.
 //   node tests/run.mjs
+import esbuild from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,15 +12,13 @@ const OUT = mkdtempSync(join(tmpdir(), 'kss-regression-'));
 const entries = ['errors', 'safeStorage', 'attendanceEngine', 'hierarchy'];
 
 for (const name of entries) {
-  const res = spawnSync(
-    'npx',
-    ['esbuild', `src/lib/${name}.ts`, '--bundle', '--format=cjs', '--platform=node', `--outfile=${join(OUT, `${name}.cjs`)}`],
-    { stdio: 'inherit', shell: true }
-  );
-  if (res.status !== 0) {
-    console.error(`[run] esbuild failed for ${name}`);
-    process.exit(1);
-  }
+  esbuild.buildSync({
+    entryPoints: [`src/lib/${name}.ts`],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    outfile: join(OUT, `${name}.cjs`)
+  });
 }
 
 const testFiles = [

@@ -49,7 +49,7 @@ import { db } from '../../lib/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete, safeGetTimestampMillis, isExecutiveOrLeadership, isLateCheckIn } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete, safeGetTimestampMillis, isExecutiveOrLeadership, isLateCheckIn, isWfhType, isApprovedWfhForEmployee } from '../../lib/attendanceEngine';
 import { Employee, AttendanceRecord } from '../../types';
 
 interface DashboardViewProps {
@@ -179,28 +179,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       const rec = todayRecords.find(r => 
         r.employeeId === emp.id || 
         r.employeeCode === emp.employeeId || 
-        (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())
+        (r.employeeName && emp.fullName && (
+          r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+          r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+        ))
       );
 
       // Check if employee has approved leave or WFH today
       const leaveReq = leaveRequests.find(l => 
         ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
          (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
-         (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+         (!!l.employeeName && !!emp.fullName && (
+           l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+           l.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+         ))) &&
         (l.status === 'Approved' || ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') && (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') && (l.ceoStatus === 'Approved' || l.ceoStatus === 'N/A' || l.ceoStatus === 'Bypassed') && (l.ctoStatus === 'Approved' || l.ctoStatus === 'N/A' || l.ctoStatus === 'Bypassed'))) &&
         todayStr >= (l.startDate || (l as any).fromDate) && 
         todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
 
-      const hasApprovedLeave = !!leaveReq && (leaveReq.type || '').toUpperCase() !== 'WFH';
-      const isCompanyWfh = (companyWideWfhDates || []).includes(todayStr) || ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
-      // Individual WFH approval: must have an explicit approved WFH leave request or entry in approvedWfhDates
-      const isApprovedEmpWfh = !hasApprovedLeave && ((emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && (leaveReq.type || '').toUpperCase() === 'WFH'));
+      const hasApprovedLeave = !!leaveReq && !isWfhType(leaveReq.type) && !isWfhType(leaveReq.leaveCategory);
       
-      // If employee has physically checked in, check-in always wins over WFH unless explicitly approved WFH
-      const hasRealCheckIn = !!(rec?.checkInAt);
-      const isExplicitNonWfh = rec?.isWfh === false;
-      const isWfh = !hasApprovedLeave && !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
+      const isWfh = isApprovedWfhForEmployee(emp, todayStr, {
+        leaveRequests,
+        companyWideWfhDates,
+        settings,
+        record: rec
+      });
 
       // Active break detection
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
@@ -209,18 +214,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       const isLate = rec?.status === 'Late' || (!!rec?.checkInAt && isLateCheckIn(rec.checkInAt));
 
       // Determine accurate real-time status:
-      // Priority: Active Break -> On Leave -> Present / Checked In -> WFH -> Absent
+      // Priority: Active Break -> On Leave -> Work From Home -> Present / Checked In -> Absent
       let computedStatus: 'Present' | 'Work From Home' | 'On Leave' | 'LOP' | 'On Break' | 'Absent' = 'Absent';
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
       } else if (hasApprovedLeave || rec?.status === 'On Leave' || emp.status === 'On Leave') {
         computedStatus = 'On Leave';
-      } else if (rec?.checkInAt && (!isApprovedEmpWfh || isExplicitNonWfh)) {
-        // Any checked in employee without active approved WFH is Present
-        computedStatus = 'Present';
-      } else if (isWfh && !isExplicitNonWfh) {
+      } else if (isWfh) {
         computedStatus = 'Work From Home';
+      } else if (rec?.checkInAt) {
+        computedStatus = 'Present';
       } else if (rec) {
         if (rec.status === 'Present' || rec.status === 'Late' || rec.checkInAt) {
           computedStatus = 'Present';
@@ -253,10 +257,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   }, [activeEmployees, todayRecords, leaveRequests, companyWideWfhDates, settings, todayStr]);
 
   // Counts based on the daily roster
-  const presentTodayCount = dailyRoster.filter(r => r.status === 'Present' || r.status === 'On Break').length;
+  const presentTodayCount = dailyRoster.filter(r => (r.status === 'Present' || r.status === 'On Break') && !r.isWfh).length;
   const onBreakCount = dailyRoster.filter(r => r.status === 'On Break').length;
-  const lateTodayCount = dailyRoster.filter(r => r.isLate).length;
-  const wfhTodayCount = dailyRoster.filter(r => r.status === 'Work From Home').length;
+  const lateTodayCount = dailyRoster.filter(r => r.isLate && !r.isWfh).length;
+  const wfhTodayCount = dailyRoster.filter(r => r.status === 'Work From Home' || r.isWfh).length;
   const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
   const lopCount = dailyRoster.filter(r => r.status === 'LOP' || r.status === 'Absent').length;
   const absentTodayCount = lopCount;
@@ -272,10 +276,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       if (!matchesSearch) return false;
 
       if (rosterFilter === 'ALL') return true;
-      if (rosterFilter === 'Present') return item.status === 'Present' || item.status === 'On Break';
+      if (rosterFilter === 'Present') return (item.status === 'Present' || item.status === 'On Break') && !item.isWfh;
       if (rosterFilter === 'On Break') return item.status === 'On Break';
-      if (rosterFilter === 'Late') return item.isLate;
-      if (rosterFilter === 'Work From Home') return item.status === 'Work From Home';
+      if (rosterFilter === 'Late') return item.isLate && !item.isWfh;
+      if (rosterFilter === 'Work From Home' || rosterFilter === 'WFH') return item.status === 'Work From Home' || item.isWfh;
       if (rosterFilter === 'On Leave' || rosterFilter === 'Leave') return item.status === 'On Leave';
       if (rosterFilter === 'LOP' || rosterFilter === 'Absent') return item.status === 'LOP' || item.status === 'Absent';
       return true;

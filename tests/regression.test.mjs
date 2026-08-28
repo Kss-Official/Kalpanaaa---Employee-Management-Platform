@@ -1437,3 +1437,45 @@ test('feedback service ships no fabricated appraisals and never fakes success', 
   // Privacy filter matches on identity only, never on a shared display name.
   assert.equal(/targetEmployeeName.*toLowerCase\(\) === activeEmployee\.fullName/.test(src), false);
 });
+
+test('wfh recognition: matches all variations of WFH types and resolves employee WFH accurately', () => {
+  const isWfh = engine.isWfhType;
+  assert.equal(isWfh('WFH'), true);
+  assert.equal(isWfh('wfh'), true);
+  assert.equal(isWfh('Work From Home'), true);
+  assert.equal(isWfh('work from home'), true);
+  assert.equal(isWfh('Work From Home (WFH)'), true);
+  assert.equal(isWfh('Remote Work'), true);
+  assert.equal(isWfh('Earn Leave'), false);
+  assert.equal(isWfh('Sick Leave'), false);
+  assert.equal(isWfh('Casual Leave'), false);
+
+  const asbin = {
+    id: 'emp-KSS2407004',
+    employeeId: 'KSS2407004',
+    uid: 'uid-KSS2407004',
+    fullName: 'Asbin T S',
+    approvedWfhDates: ['2026-08-28']
+  };
+
+  const isApproved = engine.isApprovedWfhForEmployee(asbin, '2026-08-28');
+  assert.equal(isApproved, true, 'Asbin must be recognized as approved WFH on approved date');
+
+  const notApproved = engine.isApprovedWfhForEmployee(asbin, '2026-09-15');
+  assert.equal(notApproved, false, 'Asbin must not be approved on non-WFH date');
+
+  // WFH via approved leave request with 'Work From Home' type
+  const asbinWfhReq = [{
+    id: 'req-asbin-1',
+    employeeId: 'emp-KSS2407004',
+    employeeName: 'Asbin T S',
+    type: 'Work From Home',
+    status: 'Approved',
+    startDate: '2026-09-01',
+    endDate: '2026-09-03'
+  }];
+
+  const isReqApproved = engine.isApprovedWfhForEmployee(asbin, '2026-09-02', { leaveRequests: asbinWfhReq });
+  assert.equal(isReqApproved, true, 'Asbin must be recognized as approved WFH via approved WFH leave request');
+});
+

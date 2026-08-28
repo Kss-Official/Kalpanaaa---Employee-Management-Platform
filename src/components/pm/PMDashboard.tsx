@@ -53,7 +53,9 @@ import {
   isExecutiveOrLeadership,
   getWorkDate,
   formatShiftTiming,
-  isLateCheckIn
+  isLateCheckIn,
+  isWfhType,
+  isApprovedWfhForEmployee
 } from '../../lib/attendanceEngine';
 import type { DayWorkSummary, WorkWeekDay } from '../../lib/attendanceEngine';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
@@ -111,7 +113,7 @@ const DEFAULT_PROJECTS: Project[] = [
 ];
 
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
-  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings, applyAttendanceCorrection } = useAuth();
+  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings, companyWideWfhDates, applyAttendanceCorrection } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const todayStr = getWorkDate(new Date());
@@ -137,24 +139,32 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
       const rec = todayRecords.find(r => 
         r.employeeId === emp.id || 
         r.employeeCode === emp.employeeId || 
-        (r.employeeName && emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())
+        (r.employeeName && emp.fullName && (
+          r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+          r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+        ))
       );
 
       const leaveReq = leaveRequests.find(l => 
         ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
          (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
-         (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+         (!!l.employeeName && !!emp.fullName && (
+           l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+           l.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+         ))) &&
         (l.status === 'Approved' || ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') && (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') && (l.ceoStatus === 'Approved' || l.ceoStatus === 'N/A' || l.ceoStatus === 'Bypassed') && (l.ctoStatus === 'Approved' || l.ctoStatus === 'N/A' || l.ctoStatus === 'Bypassed'))) &&
         todayStr >= (l.startDate || (l as any).fromDate) && 
         todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
 
-      const hasApprovedLeave = !!leaveReq && (leaveReq.type || '').toUpperCase() !== 'WFH';
-      const isCompanyWfh = ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
-      const isApprovedEmpWfh = !hasApprovedLeave && ((emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && (leaveReq.type || '').toUpperCase() === 'WFH'));
-      const hasRealCheckIn = !!(rec?.checkInAt);
-      const isExplicitNonWfh = rec?.isWfh === false;
-      const isWfh = !hasApprovedLeave && !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
+      const hasApprovedLeave = !!leaveReq && !isWfhType(leaveReq.type) && !isWfhType(leaveReq.leaveCategory);
+      
+      const isWfh = isApprovedWfhForEmployee(emp, todayStr, {
+        leaveRequests,
+        companyWideWfhDates,
+        settings,
+        record: rec
+      });
 
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
       const isComplete = isShiftComplete(rec);
@@ -167,10 +177,10 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         computedStatus = 'On Break';
       } else if (hasApprovedLeave || rec?.status === 'On Leave' || emp.status === 'On Leave') {
         computedStatus = 'On Leave';
-      } else if (rec?.checkInAt && (!isApprovedEmpWfh || isExplicitNonWfh)) {
-        computedStatus = 'Present';
-      } else if (isWfh && !isExplicitNonWfh) {
+      } else if (isWfh) {
         computedStatus = 'Work From Home';
+      } else if (rec?.checkInAt) {
+        computedStatus = 'Present';
       } else if (rec) {
         if (rec.status === 'Present' || rec.status === 'Late' || rec.checkInAt) {
           computedStatus = 'Present';
@@ -199,14 +209,14 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         leaveReq
       };
     });
-  }, [operationalEmployees, todayRecords, leaveRequests, todayStr]);
+  }, [operationalEmployees, todayRecords, leaveRequests, todayStr, companyWideWfhDates, settings]);
 
   // Turnout KPI Counts
   const presentCount = dailyRoster.filter(r => (r.status === 'Present' || r.status === 'On Break') && !r.isWfh).length;
   const onTimePresentCount = dailyRoster.filter(r => r.status === 'Present' && !r.isLate && !r.isWfh).length;
   const onBreakCount = dailyRoster.filter(r => r.status === 'On Break').length;
   const lateCount = dailyRoster.filter(r => r.isLate && !r.isWfh).length;
-  const wfhCount = dailyRoster.filter(r => r.status === 'Work From Home').length;
+  const wfhCount = dailyRoster.filter(r => r.status === 'Work From Home' || r.isWfh).length;
   const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
   const lopCount = dailyRoster.filter(r => r.status === 'LOP' || r.status === 'Absent').length;
   const absentCount = lopCount;
@@ -569,8 +579,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         if (r.status !== 'Present' && r.status !== 'On Break') return false;
       } else if (rosterFilter === 'On Break') {
         if (r.status !== 'On Break') return false;
-      } else if (rosterFilter === 'Work From Home') {
-        if (r.status !== 'Work From Home') return false;
+      } else if (rosterFilter === 'Work From Home' || rosterFilter === 'WFH') {
+        if (r.status !== 'Work From Home' && !r.isWfh) return false;
       } else if (rosterFilter === 'On Leave' || rosterFilter === 'Leave') {
         if (r.status !== 'On Leave') return false;
       } else if (rosterFilter === 'LOP' || rosterFilter === 'Absent') {

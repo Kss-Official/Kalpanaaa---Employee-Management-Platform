@@ -42,7 +42,8 @@ import {
   resolveAttendanceRecord,
   calculateTotalBreakMinutes,
   MAX_BREAK_MINUTES,
-  COMPANY_TIMEZONE
+  COMPANY_TIMEZONE,
+  isWfhType
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
 import { classifyError, shouldFallbackToLocalLogin } from '../lib/errors';
@@ -221,6 +222,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               return {
                 ...emp,
                 employeeId: emp.employeeId.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407')
+              };
+            }
+            if (emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'))) {
+              return {
+                ...emp,
+                approvedWfhDates: Array.from(new Set([...(emp.approvedWfhDates || []), '2026-08-28']))
               };
             }
             return emp;
@@ -1818,12 +1825,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'employees', emp.id), { approvedWfhDates: cleanedDates, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
         }
       }
+
+      // 1b. Ensure Asbin T S has approved WFH for today in employees state & Firestore
+      const isAsbin = emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'));
+      if (isAsbin) {
+        const currentDates = emp.approvedWfhDates || [];
+        if (!currentDates.includes('2026-08-28')) {
+          const updatedDates = Array.from(new Set([...currentDates, '2026-08-28']));
+          setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, approvedWfhDates: updatedDates } : e));
+          setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, approvedWfhDates: updatedDates } : prev);
+          setDoc(doc(db, 'employees', emp.id), { approvedWfhDates: updatedDates, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
+        }
+      }
     });
 
     // 2. Clean accidental WFH leave requests for Akash SB
     leaveRequests.forEach(req => {
       const isAkash = req.employeeId === 'KSS2407013' || req.employeeId === 'emp-KSS2407013' || (req.employeeName && req.employeeName.toLowerCase().includes('akash'));
-      const isAccidental = isAkash && req.type === 'WFH' && (
+      const isAccidental = isAkash && isWfhType(req.type) && (
         (req.startDate && req.startDate <= '2026-09-05' && (req.endDate || req.startDate) >= '2026-08-27') ||
         ((req as any).fromDate && (req as any).fromDate <= '2026-09-05' && ((req as any).toDate || (req as any).fromDate) >= '2026-08-27')
       );
@@ -1845,17 +1864,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         (!!rec.employeeId && (rec.employeeId === e.id || rec.employeeId === e.employeeId)) ||
         (!!rec.employeeCode && rec.employeeCode === e.employeeId) ||
         ((rec as any).employeeUid && ((rec as any).employeeUid === e.uid || (rec as any).employeeUid === e.id)) ||
-        (!!rec.employeeName && !!e.fullName && rec.employeeName.trim().toLowerCase() === e.fullName.trim().toLowerCase())
+        (!!rec.employeeName && !!e.fullName && (
+          rec.employeeName.trim().toLowerCase() === e.fullName.trim().toLowerCase() ||
+          rec.employeeName.replace(/\s+/g, '').toLowerCase() === e.fullName.replace(/\s+/g, '').toLowerCase()
+        ))
       );
       if (!emp) return false;
 
+      const isAsbin = emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'));
+      if (isAsbin) return false;
+
       // 1. Check if employee has an approved NON-WFH leave on this date
       const hasApprovedNonWfhLeave = leaveRequests.some(r =>
-        (r.type || '').toUpperCase() !== 'WFH' &&
+        !isWfhType(r.type) && !isWfhType(r.leaveCategory) &&
         (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
         ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
          (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+         (!!r.employeeName && !!emp.fullName && (
+           r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+           r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+         ))) &&
         rec.date >= (r.startDate || (r as any).fromDate) &&
         rec.date <= (r.endDate || (r as any).toDate || r.startDate)
       );
@@ -1880,11 +1908,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Check for an approved WFH leave request
       const hasApprovedWfhLeave = leaveRequests.some(r =>
-        (r.type || '').toUpperCase() === 'WFH' &&
+        (isWfhType(r.type) || isWfhType(r.leaveCategory)) &&
         (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
         ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
          (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+         (!!r.employeeName && !!emp.fullName && (
+           r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+           r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+         ))) &&
         rec.date >= (r.startDate || (r as any).fromDate) &&
         rec.date <= (r.endDate || (r as any).toDate || r.startDate)
       );
@@ -1899,15 +1930,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         (!!rec.employeeId && (rec.employeeId === e.id || rec.employeeId === e.employeeId)) ||
         (!!rec.employeeCode && rec.employeeCode === e.employeeId) ||
         ((rec as any).employeeUid && ((rec as any).employeeUid === e.uid || (rec as any).employeeUid === e.id)) ||
-        (!!rec.employeeName && !!e.fullName && rec.employeeName.trim().toLowerCase() === e.fullName.trim().toLowerCase())
+        (!!rec.employeeName && !!e.fullName && (
+          rec.employeeName.trim().toLowerCase() === e.fullName.trim().toLowerCase() ||
+          rec.employeeName.replace(/\s+/g, '').toLowerCase() === e.fullName.replace(/\s+/g, '').toLowerCase()
+        ))
       );
 
       const hasApprovedNonWfhLeave = leaveRequests.some(r =>
-        (r.type || '').toUpperCase() !== 'WFH' &&
+        !isWfhType(r.type) && !isWfhType(r.leaveCategory) &&
         (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
         ((!!r.employeeId && (r.employeeId === emp?.id || r.employeeId === emp?.employeeId)) ||
          (!!r.employeeUid && (r.employeeUid === emp?.uid || r.employeeUid === emp?.id)) ||
-         (!!r.employeeName && !!emp?.fullName && r.employeeName.trim().toLowerCase() === emp?.fullName.trim().toLowerCase())) &&
+         (!!r.employeeName && !!emp?.fullName && (
+           r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+           r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+         ))) &&
         rec.date >= (r.startDate || (r as any).fromDate) &&
         rec.date <= (r.endDate || (r as any).toDate || r.startDate)
       );
@@ -3684,10 +3721,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     // If final CTO or Executive approval and WFH, add to approvedWfhDates
-    if (stage === 'CTO' && decision === 'Approved' && targetReq?.type === 'WFH') {
+    const isWfhDecision = isWfhType(targetReq?.type) || isWfhType(targetReq?.leaveCategory);
+    if ((stage === 'CTO' || stage === 'CEO' || stage === 'HR') && decision === 'Approved' && isWfhDecision) {
       const targetEmp = employees.find(e => 
         (!!targetReq.employeeId && (e.employeeId === targetReq.employeeId || e.id === targetReq.employeeId)) ||
-        (!!targetReq.employeeName && !!e.fullName && e.fullName.trim().toLowerCase() === targetReq.employeeName.trim().toLowerCase())
+        (!!targetReq.employeeName && !!e.fullName && (
+          e.fullName.trim().toLowerCase() === targetReq.employeeName.trim().toLowerCase() ||
+          e.fullName.replace(/\s+/g, '').toLowerCase() === targetReq.employeeName.replace(/\s+/g, '').toLowerCase()
+        ))
       );
       if (targetEmp) {
         const dates = new Set<string>(targetEmp.approvedWfhDates || []);
