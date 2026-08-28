@@ -144,16 +144,17 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
          (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
          (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
-        l.status === 'Approved' &&
+        (l.status === 'Approved' || ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') && (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') && (l.ceoStatus === 'Approved' || l.ceoStatus === 'N/A' || l.ceoStatus === 'Bypassed') && (l.ctoStatus === 'Approved' || l.ctoStatus === 'N/A' || l.ctoStatus === 'Bypassed'))) &&
         todayStr >= (l.startDate || (l as any).fromDate) && 
         todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
 
+      const hasApprovedLeave = !!leaveReq && (leaveReq.type || '').toUpperCase() !== 'WFH';
       const isCompanyWfh = ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
-      const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
+      const isApprovedEmpWfh = !hasApprovedLeave && ((emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && (leaveReq.type || '').toUpperCase() === 'WFH'));
       const hasRealCheckIn = !!(rec?.checkInAt);
       const isExplicitNonWfh = rec?.isWfh === false;
-      const isWfh = !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
+      const isWfh = !hasApprovedLeave && !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
 
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
       const isComplete = isShiftComplete(rec);
@@ -164,6 +165,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
+      } else if (hasApprovedLeave || rec?.status === 'On Leave' || emp.status === 'On Leave') {
+        computedStatus = 'On Leave';
       } else if (rec?.checkInAt && (!isApprovedEmpWfh || isExplicitNonWfh)) {
         computedStatus = 'Present';
       } else if (isWfh && !isExplicitNonWfh) {
@@ -176,8 +179,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         } else if (rec.status === 'Absent') {
           computedStatus = 'Absent';
         }
-      } else if (leaveReq && leaveReq.type !== 'WFH') {
-        computedStatus = 'On Leave';
       } else if (emp.status === 'On Leave') {
         computedStatus = 'On Leave';
       }
@@ -911,7 +912,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                       const isApprovedLeave = hasApprovedLeaveOn(
                         leaveRequests, emp, d.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]
                       );
-                      const isWfhApproved = hasApprovedLeaveOn(leaveRequests, emp, d.dateStr, ['WFH']) || (emp.approvedWfhDates || []).includes(d.dateStr);
+                      const isWfhApproved = !isApprovedLeave && (hasApprovedLeaveOn(leaveRequests, emp, d.dateStr, ['WFH', 'wfh']) || (emp.approvedWfhDates || []).includes(d.dateStr));
 
                       let status = daySummary?.status || rec?.status || 'Absent';
                       if (d.isFuture) status = 'Upcoming';
@@ -931,14 +932,14 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
                       if (daySummary?.isOnBreak) {
                         cellColor = 'bg-amber-500/15 text-amber-300 border-amber-500/40 font-bold animate-pulse';
+                      } else if (status === 'On Leave' || isApprovedLeave) {
+                        cellColor = 'bg-purple-500/15 text-purple-300 border-purple-500/40 font-bold';
                       } else if (isWfhDay) {
                         cellColor = 'bg-sky-500/15 text-sky-300 border-sky-500/40 font-bold';
                       } else if (status === 'Late') {
                         cellColor = 'bg-orange-500/15 text-orange-400 border-orange-500/30 font-bold';
                       } else if (isCheckedIn || status === 'Present') {
                         cellColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-bold';
-                      } else if (status === 'On Leave') {
-                        cellColor = 'bg-purple-500/10 text-purple-400 border-purple-500/30';
                       } else if (status === 'Holiday') {
                         cellColor = 'bg-slate-900 text-slate-500 border-slate-800/60';
                       } else if (d.isFuture) {

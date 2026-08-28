@@ -41,7 +41,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   initialSelectedRecord, 
   onClose 
 }) => {
-  const { attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection } = useAuth();
+  const { attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection, updateEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const isSuperAdmin = role === 'SUPER_ADMIN' || activeEmployee?.role === 'SUPER_ADMIN';
@@ -71,6 +71,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   const [editNotes, setEditNotes] = useState('');
   const [isSavingCorrection, setIsSavingCorrection] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+  const [quickFeedback, setQuickFeedback] = useState<string | null>(null);
 
   const [yearStr, monthStr] = selectedYearMonth.split('-');
   const year = parseInt(yearStr, 10);
@@ -281,31 +282,29 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     const nonWorking = isNonWorkingDay(dateFormatted, holidayDates);
     const isFuture = dateFormatted > todayStr;
 
-    const wfhReq = empLeaveRequests.find(l => l.type === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-    const hasLeave = empLeaveRequests.some(l => l.type !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-    const isApprovedWfh = !!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted);
+    const wfhReq = empLeaveRequests.find(l => (l.type || '').toUpperCase() === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+    const hasLeave = empLeaveRequests.some(l => (l.type || '').toUpperCase() !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+    const isApprovedWfh = !hasLeave && (!!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted));
 
     if (rec) {
-      if ((rec.isWfh || rec.status === 'Work From Home') && isApprovedWfh) {
+      if (hasLeave || rec.status === 'On Leave') {
+        leaveDays++;
+      } else if ((rec.isWfh || rec.status === 'Work From Home') && isApprovedWfh) {
         wfhDays++;
       } else if (rec.status === 'Late' || (rec.checkInAt && isLateCheckIn(rec.checkInAt))) {
         lateDays++;
       } else if (rec.status === 'Present' || rec.checkInAt) {
         presentDays++;
-      } else if (rec.status === 'On Leave' || hasLeave) {
-        leaveDays++;
       } else if (rec.status === 'Holiday' || nonWorking) {
         holidayDays++;
-      } else if (rec.status === 'Absent') {
-        absentDays++;
-      } else if (!isFuture) {
+      } else if (rec.status === 'Absent' || !isFuture) {
         absentDays++;
       }
     } else {
-      if (isApprovedWfh) {
-        wfhDays++;
-      } else if (hasLeave) {
+      if (hasLeave) {
         leaveDays++;
+      } else if (isApprovedWfh) {
+        wfhDays++;
       } else if (nonWorking) {
         holidayDays++;
       } else if (!isFuture) {
@@ -364,6 +363,59 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
       setEditCheckInTime('09:30');
       setEditCheckOutTime('18:30');
       setEditNotes('Project Manager attendance override');
+    }
+  };
+
+  // 1-Click Quick Status Override for Selected Date (Direct Firestore Sync)
+  const handleQuickMarkStatus = async (dateStr: string, newStatus: AttendanceStatus) => {
+    triggerHaptic();
+    setIsSavingCorrection(true);
+    setQuickFeedback(null);
+
+    try {
+      const existingRecord = recordsByDate.get(dateStr);
+      const targetRecord: any = existingRecord || {
+        id: `synthetic_${employee.id}_${dateStr}`,
+        employeeId: employee.id,
+        employeeCode: employee.employeeId,
+        employeeName: employee.fullName,
+        department: employee.department,
+        date: dateStr,
+        isSynthetic: true
+      };
+
+      const isLeave = newStatus === 'On Leave';
+      const isWfh = newStatus === 'Work From Home';
+      const isAbsent = newStatus === 'Absent';
+      const isPresent = newStatus === 'Present' || newStatus === 'Late';
+
+      const updates: Partial<AttendanceRecord> = {
+        status: newStatus,
+        checkInAt: (isLeave || isAbsent) ? null : (targetRecord.checkInAt || `${dateStr}T09:30:00.000Z`),
+        checkOutAt: (isLeave || isAbsent) ? null : (targetRecord.checkOutAt || `${dateStr}T18:30:00.000Z`),
+        workingMinutes: (isLeave || isAbsent) ? 0 : (targetRecord.workingMinutes || 540),
+        isWfh: isWfh,
+        notes: `Quick updated to ${newStatus} by ${activeEmployee?.fullName || 'Admin/PM'}`
+      };
+
+      // If marking as On Leave or Absent, also ensure employee.approvedWfhDates does not have this date
+      if ((isLeave || isAbsent || isPresent) && employee.approvedWfhDates && employee.approvedWfhDates.includes(dateStr)) {
+        const cleanedDates = employee.approvedWfhDates.filter(d => d !== dateStr);
+        updateEmployee(employee.id, { approvedWfhDates: cleanedDates });
+      }
+
+      const res = await applyAttendanceCorrection(targetRecord, updates);
+      if (res.success) {
+        setQuickFeedback(`✓ Saved! Marked as "${newStatus}" for ${dateStr}`);
+        setTimeout(() => setQuickFeedback(null), 4000);
+      } else {
+        setQuickFeedback(`Error: ${res.message}`);
+      }
+    } catch (err: any) {
+      console.error('Quick status override error:', err);
+      setQuickFeedback(`Failed: ${err?.message || 'Error updating status'}`);
+    } finally {
+      setIsSavingCorrection(false);
     }
   };
 
@@ -683,9 +735,9 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   const dayNum = i + 1;
                   const dateFormatted = `${selectedYearMonth}-${String(dayNum).padStart(2, '0')}`;
                   const rec = recordsByDate.get(dateFormatted);
-                  const wfhReq = empLeaveRequests.find(l => l.type === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
-                  const isApprovedWfh = !!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted);
-                  const isApprovedLeave = empLeaveRequests.some(l => l.type !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+                  const wfhReq = empLeaveRequests.find(l => (l.type || '').toUpperCase() === 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+                  const isApprovedLeave = empLeaveRequests.some(l => (l.type || '').toUpperCase() !== 'WFH' && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
+                  const isApprovedWfh = !isApprovedLeave && (!!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted));
                   const isNonWorking = isNonWorkingDay(dateFormatted, holidayDates);
                   const holidayInfo = getHolidayInfo(dateFormatted);
                   const isFuture = dateFormatted > todayStr;
@@ -695,7 +747,11 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   let statusDot = 'bg-rose-500';
 
                   if (rec) {
-                    if ((rec.isWfh || rec.status === 'Work From Home') && isApprovedWfh) {
+                    if (isApprovedLeave || rec.status === 'On Leave') {
+                      statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
+                      statusLabel = 'Leave';
+                      statusDot = 'bg-purple-400';
+                    } else if ((rec.isWfh || rec.status === 'Work From Home') && isApprovedWfh) {
                       statusBg = 'bg-sky-500/10 border-sky-500/30 text-sky-300';
                       statusLabel = 'WFH';
                       statusDot = 'bg-sky-400';
@@ -707,10 +763,6 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       statusBg = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300';
                       statusLabel = 'Present';
                       statusDot = 'bg-emerald-400';
-                    } else if (rec.status === 'On Leave' || isApprovedLeave) {
-                      statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
-                      statusLabel = 'Leave';
-                      statusDot = 'bg-purple-400';
                     } else if (rec.status === 'Holiday' || isNonWorking) {
                       statusBg = 'bg-slate-800/40 border-slate-800 text-slate-400';
                       statusLabel = holidayInfo ? holidayInfo.name : 'Holiday';
@@ -724,14 +776,14 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       statusLabel = 'Absent';
                       statusDot = 'bg-rose-400';
                     }
-                  } else if (isApprovedWfh) {
-                    statusBg = 'bg-sky-500/10 border-sky-500/30 text-sky-300';
-                    statusLabel = 'WFH';
-                    statusDot = 'bg-sky-400';
                   } else if (isApprovedLeave) {
                     statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
                     statusLabel = 'Leave';
                     statusDot = 'bg-purple-400';
+                  } else if (isApprovedWfh) {
+                    statusBg = 'bg-sky-500/10 border-sky-500/30 text-sky-300';
+                    statusLabel = 'WFH';
+                    statusDot = 'bg-sky-400';
                   } else if (isNonWorking) {
                     statusBg = 'bg-slate-900/60 border-slate-800/80 text-slate-400';
                     statusLabel = holidayInfo ? holidayInfo.name : 'Weekly Off';
@@ -777,17 +829,25 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                 })}
               </div>
 
-              {/* Selected Day Details & PM/Admin Attendance Editor Trigger */}
+              {/* Quick Feedback Toast */}
+              {quickFeedback && (
+                <div className="p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-2xl text-emerald-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{quickFeedback}</span>
+                </div>
+              )}
+
+              {/* Selected Day Details & PM/Admin Attendance Action Toolbar */}
               {selectedDateStr && (
-                <div className="bg-slate-950 p-4 rounded-2xl border border-blue-500/30 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-blue-500/30 shadow-lg flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 animate-in fade-in">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
                       <Calendar className="w-5 h-5" />
                     </div>
                     <div>
                       <h5 className="text-xs font-black text-white">Selected Date: {selectedDateStr}</h5>
                       <p className="text-[11px] text-slate-400">
-                        Status: <strong className="text-slate-200">{selectedDayRecord?.status || 'No record / Absent'}</strong>
+                        Current Status: <strong className="text-slate-200">{selectedDayRecord?.status || (empLeaveRequests.some(l => (l.type || '').toUpperCase() !== 'WFH' && selectedDateStr >= (l.startDate || (l as any).fromDate) && selectedDateStr <= (l.endDate || (l as any).toDate || l.startDate)) ? 'On Leave' : 'No record / Absent')}</strong>
                         {selectedDayRecord?.checkInAt && (
                           <> • In: <span className="text-emerald-400 font-mono">{toISTTimeString(selectedDayRecord.checkInAt)}</span></>
                         )}
@@ -799,13 +859,61 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   </div>
 
                   {canEditAttendance && (
-                    <button
-                      onClick={() => handleOpenEditForDate(selectedDateStr, selectedDayRecord)}
-                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer shrink-0"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit / Override Day Attendance</span>
-                    </button>
+                    <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto justify-start lg:justify-end">
+                      {/* 1-Click: Mark On Leave Button */}
+                      <button
+                        disabled={isSavingCorrection}
+                        onClick={() => handleQuickMarkStatus(selectedDateStr, 'On Leave')}
+                        className="px-3 py-1.5 bg-purple-500/15 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                        title="Mark this employee as On Leave on this date"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-purple-400" />
+                        <span>Mark On Leave</span>
+                      </button>
+
+                      {/* 1-Click: Mark Present Button */}
+                      <button
+                        disabled={isSavingCorrection}
+                        onClick={() => handleQuickMarkStatus(selectedDateStr, 'Present')}
+                        className="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                        title="Mark this employee as Present on this date"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <span>Mark Present</span>
+                      </button>
+
+                      {/* 1-Click: Mark WFH Button */}
+                      <button
+                        disabled={isSavingCorrection}
+                        onClick={() => handleQuickMarkStatus(selectedDateStr, 'Work From Home')}
+                        className="px-3 py-1.5 bg-sky-500/15 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                        title="Mark this employee as Work From Home on this date"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-sky-400" />
+                        <span>Mark WFH</span>
+                      </button>
+
+                      {/* 1-Click: Mark Absent Button */}
+                      <button
+                        disabled={isSavingCorrection}
+                        onClick={() => handleQuickMarkStatus(selectedDateStr, 'Absent')}
+                        className="px-3 py-1.5 bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                        title="Mark this employee as Absent on this date"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-rose-400" />
+                        <span>Mark Absent</span>
+                      </button>
+
+                      {/* Full Edit Modal Trigger */}
+                      <button
+                        onClick={() => handleOpenEditForDate(selectedDateStr, selectedDayRecord)}
+                        className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer shrink-0 active:scale-95"
+                        title="Custom Shift & Timings Correction"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Custom Timings</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               )}

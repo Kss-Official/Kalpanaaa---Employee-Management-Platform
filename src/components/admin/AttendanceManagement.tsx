@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Employee, AttendanceRecord } from '../../types';
+import { Employee, AttendanceRecord, AttendanceStatus } from '../../types';
 import { 
   Search, 
   FileDown, 
@@ -23,7 +23,7 @@ import {
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeEmployeeLeaveBalance } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeEmployeeLeaveBalance, isLateCheckIn } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 
 interface AttendanceManagementProps {
@@ -32,7 +32,7 @@ interface AttendanceManagementProps {
 }
 
 export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
-  const { employees, attendance, updateAttendanceRecord, addAuditLog, updateEmployee, settings, leaveRequests, role, activeEmployee } = useAuth();
+  const { employees, attendance, updateAttendanceRecord, addAuditLog, updateEmployee, settings, leaveRequests, role, activeEmployee, applyAttendanceCorrection } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const isSuperAdmin = role === 'SUPER_ADMIN' || activeEmployee?.role === 'SUPER_ADMIN';
@@ -51,6 +51,10 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
   // State for shift history modal
   const [historyEmployee, setHistoryEmployee] = useState<Employee | null>(null);
+
+  // Quick Action State
+  const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
+  const [quickActionToast, setQuickActionToast] = useState<string | null>(null);
 
   // ─── Force Undo Checkout State ─────────────────────────────────────────────
   const [undoCheckoutTarget, setUndoCheckoutTarget] = useState<{
@@ -79,6 +83,52 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  // 1-Click Quick Status Override for Today
+  const handleQuickMarkEmployeeStatus = async (emp: Employee, status: AttendanceStatus) => {
+    triggerHaptic();
+    setQuickActionLoading(emp.id);
+    try {
+      const todayRec = todayRecordByEmpId.get(emp.id) || todayRecordByEmpId.get(emp.employeeId || '');
+      const targetRecord: any = todayRec || {
+        id: `synthetic_${emp.id}_${todayStr}`,
+        employeeId: emp.id,
+        employeeCode: emp.employeeId,
+        employeeName: emp.fullName,
+        department: emp.department,
+        date: todayStr,
+        isSynthetic: true
+      };
+
+      const isLeave = status === 'On Leave';
+      const isWfh = status === 'Work From Home';
+      const isAbsent = status === 'Absent';
+      const isPresent = status === 'Present' || status === 'Late';
+
+      const updates: Partial<AttendanceRecord> = {
+        status,
+        checkInAt: (isLeave || isAbsent) ? null : (targetRecord.checkInAt || `${todayStr}T09:30:00.000Z`),
+        checkOutAt: (isLeave || isAbsent) ? null : (targetRecord.checkOutAt || `${todayStr}T18:30:00.000Z`),
+        workingMinutes: (isLeave || isAbsent) ? 0 : (targetRecord.workingMinutes || 540),
+        isWfh: isWfh,
+        notes: `Marked as ${status} by ${activeEmployee?.fullName || 'Admin'}`
+      };
+
+      if ((isLeave || isAbsent || isPresent) && emp.approvedWfhDates && emp.approvedWfhDates.includes(todayStr)) {
+        const cleanedDates = emp.approvedWfhDates.filter(d => d !== todayStr);
+        updateEmployee(emp.id, { approvedWfhDates: cleanedDates });
+      }
+
+      await applyAttendanceCorrection(targetRecord, updates);
+      setQuickActionToast(`✓ Successfully updated ${emp.fullName} to "${status}" for today!`);
+      setTimeout(() => setQuickActionToast(null), 3500);
+    } catch (err: any) {
+      console.error('Quick status update failed:', err);
+      setQuickActionToast(`Failed: ${err?.message || 'Error updating status'}`);
+    } finally {
+      setQuickActionLoading(null);
+    }
+  };
 
   // Compute Leave Balance with strict rule: Zero base, 1 leave credited every month on 1st date
   const computeLeaveBalance = (emp: Employee) => {
@@ -344,12 +394,49 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                     todayRecordByEmpId.get(emp.employeeId || '') ||
                     null;
 
+                  const leaveReq = leaveRequests.find(l => 
+                    ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
+                     (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
+                     (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+                    (l.status === 'Approved' || ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') && (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') && (l.ceoStatus === 'Approved' || l.ceoStatus === 'N/A' || l.ceoStatus === 'Bypassed') && (l.ctoStatus === 'Approved' || l.ctoStatus === 'N/A' || l.ctoStatus === 'Bypassed'))) &&
+                    todayStr >= (l.startDate || (l as any).fromDate) && 
+                    todayStr <= (l.endDate || (l as any).toDate || l.startDate)
+                  );
+
+                  const hasApprovedLeave = !!leaveReq && (leaveReq.type || '').toUpperCase() !== 'WFH';
+                  const isCompanyWfh = ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
+                  const isApprovedEmpWfh = !hasApprovedLeave && ((emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && (leaveReq.type || '').toUpperCase() === 'WFH'));
+
+                  let todayStatusLabel: 'Present' | 'Late' | 'WFH' | 'On Leave' | 'Absent' = 'Absent';
+                  let todayStatusBadge = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+
+                  if (hasApprovedLeave || todayRec?.status === 'On Leave' || emp.status === 'On Leave') {
+                    todayStatusLabel = 'On Leave';
+                    todayStatusBadge = 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+                  } else if (todayRec?.checkInAt) {
+                    if (todayRec.status === 'Late' || isLateCheckIn(todayRec.checkInAt)) {
+                      todayStatusLabel = 'Late';
+                      todayStatusBadge = 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+                    } else if (isApprovedEmpWfh || todayRec.isWfh || todayRec.status === 'Work From Home') {
+                      todayStatusLabel = 'WFH';
+                      todayStatusBadge = 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+                    } else {
+                      todayStatusLabel = 'Present';
+                      todayStatusBadge = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+                    }
+                  } else if (isApprovedEmpWfh || (isCompanyWfh && !todayRec?.checkInAt)) {
+                    todayStatusLabel = 'WFH';
+                    todayStatusBadge = 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+                  }
+
                   // Show Undo Checkout only if employee checked in AND already checked out today
                   const hasUndoableCheckout =
                     canForceUndoCheckout &&
                     todayRec &&
                     !!todayRec.checkInAt &&
                     !!todayRec.checkOutAt;
+
+                  const isUpdatingThis = quickActionLoading === emp.id;
 
                   return (
                     <tr key={emp.id} className="hover:bg-slate-800/40 transition-colors group align-middle">
@@ -403,20 +490,36 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                         </div>
                       </td>
 
-                      {/* 5. Leave Balance */}
+                      {/* 5. Today Status & Leave Balance */}
                       <td className="py-3.5 px-5">
-                        <div className="inline-flex items-center gap-2 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800">
-                          <Palmtree className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                          <div>
-                            <span className="text-xs font-black text-purple-300 font-mono">{leaveInfo.balance} Leaves Left</span>
-                            <span className="text-[9px] text-slate-400 block font-medium">1 credited on 1st • 0 base</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`px-2.5 py-1 rounded-lg border text-xs font-bold ${todayStatusBadge}`}>
+                            {todayStatusLabel}
+                          </span>
+
+                          <div className="inline-flex items-center gap-1.5 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800">
+                            <Palmtree className="w-3 h-3 text-purple-400 shrink-0" />
+                            <span className="text-[11px] font-black text-purple-300 font-mono">{leaveInfo.balance} Left</span>
                           </div>
                         </div>
                       </td>
 
-                      {/* 6. Shift Log / Live Sync Options */}
+                      {/* 6. Shift Log & Quick Override Actions */}
                       <td className="py-3.5 px-5 text-right">
                         <div className="flex items-center justify-end gap-2">
+
+                          {/* Quick Mark On Leave Action */}
+                          {todayStatusLabel !== 'On Leave' && (
+                            <button
+                              disabled={isUpdatingThis}
+                              onClick={() => handleQuickMarkEmployeeStatus(emp, 'On Leave')}
+                              className="px-2.5 py-1.5 bg-purple-500/10 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 text-xs font-bold rounded-xl flex items-center gap-1 transition-all shadow-xs cursor-pointer disabled:opacity-50 active:scale-95"
+                              title={`Set ${emp.fullName} as On Leave for today`}
+                            >
+                              <Palmtree className="w-3 h-3 text-purple-400" />
+                              <span>Set On Leave</span>
+                            </button>
+                          )}
 
                           {/* ── Force Undo Checkout Button ── */}
                           {hasUndoableCheckout && todayRec && (

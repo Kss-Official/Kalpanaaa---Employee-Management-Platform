@@ -15,8 +15,10 @@ import {
   LogOut,
   X,
   Banknote,
-  MessageSquare
+  MessageSquare,
+  Sparkles
 } from 'lucide-react';
+import { isAuthorizedTechLead } from '../../lib/hierarchy';
 
 interface SidebarProps {
   activeTab: string;
@@ -37,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isExecutive = effectiveRole === 'SUPER_ADMIN'; // CEO / CTO
   const isHr = effectiveRole === 'HR_ADMIN';
   const isPm = effectiveRole === 'PROJECT_MANAGER';
+  const isTechLead = isAuthorizedTechLead(activeEmployee);
   const isAdmin = isExecutive || isHr;
 
   const executiveNavItems = [
@@ -83,7 +86,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const employeeNavItems = [
     { id: 'emp_dashboard', label: 'My Workspace', icon: LayoutDashboard },
     { id: 'emp_attendance', label: 'My Attendance', icon: UserCheck },
-    { id: 'emp_feedback', label: 'My Feedback & Reviews', icon: MessageSquare },
+    ...(isTechLead ? [
+      { id: 'feedback_hub', label: 'Team Feedback Hub (Lead)', icon: Sparkles },
+      { id: 'emp_feedback', label: 'My Received Feedback', icon: MessageSquare }
+    ] : [
+      { id: 'emp_feedback', label: 'My Feedback & Reviews', icon: MessageSquare }
+    ]),
     { id: 'emp_leave', label: 'My Leave & WFH', icon: CalendarCheck2 },
     { id: 'company_rules', label: 'Company & Employee Rules', icon: FileText },
     { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },
@@ -122,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="px-4 py-3.5 border-b border-slate-800/80 flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold tracking-wider text-blue-400 uppercase block">
-              {isAdmin ? 'Corporate Admin' : isPm ? 'Project Manager' : 'Employee Session'}
+              {isAdmin ? 'Corporate Admin' : isPm ? 'Project Manager' : isTechLead ? 'Tech Lead' : 'Employee Session'}
             </span>
             <span className="text-xs font-bold text-white truncate block max-w-[170px]">
               {activeEmployee?.fullName || 'Kalpanaaa HRMS'}
@@ -153,7 +161,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {[
                   { id: 'emp_dashboard', label: 'Dashboard', icon: LayoutDashboard },
                   { id: 'emp_attendance', label: 'Attendance', icon: UserCheck },
-                  { id: 'emp_feedback', label: 'My Feedback & Reviews', icon: MessageSquare },
+                  ...(isTechLead ? [
+                    { id: 'feedback_hub', label: 'Team Feedback Hub (Lead)', icon: Sparkles },
+                    { id: 'emp_feedback', label: 'My Received Feedback', icon: MessageSquare }
+                  ] : [
+                    { id: 'emp_feedback', label: 'My Feedback & Reviews', icon: MessageSquare }
+                  ]),
                   { id: 'emp_leave', label: 'Leave & WFH', icon: CalendarCheck2 },
                   { id: 'company_rules', label: 'Company & Employee Rules', icon: FileText },
                   { id: 'emp_payslips', label: 'Salary Payslips', icon: Banknote },

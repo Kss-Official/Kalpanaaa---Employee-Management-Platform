@@ -12,6 +12,7 @@ import { lazyWithRetry } from './lib/lazyWithRetry';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
+import { isAuthorizedTechLead } from './lib/hierarchy';
 
 // ── Resilient Lazy imports with automatic Chunk Load Failure Recovery ──
 const LandingView          = lazyWithRetry(() => import('./components/landing/LandingView').then(m => ({ default: m.LandingView })), 'LandingView');
@@ -158,6 +159,9 @@ const MainLayout: React.FC = () => {
   // Synchronous tab sanitization per role to eliminate flash of wrong content (Fixes C15 Contract)
   const getSanitizedTabForRole = (tab: string, roleToUse: string): string => {
     if (roleToUse === 'EMPLOYEE') {
+      if (isAuthorizedTechLead(activeEmployee) && tab === 'feedback_hub') {
+        return 'feedback_hub';
+      }
       if (!tab.startsWith('emp_') && tab !== 'notifications' && tab !== 'company_rules') {
         return 'emp_dashboard';
       }
@@ -226,7 +230,7 @@ const MainLayout: React.FC = () => {
           />
 
           <main className="flex-1 min-w-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto overscroll-y-contain h-full bg-slate-950">
-            {!currentTab.startsWith('emp_') && currentTab !== 'notifications' && currentTab !== 'company_rules' && (role === 'EMPLOYEE' || activeEmployee?.role === 'EMPLOYEE') ? (
+            {!currentTab.startsWith('emp_') && currentTab !== 'notifications' && currentTab !== 'company_rules' && !(currentTab === 'feedback_hub' && isAuthorizedTechLead(activeEmployee)) && (role === 'EMPLOYEE' || activeEmployee?.role === 'EMPLOYEE') ? (
               <div className="bg-slate-900 border border-rose-900/50 rounded-3xl p-8 max-w-2xl mx-auto my-12 text-center space-y-5 shadow-2xl">
                 <div className="w-16 h-16 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
                   <ShieldCheck className="w-8 h-8" />

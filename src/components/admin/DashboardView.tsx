@@ -187,19 +187,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
          (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
          (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
-        l.status === 'Approved' &&
+        (l.status === 'Approved' || ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') && (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') && (l.ceoStatus === 'Approved' || l.ceoStatus === 'N/A' || l.ceoStatus === 'Bypassed') && (l.ctoStatus === 'Approved' || l.ctoStatus === 'N/A' || l.ctoStatus === 'Bypassed'))) &&
         todayStr >= (l.startDate || (l as any).fromDate) && 
         todayStr <= (l.endDate || (l as any).toDate || l.startDate)
       );
 
+      const hasApprovedLeave = !!leaveReq && (leaveReq.type || '').toUpperCase() !== 'WFH';
       const isCompanyWfh = (companyWideWfhDates || []).includes(todayStr) || ((settings as any)?.companyWideWfhDates || []).includes(todayStr);
       // Individual WFH approval: must have an explicit approved WFH leave request or entry in approvedWfhDates
-      const isApprovedEmpWfh = (emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && leaveReq.type === 'WFH');
+      const isApprovedEmpWfh = !hasApprovedLeave && ((emp.approvedWfhDates || []).includes(todayStr) || (!!leaveReq && (leaveReq.type || '').toUpperCase() === 'WFH'));
       
       // If employee has physically checked in, check-in always wins over WFH unless explicitly approved WFH
       const hasRealCheckIn = !!(rec?.checkInAt);
       const isExplicitNonWfh = rec?.isWfh === false;
-      const isWfh = !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
+      const isWfh = !hasApprovedLeave && !isExplicitNonWfh && (isApprovedEmpWfh || (isCompanyWfh && !hasRealCheckIn));
 
       // Active break detection
       const activeBreak = rec?.breaks?.find(b => !b.endAt && !(b as any).endTime);
@@ -208,11 +209,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
       const isLate = rec?.status === 'Late' || (!!rec?.checkInAt && isLateCheckIn(rec.checkInAt));
 
       // Determine accurate real-time status:
-      // Differentiate Work From Home clearly from in-office Present and Absent
+      // Priority: Active Break -> On Leave -> Present / Checked In -> WFH -> Absent
       let computedStatus: 'Present' | 'Work From Home' | 'On Leave' | 'LOP' | 'On Break' | 'Absent' = 'Absent';
 
       if (activeBreak && isCheckedIn) {
         computedStatus = 'On Break';
+      } else if (hasApprovedLeave || rec?.status === 'On Leave' || emp.status === 'On Leave') {
+        computedStatus = 'On Leave';
       } else if (rec?.checkInAt && (!isApprovedEmpWfh || isExplicitNonWfh)) {
         // Any checked in employee without active approved WFH is Present
         computedStatus = 'Present';
@@ -226,8 +229,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
         } else if (rec.status === 'Absent') {
           computedStatus = 'Absent';
         }
-      } else if (leaveReq && leaveReq.type !== 'WFH') {
-        computedStatus = 'On Leave';
       } else if (emp.status === 'On Leave') {
         computedStatus = 'On Leave';
       }

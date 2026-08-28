@@ -1354,16 +1354,9 @@ export function isNonWorkingDay(
 /** True when an approved leave request of the given employee covers `dateStr`. */
 /**
  * Leave types that excuse an employee from attending.
- *
- * `LeaveRequest.type` is only ever `'Leave' | 'WFH'` (src/types/index.ts); the
- * remaining entries are tolerated for legacy or externally-imported rows. WFH is
- * deliberately ABSENT: working from home is a working day, so an approved WFH
- * request must not excuse a missing check-in or reduce expected hours. Callers
- * that need "did not have to attend" must pass this list -- an unfiltered
- * `hasApprovedLeaveOn` also matches WFH and silently forgives real absences.
  */
 export const EXCUSED_LEAVE_TYPES = [
-  'Leave', 'Earn Leave', 'Earned Leave', 'Paid Leave', 'Sick Leave', 'Casual Leave', 'Comp Off', 'Maternity', 'Paternity'
+  'Leave', 'LEAVE', 'leave', 'Earn Leave', 'Earned Leave', 'Paid Leave', 'Sick Leave', 'Casual Leave', 'Comp Off', 'Maternity', 'Paternity', 'Personal Leave', 'Festival Leave', 'Vacation'
 ] as const;
 
 export function hasApprovedLeaveOn(
@@ -1381,7 +1374,10 @@ export function hasApprovedLeaveOn(
        (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') &&
        (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'));
     if (!isApproved) return false;
-    if (types && !types.includes(r.type)) return false;
+    if (types) {
+      const matchType = types.some(t => t.toLowerCase() === (r.type || '').trim().toLowerCase());
+      if (!matchType) return false;
+    }
     const matchesEmployee =
       (!!r.employeeId && (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeId === emp.uid)) ||
       (!!(r as any).employeeCode && ((r as any).employeeCode === emp.employeeId || (r as any).employeeCode === emp.id)) ||
@@ -1397,6 +1393,8 @@ export function hasApprovedLeaveOn(
 /**
  * Single source of truth: is dateStr an approved Work From Home day for this employee?
  * Checks company-wide WFH dates, employee approvedWfhDates list, and approved WFH leave requests.
+ * Note: If the employee has an approved non-WFH leave (e.g. Vacation, Sick, Casual, Festival Leave),
+ * they are ON LEAVE — never Work From Home!
  */
 export function isApprovedWfhForEmployee(
   emp: any,
@@ -1408,10 +1406,14 @@ export function isApprovedWfhForEmployee(
   } = {}
 ): boolean {
   if (!emp) return false;
+  // Approved non-WFH Leave strictly overrides any WFH designation
+  if (hasApprovedLeaveOn(opts.leaveRequests, emp, dateStr, EXCUSED_LEAVE_TYPES as unknown as string[])) {
+    return false;
+  }
   const companyWideDates = opts.companyWideWfhDates || opts.settings?.companyWideWfhDates || [];
   if (companyWideDates.includes(dateStr)) return true;
   if ((emp.approvedWfhDates || []).includes(dateStr)) return true;
-  return hasApprovedLeaveOn(opts.leaveRequests, emp, dateStr, ['WFH']);
+  return hasApprovedLeaveOn(opts.leaveRequests, emp, dateStr, ['WFH', 'wfh']);
 }
 
 export function buildDailyRoster(
@@ -1458,13 +1460,41 @@ export function buildDailyRoster(
     }
 
     const existing = resolveAttendanceRecord(records, emp, dateStr);
-    const isWfhApproved = (existing && (existing.isWfh || existing.status === 'Work From Home')) ||
-      hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH']) ||
+    const hasApprovedLeave = hasApprovedLeaveOn(leaveRequests, emp, dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]) ||
+      leaveRequests.some(r => {
+        if (!r || (r.type || '').toUpperCase() === 'WFH') return false;
+        const isApproved = r.status === 'Approved' ||
+          ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') &&
+           (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') &&
+           (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') &&
+           (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'));
+        if (!isApproved) return false;
+        const matchesEmployee =
+          (!!r.employeeId && (r.employeeId === emp.employeeId || r.employeeId === emp.id || r.employeeId === emp.uid)) ||
+          (!!(r as any).employeeCode && ((r as any).employeeCode === emp.employeeId || (r as any).employeeCode === emp.id)) ||
+          (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id || r.employeeUid === emp.employeeId)) ||
+          (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+        if (!matchesEmployee) return false;
+        const start = r.startDate || r.fromDate;
+        const end = r.endDate || r.toDate || start;
+        return !!start && dateStr >= start && dateStr <= end;
+      });
+
+    const isWfhApproved = !hasApprovedLeave && (
+      (existing && (existing.isWfh || existing.status === 'Work From Home')) ||
+      hasApprovedLeaveOn(leaveRequests, emp, dateStr, ['WFH', 'wfh']) ||
       (emp.approvedWfhDates || []).includes(dateStr) ||
-      (opts.companyWideWfhDates || []).includes(dateStr);
+      (opts.companyWideWfhDates || []).includes(dateStr)
+    );
 
     if (existing) {
-      if (isWfhApproved && !existing.isWfh && existing.status !== 'On Leave') {
+      if (hasApprovedLeave && existing.status !== 'On Leave' && !existing.checkInAt) {
+        roster.push({
+          ...existing,
+          isWfh: false,
+          status: 'On Leave'
+        });
+      } else if (isWfhApproved && !existing.isWfh && existing.status !== 'On Leave') {
         roster.push({
           ...existing,
           isWfh: true,
@@ -1474,7 +1504,7 @@ export function buildDailyRoster(
         // Heal accidental or unapproved WFH record to its genuine punctuality status
         const realStatus = existing.checkInAt
           ? (isLateCheckIn(existing.checkInAt) ? 'Late' : 'Present')
-          : (existing.status === 'Work From Home' ? 'Absent' : existing.status);
+          : (hasApprovedLeave ? 'On Leave' : (existing.status === 'Work From Home' ? 'Absent' : existing.status));
         roster.push({
           ...existing,
           isWfh: false,
@@ -1488,8 +1518,7 @@ export function buildDailyRoster(
 
     let status: AttendanceStatus;
     if (nonWorking) status = 'Holiday';
-    else if (hasApprovedLeaveOn(leaveRequests, emp, dateStr, EXCUSED_LEAVE_TYPES as unknown as string[])) status = 'On Leave';
-    else if (emp.status === 'On Leave') status = 'On Leave';
+    else if (hasApprovedLeave || emp.status === 'On Leave') status = 'On Leave';
     else if (isWfhApproved) status = 'Work From Home';
     else if (isFuture || !shiftStartElapsed) continue; // not yet knowable
     else status = 'Absent';

@@ -43,7 +43,7 @@ import {
   fetchConfidentialNote
 } from '../../lib/feedbackService';
 import { FEEDBACK_TEMPLATES } from '../../lib/feedbackTemplates';
-import { canReview, tierOf } from '../../lib/hierarchy';
+import { canReview, tierOf, isAuthorizedTechLead } from '../../lib/hierarchy';
 import { useHaptic } from '../../hooks/useHaptic';
 import { QuizScheduler } from './QuizScheduler';
 
@@ -62,6 +62,7 @@ export const FeedbackHub: React.FC = () => {
   const isSuperAdmin = effectiveRole === 'SUPER_ADMIN';
   const isHr = effectiveRole === 'HR_ADMIN';
   const isPm = effectiveRole === 'PROJECT_MANAGER';
+  const isTechLead = isAuthorizedTechLead(activeEmployee);
   const isExecutive = isSuperAdmin || isHr;
 
   // Real-time Feedbacks state
@@ -293,7 +294,7 @@ export const FeedbackHub: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2.5 py-0.5 rounded-md border border-blue-500/20">
-              {isExecutive ? 'Executive & Leadership Hub' : 'Project Manager Portal'}
+              {isExecutive ? 'Executive & Leadership Hub' : isPm ? 'Project Manager Portal' : isTechLead ? 'Tech Lead Performance Hub' : 'Feedback Hub'}
             </span>
             <span className="text-xs text-slate-500 font-mono">Confidential RBAC Active</span>
           </div>
@@ -304,6 +305,8 @@ export const FeedbackHub: React.FC = () => {
           <p className="text-xs text-slate-400 mt-0.5 max-w-2xl">
             {isExecutive 
               ? 'Directly submit structured performance appraisals, reviews, and guidance for Project Managers and all employees.'
+              : isTechLead
+              ? 'Provide 1:1 sprint performance reviews, code quality feedback, work & behavioral guidance for team members across the organization.'
               : 'Provide 1:1 sprint performance feedback, growth milestones, and guidance for your project team members.'}
           </p>
         </div>

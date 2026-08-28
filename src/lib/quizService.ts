@@ -5,6 +5,8 @@ import {
   query, where, orderBy, increment, updateDoc
 } from 'firebase/firestore';
 
+import { isAuthorizedTechLead } from './hierarchy';
+
 /** Roles that may create, schedule, and view results. */
 export const QUIZ_SCHEDULER_ROLES: UserRole[] = [
   'SUPER_ADMIN',
@@ -12,7 +14,8 @@ export const QUIZ_SCHEDULER_ROLES: UserRole[] = [
   'PROJECT_MANAGER'
 ];
 
-export function canScheduleQuiz(role: UserRole | string): boolean {
+export function canScheduleQuiz(role: UserRole | string, emp?: any): boolean {
+  if (emp && isAuthorizedTechLead(emp)) return true;
   return QUIZ_SCHEDULER_ROLES.includes(role as UserRole);
 }
 
@@ -111,7 +114,8 @@ export function subscribeToQuizzes(
   role: UserRole | string,
   employeeDepartment: string | undefined,
   onData: (quizzes: FeedbackQuiz[]) => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  activeEmployee?: any
 ): () => void {
   const base = collection(db, QUIZ_COLLECTION);
   const q = query(base, orderBy('createdAt', 'desc'));
@@ -121,7 +125,7 @@ export function subscribeToQuizzes(
     (snapshot) => {
       const quizzes: FeedbackQuiz[] = [];
       snapshot.forEach(d => quizzes.push(d.data() as FeedbackQuiz));
-      const filtered = canScheduleQuiz(role)
+      const filtered = canScheduleQuiz(role, activeEmployee)
         ? quizzes
         : quizzes.filter(qz =>
             qz.targetAudience === 'ALL_EMPLOYEES' ||

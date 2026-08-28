@@ -58,11 +58,13 @@ export function isAuthorizedTechLead(emp: any): boolean {
   const employeeId = String(emp.employeeId || '').toUpperCase();
   const email = String(emp.email || '').toLowerCase().trim();
   const name = String(emp.fullName || emp.name || '').toLowerCase().trim();
+  const designation = String(emp.designation || emp.jobTitle || emp.role || '').toLowerCase().trim();
 
   const isSatya = 
     email.includes('satya.ranjan.dash') || 
     email.includes('satya.ranjan.das') ||
-    name.includes('satya ranjan') || 
+    (email.includes('satya') && (email.includes('dash') || email.includes('das'))) ||
+    (name.includes('satya') && (name.includes('das') || name.includes('dash'))) || 
     employeeId === 'KSS2407012' || 
     id === 'emp-KSS2407012' || 
     uid === 'QpDtyS6Jp5OqNu3klvfWGoWHfmS2' ||
@@ -71,12 +73,19 @@ export function isAuthorizedTechLead(emp: any): boolean {
   const isJason = 
     email.includes('jasonkennethn') || 
     email.includes('jason.kenneth') ||
-    name.includes('jason kenneth') || 
+    (email.includes('jason') && email.includes('kenneth')) ||
+    (name.includes('jason') && name.includes('kenneth')) || 
     employeeId === 'KSS2407014' || 
     id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || 
     uid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2';
 
-  return isSatya || isJason;
+  const isExplicitTechLead = 
+    designation === 'tech lead' || 
+    designation === 'technical lead' || 
+    designation.includes('technical lead') ||
+    designation.includes('tech lead');
+
+  return isSatya || isJason || isExplicitTechLead;
 }
 
 /**

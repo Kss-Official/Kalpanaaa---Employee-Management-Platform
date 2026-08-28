@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -489,7 +489,7 @@ export const QuizScheduler: React.FC = () => {
   const { activeEmployee, role, employees, isAuthenticated } = useAuth();
   const { triggerHaptic } = useHaptic();
   const effectiveRole = activeEmployee?.role || role;
-  const isScheduler = canScheduleQuiz(effectiveRole);
+  const isScheduler = canScheduleQuiz(effectiveRole, activeEmployee);
   const [quizzes, setQuizzes] = useState<FeedbackQuiz[]>([]);
   const [composeOpen, setComposeOpen] = useState(false);
   const [takingQuiz, setTakingQuiz] = useState<FeedbackQuiz | null>(null);
@@ -498,8 +498,8 @@ export const QuizScheduler: React.FC = () => {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    return subscribeToQuizzes(effectiveRole, activeEmployee?.department, setQuizzes, (err) => console.warn('[QuizScheduler]', err));
-  }, [isAuthenticated, effectiveRole, activeEmployee?.department]);
+    return subscribeToQuizzes(effectiveRole, activeEmployee?.department, setQuizzes, (err) => console.warn('[QuizScheduler]', err), activeEmployee);
+  }, [isAuthenticated, effectiveRole, activeEmployee?.department, activeEmployee]);
 
   useEffect(() => {
     if (!activeEmployee?.id || isScheduler) return;

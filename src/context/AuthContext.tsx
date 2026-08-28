@@ -1111,6 +1111,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // ROOT-LEVEL FIX: LIVE AUTOCORRECT AKASH SB ACCIDENTAL WFH DATES (27th/28th Aug – 5th Sep)
+              if (
+                data.id === 'emp-KSS2407013' ||
+                data.employeeId === 'KSS2407013' ||
+                (data.fullName && data.fullName.toLowerCase().includes('akash'))
+              ) {
+                if (data.approvedWfhDates && Array.isArray(data.approvedWfhDates) && data.approvedWfhDates.length > 0) {
+                  const accidentalRange = ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'];
+                  const cleaned = data.approvedWfhDates.filter(d => !accidentalRange.includes(d));
+                  if (cleaned.length !== data.approvedWfhDates.length) {
+                    data.approvedWfhDates = cleaned;
+                    if (canMigrate) {
+                      setDoc(doc(db, 'employees', data.id), { approvedWfhDates: cleaned }, { merge: true }).catch(() => { });
+                    }
+                  }
+                }
+              }
+
               fetched.push(data);
             });
 
@@ -1323,6 +1341,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 updatedAt: updatedISO
               };
 
+              // ROOT-LEVEL CORRECTION: Akash SB accidental WFH attendance (27th/28th Aug – 5th Sep)
+              const isAkashAtt = (
+                cleanRec.employeeId === 'emp-KSS2407013' ||
+                cleanRec.employeeCode === 'KSS2407013' ||
+                cleanRec.employeeId === 'KSS2407013' ||
+                (cleanRec.employeeName && cleanRec.employeeName.toLowerCase().includes('akash'))
+              );
+              if (isAkashAtt && cleanRec.date >= '2026-08-27' && cleanRec.date <= '2026-09-05') {
+                if (cleanRec.isWfh || cleanRec.status === 'Work From Home') {
+                  cleanRec.isWfh = false;
+                  if (cleanRec.status === 'Work From Home') {
+                    cleanRec.status = cleanRec.checkInAt ? 'Present' : 'Absent';
+                  }
+                }
+              }
+
               fetched.push(cleanRec);
             });
           }
@@ -1441,6 +1475,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const data = docSnap.data();
               const raw = { id: docSnap.id, ...data } as LeaveRequest;
               
+              // ROOT-LEVEL PURGE: Accidental WFH request for Akash SB (27th/28th Aug – 5th Sep)
+              const isAkashReq = (
+                raw.employeeId === 'KSS2407013' ||
+                raw.employeeId === 'emp-KSS2407013' ||
+                (raw.employeeName && raw.employeeName.toLowerCase().includes('akash'))
+              );
+              const isAccidentalRange = raw.type === 'WFH' && (
+                (raw.startDate && raw.startDate <= '2026-09-05' && (raw.endDate || raw.startDate) >= '2026-08-27') ||
+                ((raw as any).fromDate && (raw as any).fromDate <= '2026-09-05' && ((raw as any).toDate || (raw as any).fromDate) >= '2026-08-27')
+              );
+              if (isAkashReq && isAccidentalRange) {
+                if (roleRef.current === 'SUPER_ADMIN' || roleRef.current === 'HR_ADMIN') {
+                  deleteDoc(doc(db, 'leaveRequests', docSnap.id)).catch(() => { });
+                }
+                return;
+              }
+
               const isApplicantPmOrHr = raw.employeeRole === 'PROJECT_MANAGER' ||
                 raw.employeeRole === 'HR_ADMIN' ||
                 raw.employeeRole === 'SUPER_ADMIN' ||
@@ -1747,18 +1798,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => { cancelled = true; };
   }, [isAuthenticated, authUid, role]);
 
-  // ── Auto-heal unapproved WFH attendance records in Firestore ─────────────────
-  // If any attendance record has isWfh=true or status='Work From Home' but the
-  // employee has NO approved WFH leave request for that date, patch Firestore now.
-  // This corrects backend data (e.g. Akash SB's record) so ALL views reflect truth.
+  // ── Auto-heal & Root-level WFH correction (Akash SB & unapproved WFH) ─────────
+  // Automatically purges accidental WFH allocations (such as Akash SB 27th/28th Aug - 5th Sep)
+  // and corrects backend data so ALL views (Calendar, Admin, PM, HR, Portal) reflect truth.
   useEffect(() => {
     if (!isAuthenticated) return;
+
+    const accidentalRange = ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'];
+
+    // 1. Clean Akash SB's approvedWfhDates in employees state & Firestore
+    employees.forEach(emp => {
+      const isAkash = emp.id === 'emp-KSS2407013' || emp.employeeId === 'KSS2407013' || (emp.fullName && emp.fullName.toLowerCase().includes('akash'));
+      if (isAkash && emp.approvedWfhDates && emp.approvedWfhDates.length > 0) {
+        const hasAccidental = emp.approvedWfhDates.some(d => accidentalRange.includes(d));
+        if (hasAccidental) {
+          const cleanedDates = emp.approvedWfhDates.filter(d => !accidentalRange.includes(d));
+          setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, approvedWfhDates: cleanedDates } : e));
+          setActiveEmployee(prev => (prev && prev.id === emp.id) ? { ...prev, approvedWfhDates: cleanedDates } : prev);
+          setDoc(doc(db, 'employees', emp.id), { approvedWfhDates: cleanedDates, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
+        }
+      }
+    });
+
+    // 2. Clean accidental WFH leave requests for Akash SB
+    leaveRequests.forEach(req => {
+      const isAkash = req.employeeId === 'KSS2407013' || req.employeeId === 'emp-KSS2407013' || (req.employeeName && req.employeeName.toLowerCase().includes('akash'));
+      const isAccidental = isAkash && req.type === 'WFH' && (
+        (req.startDate && req.startDate <= '2026-09-05' && (req.endDate || req.startDate) >= '2026-08-27') ||
+        ((req as any).fromDate && (req as any).fromDate <= '2026-09-05' && ((req as any).toDate || (req as any).fromDate) >= '2026-08-27')
+      );
+      if (isAccidental && req.id) {
+        setLeaveRequests(prev => prev.filter(r => r.id !== req.id));
+        deleteDoc(doc(db, 'leaveRequests', req.id)).catch(() => { });
+      }
+    });
+
+    // 3. Auto-heal unapproved WFH attendance records in Firestore
     if (!attendance.length || !employees.length) return;
 
     const companyWfhDates: string[] = (settings as any)?.companyWideWfhDates || companyWideWfhDates || [];
 
     const badRecords = attendance.filter(rec => {
-      if (!rec.isWfh && rec.status !== 'Work From Home') return false;
       if (!rec.id || !rec.date) return false;
 
       const emp = employees.find(e =>
@@ -1769,6 +1849,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
       if (!emp) return false;
 
+      // 1. Check if employee has an approved NON-WFH leave on this date
+      const hasApprovedNonWfhLeave = leaveRequests.some(r =>
+        (r.type || '').toUpperCase() !== 'WFH' &&
+        (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
+        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+         (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
+        rec.date >= (r.startDate || (r as any).fromDate) &&
+        rec.date <= (r.endDate || (r as any).toDate || r.startDate)
+      );
+
+      if (hasApprovedNonWfhLeave) {
+        // If employee has approved leave, any record with WFH or status !== 'On Leave' (when no real check-in) is bad!
+        if (rec.isWfh || rec.status === 'Work From Home' || (!rec.checkInAt && rec.status !== 'On Leave')) {
+          return true;
+        }
+        return false;
+      }
+
+      if (!rec.isWfh && rec.status !== 'Work From Home') return false;
+
+      const isAkash = emp.id === 'emp-KSS2407013' || emp.employeeId === 'KSS2407013' || (emp.fullName && emp.fullName.toLowerCase().includes('akash'));
+      if (isAkash && accidentalRange.includes(rec.date)) return true;
+
       // Skip if date is covered by company-wide WFH
       if (companyWfhDates.includes(rec.date)) return false;
       // Skip if covered by employee's personal approved WFH dates
@@ -1776,8 +1880,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Check for an approved WFH leave request
       const hasApprovedWfhLeave = leaveRequests.some(r =>
-        r.type === 'WFH' &&
-        r.status === 'Approved' &&
+        (r.type || '').toUpperCase() === 'WFH' &&
+        (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
         ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
          (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
          (!!r.employeeName && !!emp.fullName && r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())) &&
@@ -1791,8 +1895,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!badRecords.length) return;
 
     badRecords.forEach(rec => {
-      let realStatus: string = 'Absent';
-      if (rec.checkInAt) {
+      const emp = employees.find(e =>
+        (!!rec.employeeId && (rec.employeeId === e.id || rec.employeeId === e.employeeId)) ||
+        (!!rec.employeeCode && rec.employeeCode === e.employeeId) ||
+        ((rec as any).employeeUid && ((rec as any).employeeUid === e.uid || (rec as any).employeeUid === e.id)) ||
+        (!!rec.employeeName && !!e.fullName && rec.employeeName.trim().toLowerCase() === e.fullName.trim().toLowerCase())
+      );
+
+      const hasApprovedNonWfhLeave = leaveRequests.some(r =>
+        (r.type || '').toUpperCase() !== 'WFH' &&
+        (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
+        ((!!r.employeeId && (r.employeeId === emp?.id || r.employeeId === emp?.employeeId)) ||
+         (!!r.employeeUid && (r.employeeUid === emp?.uid || r.employeeUid === emp?.id)) ||
+         (!!r.employeeName && !!emp?.fullName && r.employeeName.trim().toLowerCase() === emp?.fullName.trim().toLowerCase())) &&
+        rec.date >= (r.startDate || (r as any).fromDate) &&
+        rec.date <= (r.endDate || (r as any).toDate || r.startDate)
+      );
+
+      let realStatus: string = hasApprovedNonWfhLeave ? 'On Leave' : 'Absent';
+      if (!hasApprovedNonWfhLeave && rec.checkInAt) {
         try {
           const iso = formatTimestampToISO(rec.checkInAt);
           if (iso) {
@@ -1809,13 +1930,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const payload = cleanFirestorePayload({
         isWfh: false,
         status: realStatus,
+        checkInAt: hasApprovedNonWfhLeave ? null : rec.checkInAt,
+        checkOutAt: hasApprovedNonWfhLeave ? null : rec.checkOutAt,
+        workingMinutes: hasApprovedNonWfhLeave ? 0 : rec.workingMinutes,
         updatedAt: serverTimestamp(),
-        notes: (((rec.notes || '') + ' [Auto-healed: WFH flag removed — no approved WFH request]').trim())
+        notes: (((rec.notes || '') + (hasApprovedNonWfhLeave ? ' [Auto-healed: Approved Leave synchronized]' : ' [Auto-healed: WFH flag removed]')).trim())
       });
 
+      setAttendance(prev => prev.map(a => a.id === rec.id ? { ...a, ...payload } : a));
+
       setDoc(doc(db, 'attendance', rec.id), payload, { merge: true })
-        .then(() => console.info(`[WFH Heal] ${rec.employeeName} ${rec.date} → ${realStatus}`))
-        .catch(err => console.warn(`[WFH Heal] Failed ${rec.id}:`, err));
+        .then(() => console.info(`[Auto-Heal] ${rec.employeeName} ${rec.date} → ${realStatus}`))
+        .catch(err => console.warn(`[Auto-Heal] Failed ${rec.id}:`, err));
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, attendance, leaveRequests, employees, settings, companyWideWfhDates]);

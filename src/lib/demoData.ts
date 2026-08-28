@@ -423,7 +423,8 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     qrToken: 'QR-KSS2407013',
     createdAt: '2024-05-01T10:00:00Z',
     updatedAt: new Date().toISOString(),
-    profilePhotoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300'
+    profilePhotoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300',
+    approvedWfhDates: []
   },
   {
     id: 'KfAB95lpbJOeylpKQaWX4GXOPGt2',
