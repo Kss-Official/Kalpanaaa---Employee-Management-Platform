@@ -657,7 +657,7 @@ export const EmployeeFeedbackView: React.FC = () => {
                           }`}
                         >
                           <span className="text-xs font-bold block truncate">{cat}</span>
-                          <span className="text-[10px] text-slate-500 mt-1 line-clamp-1">{tpl?.subtitle}</span>
+                          <span className="text-[10px] text-slate-500 mt-1 line-clamp-1">{tpl?.tagline}</span>
                         </button>
                       );
                     })}
