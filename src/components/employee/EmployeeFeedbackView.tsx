@@ -107,6 +107,8 @@ export const EmployeeFeedbackView: React.FC = () => {
   const handleAcknowledge = async (fbId: string) => {
     triggerHaptic();
     setAcknowledgingId(fbId);
+    const nowIso = new Date().toISOString();
+    setAllFeedbacks(prev => prev.map(f => f.id === fbId ? { ...f, isAcknowledged: true, acknowledgedAt: nowIso, updatedAt: nowIso } : f));
     await acknowledgePerformanceFeedback(fbId);
     setAcknowledgingId(null);
   };
@@ -157,23 +159,31 @@ export const EmployeeFeedbackView: React.FC = () => {
     setSubmitFeedback(null);
 
     try {
+      const finalActionItems = actionItemsList.length > 0 
+        ? actionItemsList 
+        : (actionItemInput.trim() ? [actionItemInput.trim()] : ['Follow up on sprint goals']);
+
+      const finalStrengths = strengths.trim() || 'Strong technical contribution and team dedication.';
+      const finalAreas = areasForImprovement.trim() || 'Continue broadening sprint and architectural ownership.';
+
       const newFeedback: PerformanceFeedback = {
         id: `fb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         targetEmployeeId: targetEmp.id,
         targetEmployeeCode: targetEmp.employeeId || '',
         targetEmployeeName: targetEmp.fullName,
         targetEmployeeRole: targetEmp.role,
+        targetEmployeeDesignation: targetEmp.designation,
         targetEmployeeDepartment: targetEmp.department || 'Engineering',
-        reviewerId: activeEmployee?.id || 'emp-KSS2407012',
+        reviewerId: activeEmployee?.id || activeEmployee?.uid || 'emp-KSS2407012',
         reviewerName: activeEmployee?.fullName || 'Satya Ranjan Das',
         reviewerRole: activeEmployee?.role || 'EMPLOYEE',
         reviewerDesignation: activeEmployee?.designation || 'Technical Lead',
         category,
-        rating,
+        rating: Math.min(5, Math.max(1, Number(rating) || 5)),
         sentiment,
-        strengths,
-        areasForImprovement,
-        actionItems: actionItemsList,
+        strengths: finalStrengths,
+        areasForImprovement: finalAreas,
+        actionItems: finalActionItems,
         isAcknowledged: false,
         subjectTier: tierOf(targetEmp),
         createdAt: new Date().toISOString(),
