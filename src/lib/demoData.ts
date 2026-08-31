@@ -339,10 +339,10 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     profilePhotoUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300'
   },
   {
-    id: 'emp-abhinayav',
-    // employeeId unassigned — HR position currently vacant, email account retained
-    fullName: 'Abhinaya V',
-    email: 'abhinayav1919@kalpanaaa.in',
+    id: 'emp-hr',
+    employeeId: '',
+    fullName: 'HR Department',
+    email: 'hr@kalpanaaa.in',
     phone: '8105866141',
     gender: 'Female',
     dateOfBirth: '1997-02-19',
@@ -362,7 +362,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     emergencyContact: '8105866141',
     emergencyRelationship: 'Management',
     role: 'HR_ADMIN',
-    qrToken: 'QR-abhinayav',
+    qrToken: 'QR-HR',
     createdAt: '2026-08-24T09:00:00Z',
     updatedAt: new Date().toISOString(),
     approvedWfhDates: [],

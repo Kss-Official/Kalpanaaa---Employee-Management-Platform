@@ -219,7 +219,7 @@ service cloud.firestore {
         unchanged('reportingManagerUid') && unchanged('qrToken') &&
         unchanged('accessLevel') && unchanged('permissions')
       );
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isConfigAdmin() || isProjectManager();
 
       // 2a. Leave date-locks
       match /leaveLocks/{lockDate} {

@@ -277,7 +277,7 @@ export const LeaveApprovalsView: React.FC = () => {
               return (
                 <div className="inline-flex items-center gap-1.5 mt-1 px-3 py-1 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[11px] sm:text-xs font-extrabold leading-snug break-words max-w-full">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> 
-                  <span>HR Read-Only Observer Ledger — Logged in as {activeEmployee?.fullName || 'Abhinaya V'}</span>
+                  <span>HR Read-Only Observer Ledger — Logged in as {activeEmployee?.fullName || 'HR Department'}</span>
                 </div>
               );
             }

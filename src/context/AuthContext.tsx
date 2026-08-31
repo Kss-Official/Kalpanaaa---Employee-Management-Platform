@@ -2045,7 +2045,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(firebaseUser);
       setIsDemoMode(false);
       const cleanEmail = firebaseUser.email?.toLowerCase();
-      let matched = employeesRef.current.find(e => e.email?.toLowerCase() === cleanEmail);
+      let matched = employeesRef.current.find(e => 
+        e.email?.toLowerCase() === cleanEmail ||
+        (cleanEmail === 'abhinayav1919@kalpanaaa.in' && (e.email?.toLowerCase() === 'hr@kalpanaaa.in' || e.id === 'emp-KSS2407011'))
+      );
 
       if (!matched && cleanEmail) {
         try {
@@ -2232,7 +2235,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (userCred.user) {
           setUser(userCred.user);
 
-          const matched = employees.find(e => e.email?.toLowerCase() === cleanEmail || e.id === userCred.user.uid);
+          const matched = employees.find(e => 
+            e.email?.toLowerCase() === cleanEmail || 
+            e.id === userCred.user.uid ||
+            (cleanEmail === 'abhinayav1919@kalpanaaa.in' && (e.email?.toLowerCase() === 'hr@kalpanaaa.in' || e.id === 'emp-KSS2407011'))
+          );
           if (matched) {
             const cat = getDeviceCategory();
             const newSessionId = `sess_${cat}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
