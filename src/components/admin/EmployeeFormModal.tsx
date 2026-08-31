@@ -423,6 +423,21 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   </div>
 
                   <div>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Official Joining Date <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      name="joiningDate"
+                      value={formData.joiningDate}
+                      onChange={handleChange}
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono font-bold focus:outline-none focus:border-blue-500"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Days before this date will be unmarked (not counted as absent).</p>
+                  </div>
+
+                  <div>
                     <label className="block text-slate-300 font-semibold mb-1">Shift Schedule</label>
                     <input
                       type="text"

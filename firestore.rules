@@ -66,17 +66,17 @@ service cloud.firestore {
           request.auth.token.email == 'jasonkennethn@kalpanaaa.in' ||
           request.auth.token.email == 'jason.kennethn@kalpanaaa.in'
         )) ||
-        (getEmployeeId() != null && (getEmployeeId() == 'KSS2407012' || getEmployeeId() == 'KSS2407014')) ||
-        (getEmployeeDocId() != null && (getEmployeeDocId() == 'emp-KSS2407012' || getEmployeeDocId() == 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || getEmployeeDocId() == 'emp-KSS2407014')) ||
+        (getEmployeeId() != null && (getEmployeeId() == 'KSS2407012' || getEmployeeId() == 'KSS2407011')) ||
+        (getEmployeeDocId() != null && (getEmployeeDocId() == 'emp-KSS2407012' || getEmployeeDocId() == 'KfAB95lpbJOeylpKQaWX4GXOPGt2')) || // KSS2407011 reassigned to Jason
         (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('email', '') in ['satya.ranjan.dash@kalpanaaa.in', 'satya.ranjan.das@kalpanaaa.in', 'jasonkennethn@kalpanaaa.in'] ||
-          get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('employeeId', '') in ['KSS2407012', 'KSS2407014'] ||
+          get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('employeeId', '') in ['KSS2407012', 'KSS2407011'] || // KSS2407011 reassigned to Jason
           get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('role', '') == 'TECH_LEAD'
         )) ||
         (userDocExists() && (
           getUserDoc().get('role', '') == 'TECH_LEAD' ||
           getUserDoc().get('email', '') in ['satya.ranjan.dash@kalpanaaa.in', 'satya.ranjan.das@kalpanaaa.in', 'jasonkennethn@kalpanaaa.in'] ||
-          getUserDoc().get('employeeId', '') in ['KSS2407012', 'KSS2407014']
+          getUserDoc().get('employeeId', '') in ['KSS2407012', 'KSS2407011'] // KSS2407011 reassigned to Jason
         ))
       );
     }
@@ -208,11 +208,11 @@ service cloud.firestore {
           (userDocExists() && getUserDoc().role == request.resource.data.role)
         )
       );
-      allow update: if isConfigAdmin() || (
+      allow update: if isConfigAdmin() || isProjectManager() || isAuthorizedTechLead() || (
         ownsEmployeeRecord(employeeId) &&
         unchanged('role') && unchanged('executiveRole') && unchanged('employeeId') &&
         unchanged('email') && unchanged('salary') && unchanged('ctc') &&
-        unchanged('joiningDate') && unchanged('probationEndDate') &&
+        unchanged('probationEndDate') &&
         unchanged('bankAccountNumber') && unchanged('bankIfscCode') && unchanged('panNumber') &&
         unchanged('approvedWfhDates') && unchanged('designation') && unchanged('department') &&
         unchanged('status') && unchanged('shift') && unchanged('pmUid') &&

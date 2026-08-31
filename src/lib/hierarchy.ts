@@ -75,7 +75,7 @@ export function isAuthorizedTechLead(emp: any): boolean {
     email.includes('jason.kenneth') ||
     (email.includes('jason') && email.includes('kenneth')) ||
     (name.includes('jason') && name.includes('kenneth')) || 
-    employeeId === 'KSS2407014' || 
+    employeeId === 'KSS2407011' || // reassigned from KSS2407014 on 2026-08-31
     id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || 
     uid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2';
 

@@ -339,8 +339,8 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     profilePhotoUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300'
   },
   {
-    id: 'emp-KSS2407011',
-    employeeId: 'KSS2407011',
+    id: 'emp-abhinayav',
+    // employeeId unassigned — HR position currently vacant, email account retained
     fullName: 'Abhinaya V',
     email: 'abhinayav1919@kalpanaaa.in',
     phone: '8105866141',
@@ -362,7 +362,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     emergencyContact: '8105866141',
     emergencyRelationship: 'Management',
     role: 'HR_ADMIN',
-    qrToken: 'QR-KSS2407011',
+    qrToken: 'QR-abhinayav',
     createdAt: '2026-08-24T09:00:00Z',
     updatedAt: new Date().toISOString(),
     approvedWfhDates: [],
@@ -429,7 +429,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   },
   {
     id: 'KfAB95lpbJOeylpKQaWX4GXOPGt2',
-    employeeId: 'KSS2407014',
+    employeeId: 'KSS2407011', // reassigned from KSS2407014 (2026-08-31)
     fullName: 'Jason Kenneth N',
     email: 'jasonkennethn@kalpanaaa.in',
     phone: '+91 98765 00014',
@@ -451,7 +451,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     emergencyContact: '+91 98765 00000',
     emergencyRelationship: 'Management',
     role: 'EMPLOYEE',
-    qrToken: 'KSS2407014',
+    qrToken: 'KSS2407011', // updated from KSS2407014
     createdAt: '2026-08-17T04:38:47.685Z',
     updatedAt: new Date().toISOString(),
     profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'

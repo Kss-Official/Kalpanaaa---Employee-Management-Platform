@@ -2616,52 +2616,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newEmp;
   };
 
-  const updateEmployee = (id: string, updates: Partial<Employee>) => {
+  const updateEmployee = async (id: string, updates: Partial<Employee>) => {
     // TOP 1% SECURITY: XSS Sanitization
     const sanitizedUpdates = sanitizeInput(updates);
 
-    // ── COST FIX: a newly uploaded resume is routed out of band ─────────────────
-    // It goes to employees/{id}/private/resume rather than onto this document,
-    // because /employees is listened to collection-wide. Captured before the state
-    // update since the relocation is async and the parent write below is not.
     const incomingResume = typeof sanitizedUpdates.resumeUrl === 'string' ? sanitizedUpdates.resumeUrl : '';
 
+    let matched = false;
+    let targetDocId = id;
+
     setEmployees(prev => prev.map(e => {
-      if (e.id === id) {
+      if (e.id === id || e.employeeId === id || (e.uid && e.uid === id)) {
+        matched = true;
+        targetDocId = e.id || id;
         const updated = { ...e, ...sanitizedUpdates, updatedAt: new Date().toISOString() };
 
-        // ── COST FIX: don't rewrite the base64 blobs on every unrelated edit ──
-        // This wrote the ENTIRE merged record, so changing a phone number also
-        // re-uploaded profilePhotoUrl and the (uncompressed) base64 resumeUrl.
-        // That padded the write, and worse, churned the document — which
-        // invalidates the field in every other client's persistent cache and
-        // makes them all re-download the blobs on their next snapshot.
-        //
-        // The full record is still sent so a document that somehow does not exist
-        // yet is created complete (merge:true on a missing doc would otherwise
-        // persist only the changed keys). The two heavy fields are simply omitted
-        // unless they are genuinely part of this update; merge:true leaves the
-        // stored values untouched when a key is absent.
         const payload: Record<string, any> = { ...updated };
         if (!('profilePhotoUrl' in sanitizedUpdates)) delete payload.profilePhotoUrl;
-        // resumeUrl NEVER goes on the parent document any more — it is handled out
-        // of band below. Dropping it unconditionally also avoids writing an empty
-        // string back: EmployeeFormModal seeds its form with
-        // `employeeToEdit?.resumeUrl || ''`, so for an already-relocated employee
-        // every unrelated edit would otherwise push `resumeUrl: ''` to Firestore.
-        // No surface clears a resume (the form requires one), so there is nothing
-        // legitimate to propagate.
         delete payload.resumeUrl;
 
         // Persist update to Firestore
-        setDoc(doc(db, 'employees', id), payload, { merge: true }).catch(err => {
-          handleFirestoreError(err, OperationType.UPDATE, `employees/${id}`);
+        setDoc(doc(db, 'employees', targetDocId), payload, { merge: true }).catch(err => {
+          handleFirestoreError(err, OperationType.UPDATE, `employees/${targetDocId}`);
         });
 
         return updated;
       }
       return e;
     }));
+
+    if (!matched) {
+      await setDoc(doc(db, 'employees', id), { ...sanitizedUpdates, updatedAt: new Date().toISOString() }, { merge: true }).catch(err => {
+        handleFirestoreError(err, OperationType.UPDATE, `employees/${id}`);
+      });
+    }
 
     // Relocate the resume, then record the outcome on the parent: a marker if it
     // landed in the subcollection, or the blob inline if that was rejected (which

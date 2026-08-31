@@ -22,10 +22,28 @@ interface EmployeeProfileModalProps {
 export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   employee, onClose, onOpenEdit, onOpenIdCard
 }) => {
-  const { attendance, auditLogs, regenerateQrToken, settings } = useAuth();
+  const { attendance, auditLogs, regenerateQrToken, settings, updateEmployee } = useAuth();
   const [activeTab, setActiveTab] = useState<'details' | 'qr' | 'attendance' | 'activity'>('details');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [isMonthlyModalOpen, setIsMonthlyModalOpen] = useState(false);
+
+  const [joiningDateValue, setJoiningDateValue] = useState(employee.joiningDate || '2026-07-27');
+  const [isSavingJoiningDate, setIsSavingJoiningDate] = useState(false);
+  const [saveJoiningDateToast, setSaveJoiningDateToast] = useState<string | null>(null);
+
+  const handleSaveJoiningDate = async () => {
+    if (!joiningDateValue) return;
+    setIsSavingJoiningDate(true);
+    try {
+      await updateEmployee(employee.id, { joiningDate: joiningDateValue });
+      setSaveJoiningDateToast('✓ Saved');
+      setTimeout(() => setSaveJoiningDateToast(null), 2500);
+    } catch (err: any) {
+      setSaveJoiningDateToast(`Failed: ${err?.message || 'Error'}`);
+    } finally {
+      setIsSavingJoiningDate(false);
+    }
+  };
 
   const empAttendance = attendance.filter(a => a.employeeId === employee.id || a.employeeCode === employee.employeeId);
   const empLogs = auditLogs.filter(l => l.target.includes(employee.employeeId) || l.actorId === employee.id);
@@ -215,9 +233,29 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                       <span className="text-[var(--text-secondary)]">Type</span>
                       <span className="font-semibold text-[var(--text-primary)]">{employee.employmentType}</span>
                     </div>
-                    <div className="flex justify-between py-1.5 border-b border-[var(--border-subtle)]">
-                      <span className="text-[var(--text-secondary)]">Joined</span>
-                      <span className="font-semibold text-[var(--text-primary)]">{employee.joiningDate}</span>
+                    <div className="flex items-center justify-between py-2 border-b border-[var(--border-subtle)] flex-wrap gap-2">
+                      <span className="text-[var(--text-secondary)]">Official Joined Date</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="date"
+                          value={joiningDateValue}
+                          onChange={e => setJoiningDateValue(e.target.value)}
+                          className="px-2.5 py-1 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-blue-500 font-bold"
+                        />
+                        {joiningDateValue !== (employee.joiningDate || '2026-07-27') && (
+                          <button
+                            type="button"
+                            onClick={handleSaveJoiningDate}
+                            disabled={isSavingJoiningDate}
+                            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-sm"
+                          >
+                            {isSavingJoiningDate ? 'Saving...' : 'Save'}
+                          </button>
+                        )}
+                        {saveJoiningDateToast && (
+                          <span className="text-[10px] font-bold text-emerald-400">{saveJoiningDateToast}</span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex justify-between py-1.5 border-b border-[var(--border-subtle)]">
                       <span className="text-[var(--text-secondary)]">Manager</span>

@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
-import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType } from '../../lib/attendanceEngine';
+import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType, COMPANY_START_DATE } from '../../lib/attendanceEngine';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { useHaptic } from '../../hooks/useHaptic';
 
@@ -74,6 +74,31 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   const [isSavingCorrection, setIsSavingCorrection] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const [quickFeedback, setQuickFeedback] = useState<string | null>(null);
+
+  // Joining Date editing state
+  const [joiningDateValue, setJoiningDateValue] = useState<string>(employee.joiningDate || (employee as any).joining_date || '2026-07-27');
+  const [isSavingJoiningDate, setIsSavingJoiningDate] = useState(false);
+  const [joiningDateToast, setJoiningDateToast] = useState<string | null>(null);
+
+  const handleSaveJoiningDate = async () => {
+    if (!joiningDateValue) return;
+    triggerHaptic();
+    setIsSavingJoiningDate(true);
+    try {
+      const targetId = employee.id || employee.employeeId || (employee as any).uid;
+      await updateEmployee(targetId, { joiningDate: joiningDateValue });
+      // In case id differed from employeeId, also ensure employeeId is targeted
+      if (employee.employeeId && employee.employeeId !== targetId) {
+        await updateEmployee(employee.employeeId, { joiningDate: joiningDateValue });
+      }
+      setJoiningDateToast('✓ Saved!');
+      setTimeout(() => setJoiningDateToast(null), 3000);
+    } catch (err: any) {
+      setJoiningDateToast(`Error: ${err?.message || 'Failed'}`);
+    } finally {
+      setIsSavingJoiningDate(false);
+    }
+  };
 
   const [yearStr, monthStr] = selectedYearMonth.split('-');
   const year = parseInt(yearStr, 10);
@@ -284,6 +309,10 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     const nonWorking = isNonWorkingDay(dateFormatted, holidayDates);
     const isFuture = dateFormatted > todayStr;
 
+    const currentJoinDate = joiningDateValue || employee.joiningDate || (employee as any).joining_date;
+    const effectiveStartDate = currentJoinDate && currentJoinDate > COMPANY_START_DATE ? currentJoinDate : COMPANY_START_DATE;
+    const isPreInception = dateFormatted < effectiveStartDate;
+
     const wfhReq = empLeaveRequests.find(l => (isWfhType(l.type) || isWfhType(l.leaveCategory)) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
     const hasLeave = empLeaveRequests.some(l => !isWfhType(l.type) && !isWfhType(l.leaveCategory) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
     const isApprovedWfh = !hasLeave && (!!wfhReq || (employee.approvedWfhDates || []).includes(dateFormatted) || ((settings as any)?.companyWideWfhDates || []).includes(dateFormatted) || (rec && (rec.isWfh === true || rec.status === 'Work From Home')));
@@ -300,8 +329,11 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
       } else if (rec.status === 'Holiday' || nonWorking) {
         holidayDays++;
       } else if (rec.status === 'Absent' || !isFuture) {
-        absentDays++;
+        if (!isPreInception) absentDays++;
       }
+    } else if (isPreInception) {
+      // Days before company start (27 July 2026) or before employee joining date are unmarked (not absent)
+      continue;
     } else {
       if (hasLeave) {
         leaveDays++;
@@ -509,9 +541,37 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-400 font-medium truncate">
-              {employee.designation} • <span className="text-slate-300">{employee.department}</span>
-            </p>
+            <div className="flex items-center gap-3 mt-1 flex-wrap">
+              <p className="text-xs text-slate-400 font-medium truncate">
+                {employee.designation} • <span className="text-slate-300">{employee.department}</span>
+              </p>
+              <div className="flex items-center gap-2 text-xs bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Joining Date:</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={joiningDateValue}
+                    onChange={e => setJoiningDateValue(e.target.value)}
+                    className="px-2.5 py-1 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-blue-500 font-bold cursor-pointer"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveJoiningDate}
+                    disabled={isSavingJoiningDate}
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white rounded-lg text-xs font-bold cursor-pointer transition-all shadow-md shadow-blue-900/40 flex items-center gap-1.5 shrink-0"
+                    title="Save Joining Date for this employee"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{isSavingJoiningDate ? 'Saving...' : 'Save Date'}</span>
+                  </button>
+                  {joiningDateToast && (
+                    <span className="text-[11px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 animate-pulse">
+                      {joiningDateToast}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -746,6 +806,10 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   const holidayInfo = getHolidayInfo(dateFormatted);
                   const isFuture = dateFormatted > todayStr;
 
+                  const currentJoinDate = joiningDateValue || employee.joiningDate || (employee as any).joining_date;
+                  const effectiveStartDate = currentJoinDate && currentJoinDate > COMPANY_START_DATE ? currentJoinDate : COMPANY_START_DATE;
+                  const isPreInception = dateFormatted < effectiveStartDate;
+
                   let statusBg = 'bg-slate-950 border-slate-800 text-slate-400';
                   let statusLabel = 'Absent';
                   let statusDot = 'bg-rose-500';
@@ -776,10 +840,20 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       statusLabel = 'Half Day';
                       statusDot = 'bg-orange-400';
                     } else if (rec.status === 'Absent') {
-                      statusBg = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
-                      statusLabel = 'Absent';
-                      statusDot = 'bg-rose-400';
+                      if (isPreInception) {
+                        statusBg = 'bg-slate-950/40 border-slate-900/60 text-slate-600';
+                        statusLabel = '—';
+                        statusDot = 'bg-slate-800';
+                      } else {
+                        statusBg = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
+                        statusLabel = 'Absent';
+                        statusDot = 'bg-rose-400';
+                      }
                     }
+                  } else if (isPreInception) {
+                    statusBg = 'bg-slate-950/40 border-slate-900/60 text-slate-600';
+                    statusLabel = '—';
+                    statusDot = 'bg-slate-800';
                   } else if (isApprovedLeave) {
                     statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
                     statusLabel = 'Leave';

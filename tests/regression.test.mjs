@@ -1479,3 +1479,40 @@ test('wfh recognition: matches all variations of WFH types and resolves employee
   assert.equal(isReqApproved, true, 'Asbin must be recognized as approved WFH via approved WFH leave request');
 });
 
+test('per-employee joining date: days before employee joiningDate are unmarked and never absent', () => {
+  const empJoinedAug11 = {
+    id: 'emp-aug11',
+    employeeId: 'KSS2407050',
+    fullName: 'Ravi Teja',
+    joiningDate: '2026-08-11',
+    status: 'Active'
+  };
+
+  const empJoinedJuly27 = {
+    id: 'emp-july27',
+    employeeId: 'KSS2407001',
+    fullName: 'Satya Ranjan Das',
+    joiningDate: '2026-07-27',
+    status: 'Active'
+  };
+
+  const staff = [empJoinedAug11, empJoinedJuly27];
+
+  // On 2026-08-05: empJoinedAug11 has NOT joined yet (must be skipped, not absent). empJoinedJuly27 HAS joined.
+  const rosterAug5 = engine.buildDailyRoster(staff, [], '2026-08-05');
+  assert.equal(rosterAug5.some(r => r.employeeId === 'emp-aug11'), false, 'Employee joining on Aug 11 must NOT be in roster on Aug 5');
+  assert.equal(rosterAug5.some(r => r.employeeId === 'emp-july27'), true, 'Employee joining on July 27 must be evaluated on Aug 5');
+
+  // On 2026-08-12: Both have joined.
+  const rosterAug12 = engine.buildDailyRoster(staff, [], '2026-08-12');
+  assert.equal(rosterAug12.some(r => r.employeeId === 'emp-aug11'), true, 'Employee joining on Aug 11 must be in roster on Aug 12');
+  assert.equal(rosterAug12.some(r => r.employeeId === 'emp-july27'), true, 'Employee joining on July 27 must be in roster on Aug 12');
+
+  // Month roster for empJoinedAug11 in August 2026:
+  const monthRoster = engine.buildEmployeeMonthRoster(empJoinedAug11, [], '2026-08');
+  // Rows in month roster should only exist from Aug 11 onwards (no synthetic absent records for Aug 1 - Aug 10)
+  for (const row of monthRoster) {
+    assert.equal(row.date >= '2026-08-11', true, `Row date ${row.date} must be on or after joiningDate 2026-08-11`);
+  }
+});
+
