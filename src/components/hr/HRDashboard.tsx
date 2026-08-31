@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { 
   Users, 
@@ -40,9 +40,25 @@ interface HRDashboardProps {
 }
 
 export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
-  const { employees, attendance, leaveRequests, activeEmployee, checkIn, checkOut, startBreak, endBreak } = useAuth();
+  const { 
+    employees, 
+    attendance, 
+    leaveRequests, 
+    activeEmployee, 
+    checkIn, 
+    checkOut, 
+    startBreak, 
+    endBreak,
+    companyWideWfhDates,
+    settings 
+  } = useAuth();
 
   const todayStr = getEmployeeWorkDate(new Date());
+
+  // Real-time live attendance feed for today
+  const todayAttendance = useMemo(() => {
+    return attendance.filter(a => a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
+  }, [attendance, todayStr]);
 
   // Real-time live attendance ticker: re-computes live status every 10 seconds
   const [, setLiveTick] = useState(0);

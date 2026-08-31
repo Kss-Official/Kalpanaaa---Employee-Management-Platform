@@ -22,18 +22,12 @@ export default defineConfig(({ command }) => {
           navigateFallback: 'index.html'
         },
         workbox: {
-          globPatterns: command === 'build' ? ['**/*.{js,css,html,ico,png,svg,jpeg}'] : [],
-          // Keep the face-recognition bundle OUT of the precache. It is a large,
-          // lazily-imported chunk that every install was paying for up front, and
-          // precaching it bought nothing: the models themselves are fetched from
-          // third-party CDNs at runtime (MODEL_URLS in src/lib/faceRecognitionEngine.ts),
-          // so face check-in could never work offline regardless. Excluded here it is
-          // fetched on demand instead, which shrinks the install and speeds first load.
-          //
-          // vendor-pdf is deliberately NOT excluded: jspdf is bundled locally, so it
-          // genuinely does work offline once precached, and PDF export would regress.
-          globIgnores: ['**/vendor-faceapi-*.js'],
-          maximumFileSizeToCacheInBytes: 6000000, // 6MB to accommodate large JS bundles and logo
+          globPatterns: command === 'build' ? ['**/*.{js,css,html,ico,png,svg}'] : [],
+          // Keep the face-recognition bundle and massive media OUT of the precache.
+          // Precaching large media exhausts browser CacheStorage quotas causing
+          // "Failed to execute 'open' on 'CacheStorage'".
+          globIgnores: ['**/vendor-faceapi-*.js', '**/Final 1.jpg*', '**/*.jpeg', '**/*.jpg', '**/*.mp4'],
+          maximumFileSizeToCacheInBytes: 3000000, // 3MB cap prevents CacheStorage quota errors
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true

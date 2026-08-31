@@ -11,6 +11,7 @@ import {
 } from "firebase/auth";
 import { 
   initializeFirestore, 
+  getFirestore,
   collection, 
   doc, 
   getDoc, 
@@ -59,13 +60,11 @@ export const auth = getAuth(app);
 function createFirestore() {
   try {
     return initializeFirestore(app, {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager()
-      })
+      localCache: memoryLocalCache()
     });
-  } catch {
-    console.warn('[Firebase] Persistent multi-tab cache unavailable (Safari/private mode?), falling back to memory cache.');
-    return initializeFirestore(app, { localCache: memoryLocalCache() });
+  } catch (err) {
+    console.warn('[Firebase] Memory cache init fallback:', err);
+    return getFirestore(app);
   }
 }
 
@@ -92,8 +91,11 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMessage = error instanceof Error ? error.message : String(error);
+  const isQuota = errMessage.includes('QuotaExceeded') || errMessage.includes('quota') || errMessage.includes('IndexedDbTransactionError');
+  
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -101,6 +103,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
+
+  if (isQuota) {
+    console.warn(`[Firestore Storage] Device storage quota reached during ${operationType} on ${path ?? '<no-path>'}. Recovering gracefully.`);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage?.setItem('kss_storage_fallback', 'memory');
+      }
+    } catch {}
+    return errInfo;
+  }
+
   // P0 INCIDENT FIX: permission-denied used to be silently suppressed here, which
   // hid the outage where every portal stopped receiving realtime updates. A
   // permission-denied is ALWAYS a security-relevant signal (missing users/{uid}
@@ -119,11 +132,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 /**
  * P0 INCIDENT FIX: resilient realtime subscription.
  *
- * Firestore listeners that fail with a transient error (unavailable / network)
+ * Firestore listeners that fail with a transient error (unavailable / network / quota)
  * stay dead unless re-subscribed manually. And after a permission-denied they can
  * NEVER succeed with the same identity — recovery is owned by the auth lifecycle.
  *
  * - Retryable errors → exponential backoff re-subscribe (1s→30s cap).
+ * - Quota errors → safe cache cleanup & retry.
  * - permission-denied / unauthenticated → reported ONCE to onError; the caller's
  *   auth-gated effect will re-attach when onAuthStateChanged delivers a user.
  * Returns an Unsubscribe that also cancels any pending backoff timer.
@@ -149,10 +163,28 @@ export function subscribeWithRecovery(
       },
       (err) => {
         if (stopped) return;
+        const errMsg = String(err?.message || err || '');
+        const isQuota = errMsg.includes('QuotaExceeded') || errMsg.includes('quota') || errMsg.includes('IndexedDbTransactionError');
+
+        if (isQuota) {
+          console.warn('[Firestore] IndexedDB storage quota reached on device. Purging stale caches...');
+          try {
+            if (typeof window !== 'undefined') {
+              window.localStorage?.setItem('kss_storage_fallback', 'memory');
+              if (window.indexedDB) {
+                const staleDbNames = ['firestore/[DEFAULT]/kalpanaaa-employees-website/(default)', 'firebase-installations-database'];
+                staleDbNames.forEach(name => {
+                  try { window.indexedDB.deleteDatabase(name); } catch {}
+                });
+              }
+            }
+          } catch {}
+        }
+
         if (isRetryableListenerError(err) && attempt < maxAttempts) {
           attempt += 1;
           const delay = nextBackoffMs(attempt);
-          console.warn(`[Firestore] Transient listener error (${err.code}), re-subscribing in ${delay}ms (attempt ${attempt}/${maxAttempts}).`);
+          console.warn(`[Firestore] Transient listener error (${err.code || 'unavailable'}), re-subscribing in ${delay}ms (attempt ${attempt}/${maxAttempts}).`);
           timer = setTimeout(start, delay);
         } else {
           // Permanent for this identity — surfaced loudly instead of suppressed.

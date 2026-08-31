@@ -167,23 +167,28 @@ export const registerFcmToken = async (
   role: string
 ): Promise<void> => {
   try {
-    // Dynamically import FCM to avoid breaking non-supported environments
-    const { getMessaging, getToken } = await import('firebase/messaging');
-    const { getApp } = await import('firebase/app');
-    
-    const messaging = getMessaging(getApp());
-    
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !navigator.serviceWorker) {
+      return;
+    }
+
     const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
     if (!vapidKey || vapidKey.includes('YOUR_')) {
       return;
     }
 
-    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !navigator.serviceWorker) {
+    // Dynamically import FCM to avoid breaking non-supported environments
+    const { isSupported, getMessaging, getToken } = await import('firebase/messaging');
+    const supported = await isSupported().catch(() => false);
+    if (!supported) {
+      // Browser does not support PushManager / Web Push API (e.g. unsupported platform or disabled)
       return;
     }
 
+    const { getApp } = await import('firebase/app');
+    const messaging = getMessaging(getApp());
+
     const registration = await navigator.serviceWorker.ready;
-    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
+    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration }).catch(() => null);
 
     if (token) {
       // Deterministic document ID derived from token suffix: guarantees 1 document per browser device
@@ -198,22 +203,28 @@ export const registerFcmToken = async (
       console.info('[FCM] Token registered idempotently for employee:', employeeId);
     }
   } catch (err) {
-    console.warn('[FCM] Token registration failed (safe to ignore in dev/unsupported browsers):', err);
+    console.warn('[FCM] Token registration non-fatal notice (safe in unsupported browsers):', err);
   }
 };
 
 // Clean up current browser's FCM push token upon logout
 export const unregisterFcmToken = async (employeeId: string): Promise<void> => {
   try {
-    const { getMessaging, getToken } = await import('firebase/messaging');
-    const { getApp } = await import('firebase/app');
-    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-    if (!vapidKey || vapidKey.includes('YOUR_') || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
       return;
     }
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+    if (!vapidKey || vapidKey.includes('YOUR_')) {
+      return;
+    }
+    const { isSupported, getMessaging, getToken } = await import('firebase/messaging');
+    const supported = await isSupported().catch(() => false);
+    if (!supported) return;
+
+    const { getApp } = await import('firebase/app');
     const messaging = getMessaging(getApp());
     const registration = await navigator.serviceWorker.ready;
-    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
+    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration }).catch(() => null);
     if (token) {
       const tokenId = token.slice(-32).replace(/[^a-zA-Z0-9_-]/g, '_');
       await deleteDoc(doc(db, 'fcmTokens', tokenId)).catch(() => {});
@@ -227,7 +238,11 @@ export const unregisterFcmToken = async (employeeId: string): Promise<void> => {
 // Listen for foreground push notifications when app is active
 export const listenForegroundFcmMessages = async (onMessageReceived: (payload: any) => void): Promise<() => void> => {
   try {
-    const { getMessaging, onMessage } = await import('firebase/messaging');
+    if (typeof window === 'undefined') return () => {};
+    const { isSupported, getMessaging, onMessage } = await import('firebase/messaging');
+    const supported = await isSupported().catch(() => false);
+    if (!supported) return () => {};
+
     const { getApp } = await import('firebase/app');
     const messaging = getMessaging(getApp());
     const unsub = onMessage(messaging, (payload) => {
