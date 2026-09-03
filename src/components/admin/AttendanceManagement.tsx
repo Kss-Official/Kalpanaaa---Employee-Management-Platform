@@ -562,7 +562,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                 <th className="py-4 px-5">Designation</th>
                 <th className="py-4 px-5">Employment Type</th>
                 <th className="py-4 px-5">Specialization</th>
-                <th className="py-4 px-5">Leave Balance</th>
+                <th className="py-4 px-5 min-w-[200px]">Status & Leave Balance</th>
                 <th className="py-4 px-5 text-right">Actions</th>
               </tr>
             </thead>
@@ -584,11 +584,12 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                     null;
 
                   // Active / Inactive status
-                  const isActive = emp.status === 'Active';
-                  const statusBadge = isActive
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                    : 'bg-slate-700/40 text-slate-400 border-slate-600/30';
+                  const isInactive = emp.status === 'Inactive' || emp.status === 'Terminated' || emp.status === 'Suspended';
+                  const isActive = !isInactive;
                   const statusLabel = isActive ? 'Active' : 'Inactive';
+                  const statusBadge = isActive
+                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                    : 'bg-rose-500/10 text-rose-400 border-rose-500/30';
 
                   // Show Undo Checkout only if employee checked in AND already checked out today
                   const hasUndoableCheckout =
@@ -682,12 +683,17 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                         </div>
                       </td>
 
-                      {/* 7. Leave Balance + Status (Clickable -> Opens Calendar) */}
+                      {/* 7. Status & Leave Balance (Clickable -> Opens Calendar) */}
                       <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-2.5 flex-wrap">
                           {/* Active / Inactive badge */}
-                          <span className={`px-2.5 py-1 rounded-lg border text-xs font-bold ${statusBadge}`}>
-                            {statusLabel}
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold ${statusBadge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              isActive
+                                ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                                : 'bg-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.8)]'
+                            }`} />
+                            <span>{statusLabel}</span>
                           </span>
 
                           {/* Total Leave Button: Click to open calendar */}
