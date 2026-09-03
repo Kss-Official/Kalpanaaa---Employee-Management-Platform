@@ -90,7 +90,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   }, [filteredEmployees]);
 
   const executiveLeaders = useMemo(() => {
-    return employees.filter(emp => isExecutiveLeadership(emp));
+    return employees
+      .filter(emp => isExecutiveLeadership(emp))
+      .sort((a, b) => {
+        // sortOrder=1 → Gaurav (left), sortOrder=2 → Akshit (right)
+        const so = (e: any) => typeof e.sortOrder === 'number' ? e.sortOrder : 99;
+        if (so(a) !== so(b)) return so(a) - so(b);
+        return (a.employeeId || '').localeCompare(b.employeeId || '');
+      });
   }, [employees]);
 
   const getStatusIndicator = (status?: string) => {

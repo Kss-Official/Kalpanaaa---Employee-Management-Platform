@@ -64,10 +64,16 @@ export const EmployeeTeamDirectory: React.FC = () => {
 
   const executiveLeaders = useMemo(() => {
     // When searching or filtering by ALL, keep the executives list in the footer
-    if (selectedRole === 'ALL' || !selectedRole) {
-      return employees.filter(emp => isExecutiveLeadership(emp));
-    }
-    return allFilteredMembers.filter(emp => isExecutiveLeadership(emp));
+    const base = (selectedRole === 'ALL' || !selectedRole)
+      ? employees.filter(emp => isExecutiveLeadership(emp))
+      : allFilteredMembers.filter(emp => isExecutiveLeadership(emp));
+
+    // sortOrder=1 → Gaurav (left), sortOrder=2 → Akshit (right)
+    return base.sort((a, b) => {
+      const so = (e: any) => typeof e.sortOrder === 'number' ? e.sortOrder : 99;
+      if (so(a) !== so(b)) return so(a) - so(b);
+      return (a.employeeId || '').localeCompare(b.employeeId || '');
+    });
   }, [employees, allFilteredMembers, selectedRole]);
 
   const handleRoleClick = (key: string) => {
