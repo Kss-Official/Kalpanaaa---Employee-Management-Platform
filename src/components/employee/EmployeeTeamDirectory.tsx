@@ -38,7 +38,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
   const allFilteredMembers = useMemo(() => {
     return employees.filter(emp => {
       if (!emp.fullName || emp.fullName.trim() === '') return false;
-      if (emp.status === 'Terminated') return false;
+      if (emp.status === 'Terminated' || emp.status === 'Inactive') return false;
 
       const matchesSearch =
         (emp.fullName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
@@ -63,16 +63,53 @@ export const EmployeeTeamDirectory: React.FC = () => {
   }, [allFilteredMembers]);
 
   const executiveLeaders = useMemo(() => {
+    const getExecutiveRank = (emp: any): number => {
+      const name = (emp?.fullName || '').toLowerCase();
+      const id = (emp?.employeeId || '').toLowerCase();
+      const email = (emp?.email || '').toLowerCase();
+      const desig = (emp?.designation || '').toLowerCase();
+      const role = (emp?.executiveRole || '').toLowerCase();
+
+      // 1. Gaurav Sir is FIRST (Left side)
+      if (
+        name.includes('gaurav') ||
+        id === 'kss2407001' ||
+        email.includes('founder') ||
+        email.includes('gaurav') ||
+        desig.includes('managing director') ||
+        (desig.includes('cto') && !desig.includes('contractor')) ||
+        role === 'cto'
+      ) {
+        return 1;
+      }
+
+      // 2. Akshit Sir is SECOND (Right side)
+      if (
+        name.includes('akshit') ||
+        id === 'kss2407002' ||
+        id === 'ceo001' ||
+        email.includes('akshit') ||
+        desig.includes('ceo') ||
+        role === 'ceo'
+      ) {
+        return 2;
+      }
+
+      const so = Number(emp?.sortOrder);
+      if (!isNaN(so) && so > 0) return so + 2;
+
+      return 99;
+    };
+
     // When searching or filtering by ALL, keep the executives list in the footer
     const base = (selectedRole === 'ALL' || !selectedRole)
       ? employees.filter(emp => isExecutiveLeadership(emp))
       : allFilteredMembers.filter(emp => isExecutiveLeadership(emp));
 
-    // sortOrder=1 → Gaurav (left), sortOrder=2 → Akshit (right)
     return base.sort((a, b) => {
-      const so = (e: any) => typeof e.sortOrder === 'number' ? e.sortOrder : 99;
-      if (so(a) !== so(b)) return so(a) - so(b);
-      return (a.employeeId || '').localeCompare(b.employeeId || '');
+      const diff = getExecutiveRank(a) - getExecutiveRank(b);
+      if (diff !== 0) return diff;
+      return (a.fullName || '').localeCompare(b.fullName || '');
     });
   }, [employees, allFilteredMembers, selectedRole]);
 

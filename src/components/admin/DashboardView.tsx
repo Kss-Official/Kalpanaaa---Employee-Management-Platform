@@ -170,7 +170,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   const todayRecords = attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
 
   // Exclude Executive Leadership & Founders (CEO, CTO, COO Rahul Pathak, Founders) from operational metrics & graphs
-  const activeEmployees = useMemo(() => employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e)), [employees]);
+  const activeEmployees = useMemo(() => employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e)), [employees]);
   const totalEmployeesCount = activeEmployees.length;
 
   // Build full daily roster for all active employees with accurate live status

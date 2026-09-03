@@ -103,7 +103,7 @@ export function isAuthorizedTechLead(emp: any): boolean {
 export function canReview(reviewer: any, subject: any): boolean {
   if (!reviewer || !subject) return false;
   if (isSamePerson(reviewer, subject)) return false;
-  if (String(subject.status || '') === 'Terminated') return false;
+  if (String(subject.status || '') === 'Terminated' || String(subject.status || '') === 'Inactive') return false;
 
   if (isAuthorizedTechLead(reviewer)) {
     return true;

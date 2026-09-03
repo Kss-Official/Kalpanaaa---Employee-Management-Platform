@@ -6,7 +6,7 @@ import {
   Download, RotateCcw, Shield, Clock, Calendar, PieChart as PieChartIcon
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { generateEmployeeQrToken } from '../../lib/attendanceEngine';
+import { generateEmployeeQrToken, computeEmploymentType } from '../../lib/attendanceEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { triggerHaptic } from '../../hooks/useHaptic';
 import { animations } from '../../lib/animations';
@@ -230,8 +230,19 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                       <span className="font-semibold text-[var(--text-primary)]">{employee.designation}</span>
                     </div>
                     <div className="flex justify-between py-1.5 border-b border-[var(--border-subtle)]">
-                      <span className="text-[var(--text-secondary)]">Type</span>
-                      <span className="font-semibold text-[var(--text-primary)]">{employee.employmentType}</span>
+                      <span className="text-[var(--text-secondary)]">Employment Stage</span>
+                      {(() => {
+                        const effectiveType = computeEmploymentType(employee);
+                        return (
+                          <span className={`font-bold ${
+                            effectiveType === 'Intern' ? 'text-cyan-400' :
+                            effectiveType === 'Trainee' ? 'text-amber-400' :
+                            'text-emerald-400'
+                          }`}>
+                            {effectiveType}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="flex items-center justify-between py-2 border-b border-[var(--border-subtle)] flex-wrap gap-2">
                       <span className="text-[var(--text-secondary)]">Official Joined Date</span>

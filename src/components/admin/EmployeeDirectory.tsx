@@ -4,7 +4,7 @@ import { AllEmployeeBarcodesView } from './AllEmployeeBarcodesView';
 import { Employee, EmployeeStatus } from '../../types';
 import { motion } from 'framer-motion';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
-import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, computeEmploymentType } from '../../lib/attendanceEngine';
 import { 
   Search, 
   Plus, 
@@ -58,8 +58,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     if (status.toLowerCase() === 'on leave' || status.toLowerCase() === 'leave') {
       return 'On Leave';
     }
-    if (status.toLowerCase() === 'terminated') {
-      return 'Terminated';
+    if (status.toLowerCase() === 'terminated' || status.toLowerCase() === 'inactive') {
+      return 'Inactive';
     }
     if (status.toLowerCase() === 'suspended') {
       return 'Suspended';
@@ -90,13 +90,50 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   }, [filteredEmployees]);
 
   const executiveLeaders = useMemo(() => {
+    const getExecutiveRank = (emp: any): number => {
+      const name = (emp?.fullName || '').toLowerCase();
+      const id = (emp?.employeeId || '').toLowerCase();
+      const email = (emp?.email || '').toLowerCase();
+      const desig = (emp?.designation || '').toLowerCase();
+      const role = (emp?.executiveRole || '').toLowerCase();
+
+      // 1. Gaurav Sir is FIRST (Left side)
+      if (
+        name.includes('gaurav') ||
+        id === 'kss2407001' ||
+        email.includes('founder') ||
+        email.includes('gaurav') ||
+        desig.includes('managing director') ||
+        (desig.includes('cto') && !desig.includes('contractor')) ||
+        role === 'cto'
+      ) {
+        return 1;
+      }
+
+      // 2. Akshit Sir is SECOND (Right side)
+      if (
+        name.includes('akshit') ||
+        id === 'kss2407002' ||
+        id === 'ceo001' ||
+        email.includes('akshit') ||
+        desig.includes('ceo') ||
+        role === 'ceo'
+      ) {
+        return 2;
+      }
+
+      const so = Number(emp?.sortOrder);
+      if (!isNaN(so) && so > 0) return so + 2;
+
+      return 99;
+    };
+
     return employees
       .filter(emp => isExecutiveLeadership(emp))
       .sort((a, b) => {
-        // sortOrder=1 → Gaurav (left), sortOrder=2 → Akshit (right)
-        const so = (e: any) => typeof e.sortOrder === 'number' ? e.sortOrder : 99;
-        if (so(a) !== so(b)) return so(a) - so(b);
-        return (a.employeeId || '').localeCompare(b.employeeId || '');
+        const diff = getExecutiveRank(a) - getExecutiveRank(b);
+        if (diff !== 0) return diff;
+        return (a.fullName || '').localeCompare(b.fullName || '');
       });
   }, [employees]);
 
@@ -105,7 +142,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     switch (s) {
       case 'Active': return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]';
       case 'On Leave': return 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]';
-      case 'Terminated': return 'bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.5)]';
+      case 'Inactive': return 'bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.5)]';
       case 'Suspended': return 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]';
       default: return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]';
     }
@@ -183,7 +220,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
               <option value="ALL">All Statuses</option>
               <option value="Active">Active</option>
               <option value="On Leave">On Leave</option>
-              <option value="Terminated">Terminated</option>
+              <option value="Inactive">Inactive</option>
             </select>
           </div>
         </div>
@@ -226,14 +263,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                           alt={emp.fullName}
                           className="w-8 h-8 rounded-full object-cover border border-slate-700/50"
                         />
-                        <div>
-                          <div
-                            onClick={() => onSelectEmployee(emp)}
-                            className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
-                          >
-                            {emp.fullName}
-                          </div>
-                          <div className="text-[10px] font-medium text-slate-500">{emp.email}</div>
+                        <div
+                          onClick={() => onSelectEmployee(emp)}
+                          className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
+                        >
+                          {emp.fullName}
                         </div>
                       </div>
                     </td>
@@ -250,7 +284,18 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                     </td>
 
                     <td className="py-3 px-6">
-                      <div className="text-slate-400 font-bold">{emp.employmentType || 'Full Time'}</div>
+                      {(() => {
+                        const effectiveType = computeEmploymentType(emp);
+                        return (
+                          <div className={`font-bold text-xs ${
+                            effectiveType === 'Intern' ? 'text-cyan-400' :
+                            effectiveType === 'Trainee' ? 'text-amber-400' :
+                            'text-slate-300'
+                          }`}>
+                            {effectiveType}
+                          </div>
+                        );
+                      })()}
                       <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift?.split(' ')[0] || 'General'}</div>
                     </td>
 

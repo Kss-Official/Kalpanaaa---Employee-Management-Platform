@@ -78,7 +78,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
 
   // Filter out Leadership/Executives (CEO, CTO, Founder, COO Rahul Pathak) from HR attendance metrics
   const operationalEmployees = useMemo(() => {
-    return employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
+    return employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e));
   }, [employees]);
 
   // Map operational employees to their resolved today's attendance record (if any)

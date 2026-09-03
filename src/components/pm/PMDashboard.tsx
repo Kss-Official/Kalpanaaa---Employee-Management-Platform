@@ -126,7 +126,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
   // Filter operational workforce (excluding CEO, CTO, COO Rahul Pathak, Founders)
   const operationalEmployees = useMemo(() => {
-    return employees.filter(e => e.status !== 'Terminated' && !isExecutiveOrLeadership(e));
+    return employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e));
   }, [employees]);
 
   const totalWorkforceCount = operationalEmployees.length;

@@ -1110,9 +1110,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
-              // LIVE AUTOCORRECT INVALID OR 'check' EMPLOYEE STATUS TO 'Active'
-              const validStatuses: EmployeeStatus[] = ['Active', 'On Leave', 'Terminated', 'Suspended'];
-              if (!data.status || !validStatuses.includes(data.status as EmployeeStatus) || String(data.status).toLowerCase() === 'check' || String(data.status).toLowerCase() === 'checked in') {
+              // LIVE AUTOCORRECT INVALID OR 'check' EMPLOYEE STATUS TO 'Active' / 'Inactive'
+              const validStatuses: EmployeeStatus[] = ['Active', 'On Leave', 'Inactive', 'Suspended', 'Terminated'];
+              if (String(data.status).toLowerCase() === 'terminated') {
+                data.status = 'Inactive';
+                if (canMigrate) {
+                  setDoc(doc(db, 'employees', data.id), { status: 'Inactive' }, { merge: true }).catch(() => { });
+                }
+              } else if (!data.status || !validStatuses.includes(data.status as EmployeeStatus) || String(data.status).toLowerCase() === 'check' || String(data.status).toLowerCase() === 'checked in') {
                 data.status = 'Active';
                 if (canMigrate) {
                   setDoc(doc(db, 'employees', data.id), { status: 'Active' }, { merge: true }).catch(() => { });
@@ -1226,7 +1231,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (!prev) return prev;
                 const fresh = deduplicated.find(e => e.id === prev.id || e.employeeId === prev.employeeId || (prev.email && e.email?.toLowerCase() === prev.email.toLowerCase()));
                 if (!fresh) return prev;
-                if (fresh.status === 'Terminated' || fresh.status === 'Suspended') {
+                if (fresh.status === 'Inactive' || fresh.status === 'Terminated' || fresh.status === 'Suspended') {
                   console.warn('[Auth] Active employee status changed to', fresh.status, '— logging out.');
                   setTimeout(() => logout(), 0);
                   return null;

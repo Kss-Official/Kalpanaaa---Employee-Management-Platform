@@ -475,7 +475,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                       <option value="Active">Active</option>
                       <option value="On Leave">On Leave</option>
                       <option value="Suspended">Suspended</option>
-                      <option value="Terminated">Terminated</option>
+                      <option value="Inactive">Inactive</option>
                     </select>
                   </div>
 

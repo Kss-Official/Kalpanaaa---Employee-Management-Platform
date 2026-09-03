@@ -1,4 +1,4 @@
-import { CompanySettings, Employee, AttendanceRecord, AttendanceStatus } from '../types';
+import { CompanySettings, Employee, AttendanceRecord, AttendanceStatus, EmploymentType } from '../types';
 
 /**
  * Standard Company Timezone for Attendance & Work-Day calculations (IST)
@@ -280,6 +280,176 @@ export function computeSickLeaveBalance(
     balance,
     history
   };
+}
+
+/**
+ * Computes Casual Leave balance:
+ * - 1 day credited every 2 months after joining (6 per year).
+ * - Deducts all approved Casual Leave requests.
+ */
+export function computeCasualLeaveBalance(
+  emp: any,
+  leaveRequests: any[] = [],
+  refDate: Date = new Date()
+): { credited: number; taken: number; balance: number; monthlyBalance: number } {
+  if (!emp) return { credited: 0, taken: 0, balance: 0, monthlyBalance: 0 };
+
+  const joinDate = emp.joiningDate ? new Date(emp.joiningDate) : new Date(refDate.getFullYear(), 0, 1);
+  if (isNaN(joinDate.getTime())) return { credited: 0, taken: 0, balance: 0, monthlyBalance: 0 };
+
+  // Credit 1 day every 2 months from joining up to refDate
+  let credited = 0;
+  const cursor = new Date(joinDate);
+  cursor.setMonth(cursor.getMonth() + 2); // first credit after 2 months
+  while (cursor <= refDate) {
+    credited++;
+    cursor.setMonth(cursor.getMonth() + 2);
+  }
+
+  const approvedLeavesTaken = (leaveRequests || []).filter(l => {
+    if (!l) return false;
+    const isEmp =
+      (!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
+      (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
+      (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+    const isApproved = l.status === 'Approved' ||
+      ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
+       (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
+       l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
+    const isCasual = l.type === 'Casual Leave' || (l as any).leaveCategory === 'Casual Leave';
+    return isEmp && isApproved && isCasual;
+  }).length;
+
+  const balance = Math.max(0, credited - approvedLeavesTaken);
+  const currentMonthPrefix = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}`;
+  const monthTaken = (leaveRequests || []).filter(l => {
+    if (!l) return false;
+    const isEmp =
+      (!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
+      (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
+      (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+    const isApproved = l.status === 'Approved' ||
+      ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
+       (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
+       l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
+    const isCasual = l.type === 'Casual Leave' || (l as any).leaveCategory === 'Casual Leave';
+    const isInMonth = l.startDate ? l.startDate.startsWith(currentMonthPrefix) : false;
+    return isEmp && isApproved && isCasual && isInMonth;
+  }).length;
+
+  return { credited, taken: approvedLeavesTaken, balance, monthlyBalance: Math.max(0, balance - monthTaken) };
+}
+
+/**
+ * Aggregates Earn Leave, Sick Leave, and Casual Leave balances into a single summary object.
+ * Used by the Leave Balance KPI box in the monthly attendance modal.
+ */
+export function computeTotalLeaveBalances(
+  emp: any,
+  leaveRequests: any[] = [],
+  refDate: Date = new Date()
+): {
+  earnLeave: { credited: number; taken: number; balance: number; monthlyBalance: number };
+  sickLeave: { credited: number; taken: number; balance: number };
+  casualLeave: { credited: number; taken: number; balance: number; monthlyBalance: number };
+  totalCredited: number;
+  totalTaken: number;
+  totalBalance: number;
+} {
+  const el = computeEmployeeLeaveBalance(emp, leaveRequests, refDate);
+  const sl = computeSickLeaveBalance(emp, leaveRequests, refDate);
+  const cl = computeCasualLeaveBalance(emp, leaveRequests, refDate);
+
+  // Compute monthly balance for earn leave
+  const currentMonthPrefix = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}`;
+  const elMonthTaken = (leaveRequests || []).filter(l => {
+    if (!l) return false;
+    const isEmp =
+      (!!l.employeeId && (l.employeeId === emp?.id || l.employeeId === emp?.employeeId)) ||
+      (!!l.employeeUid && (l.employeeUid === emp?.uid || l.employeeUid === emp?.id)) ||
+      (!!l.employeeName && !!emp?.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+    const isApproved = l.status === 'Approved' ||
+      ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
+       (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
+       l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
+    const isEarnLeave = l.type === 'Leave' || l.type === 'Earn Leave' || (l as any).leaveCategory === 'Earn Leave';
+    const isInMonth = l.startDate ? l.startDate.startsWith(currentMonthPrefix) : false;
+    return isEmp && isApproved && isEarnLeave && isInMonth;
+  }).length;
+
+  return {
+    earnLeave: { credited: el.credited, taken: el.taken, balance: el.balance, monthlyBalance: Math.max(0, el.balance - elMonthTaken) },
+    sickLeave: { credited: sl.credited, taken: sl.taken, balance: sl.balance },
+    casualLeave: cl,
+    totalCredited: el.credited + sl.credited + cl.credited,
+    totalTaken: el.taken + sl.taken + cl.taken,
+    totalBalance: el.balance + sl.balance + cl.balance,
+  };
+}
+
+/**
+ * Dynamic Employment Type Progression:
+ * - All employees start as 'Intern'
+ * - After 3 months from start date -> become 'Trainee'
+ * - 6 months from the start -> become 'Full-Time'
+ * - Executive Leadership / Founders remain 'Full-Time'
+ */
+export function computeEmploymentType(emp: any, refDate: Date = new Date()): EmploymentType {
+  if (!emp) return 'Intern';
+
+  // Founders & Executive Leadership remain Full-Time
+  if (isExecutiveOrLeadership(emp)) {
+    return 'Full-Time';
+  }
+
+  const desig = (emp.designation || '').toLowerCase();
+  const name = (emp.fullName || '').toLowerCase();
+  const id = (emp.employeeId || emp.id || '').toLowerCase();
+  const email = (emp.email || '').toLowerCase();
+
+  // D. Koushik is explicitly Intern per organization policy
+  if (name.includes('koushik') || id.includes('kss2407003') || email.includes('koushik')) {
+    return 'Intern';
+  }
+
+  if (
+    desig.includes('managing director') ||
+    desig.includes('founder') ||
+    desig.includes('ceo') ||
+    desig.includes('cto')
+  ) {
+    return 'Full-Time';
+  }
+
+  const rawJoinDateStr = emp.joiningDate || (emp as any).joining_date || COMPANY_START_DATE;
+  // Any date before company inception (27 July 2026) is normalized to official start date
+  const joinDateStr = rawJoinDateStr < COMPANY_START_DATE ? COMPANY_START_DATE : rawJoinDateStr;
+  const joinDate = new Date(joinDateStr);
+  if (isNaN(joinDate.getTime())) {
+    return 'Intern';
+  }
+
+  // Calculate elapsed calendar months from start date
+  const startYear = joinDate.getFullYear();
+  const startMonth = joinDate.getMonth();
+  const startDay = joinDate.getDate();
+
+  const refYear = refDate.getFullYear();
+  const refMonth = refDate.getMonth();
+  const refDay = refDate.getDate();
+
+  let monthsElapsed = (refYear - startYear) * 12 + (refMonth - startMonth);
+  if (refDay < startDay) {
+    monthsElapsed -= 1;
+  }
+
+  if (monthsElapsed < 3) {
+    return 'Intern';
+  } else if (monthsElapsed < 6) {
+    return 'Trainee';
+  } else {
+    return 'Full-Time';
+  }
 }
 
 export interface CompanyHolidayItem {
@@ -1504,8 +1674,8 @@ export function buildDailyRoster(
 
   for (const emp of employees) {
     if (!emp) continue;
-    // Terminated / suspended staff are no longer expected to attend.
-    if (emp.status === 'Terminated' || emp.status === 'Suspended') continue;
+    // Inactive / terminated / suspended staff are no longer expected to attend.
+    if (emp.status === 'Inactive' || emp.status === 'Terminated' || emp.status === 'Suspended') continue;
 
     // Pre-joining staff: if date is before their official joiningDate, they have not yet started (not absent)
     const joinDate = emp.joiningDate || emp.joining_date;

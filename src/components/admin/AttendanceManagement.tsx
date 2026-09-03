@@ -23,12 +23,14 @@ import {
   ChevronDown,
   Tag,
   Layers,
-  Users
+  Users,
+  Stethoscope,
+  Coffee
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeEmployeeLeaveBalance, isLateCheckIn, isWfhType } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeTotalLeaveBalances, computeEmploymentType, isLateCheckIn, isWfhType } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 import { EmployeeProfileModal } from './EmployeeProfileModal';
 import { EmployeeFormModal } from './EmployeeFormModal';
@@ -37,39 +39,39 @@ import { EmployeeIdCardModal } from './EmployeeIdCardModal';
 // ─── Dropdown Constants ────────────────────────────────────────────────────────
 
 const DEPARTMENTS = [
-  'Management', 'IT', 'HR', 'Sales', 'Business Development',
+  'IT', 'HR', 'Management', 'Sales', 'Business Development',
   'Marketing', 'Design', 'Finance', 'Operations',
 ];
 
 const DESIGNATIONS = [
-  'Managing Director', 'CEO', 'Project Manager', 'Tech Lead',
-  'Software Developer', 'Senior Software Developer',
-  'Software Engineer', 'Senior Software Engineer',
-  'AI/ML Developer', 'AI/ML Engineer', 'Senior AI/ML Engineer',
+  'Managing Director', 'Project Manager', 'Tech Lead',
+  'Software Engineer', 'Software Developer', 'Senior Software Engineer',
+  'Senior Software Developer',
   'UI/UX Designer', 'Senior UI/UX Designer',
-  'Software Support Engineer', 'QA', 'QA Engineer', 'Senior QA Engineer',
-  'DevOps', 'Senior DevOps Engineer', 'Cloud & DevOps', 'Cloud & DevOps Engineer',
-  'Cybersecurity', 'Cybersecurity Engineer',
-  'Finance & Accounts Executive', 'HR Executive',
+  'QA Engineer', 'Senior QA Engineer',
+  'DevOps Engineer', 'Cloud & DevOps Engineer',
+  'Cybersecurity Engineer',
+  'HR Operations Manager', 'HR Executive',
+  'Finance & Accounts Executive',
   'Business Development Executive', 'IT Consultant',
   'Digital Marketing Executive',
 ];
 
 const EMPLOYMENT_TYPES = [
-  'Intern', 'Trainee', 'Engineer', 'Employee', 'Consultant', 'Freelancer', 'Contract',
+  'Intern', 'Trainee', 'Full-Time', 'Part-Time', 'Contract',
 ];
 
 // Specializations grouped for smart UX
 const SPECIALIZATION_GROUPS: { label: string; color: string; items: string[] }[] = [
   {
-    label: 'Web & App Dev',
+    label: 'Software & Web Dev',
     color: 'blue',
     items: ['Frontend Development', 'Backend Development', 'Full Stack Development', 'Web Development', 'App Development'],
   },
   {
-    label: 'AI & ML',
+    label: 'AI & Machine Learning',
     color: 'violet',
-    items: ['Machine Learning', 'Deep Learning', 'Generative AI', 'NLP', 'Computer Vision', 'AI Automation', 'Chatbot Development'],
+    items: ['AI & ML', 'Machine Learning', 'Deep Learning', 'Generative AI', 'NLP', 'Computer Vision', 'AI Automation', 'Chatbot Development'],
   },
   {
     label: 'Design',
@@ -92,24 +94,19 @@ const SPECIALIZATION_GROUPS: { label: string; color: string; items: string[] }[]
     items: ['Application Security', 'Network Security', 'Cybersecurity'],
   },
   {
-    label: 'Consulting',
+    label: 'Consulting & Support',
     color: 'teal',
-    items: ['IT Consulting', 'Technology Consulting', 'Solution Architecture'],
-  },
-  {
-    label: 'Support',
-    color: 'orange',
-    items: ['Application Support', 'Software Maintenance', 'Technical Support', 'Production Support'],
+    items: ['IT Consulting', 'Technology Consulting', 'Solution Architecture', 'Application Support'],
   },
   {
     label: 'Marketing',
     color: 'lime',
-    items: ['SEO', 'Social Media Marketing', 'Content Marketing', 'Google Ads / PPC', 'Digital Marketing'],
+    items: ['SEO', 'Social Media Marketing', 'Content Marketing', 'Digital Marketing'],
   },
   {
-    label: 'Leadership',
+    label: 'Leadership & HR',
     color: 'indigo',
-    items: ['Technical Leadership', 'Team Management', 'Project Management', 'Client Management'],
+    items: ['Project Management', 'Technical Leadership', 'HR Operations', 'Talent Acquisition', 'Client Management'],
   },
 ];
 
@@ -204,12 +201,8 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
     return map;
   }, [attendance, todayStr]);
 
-  // Compute Leave Balance — if EL already taken, return 0
-  const computeLeaveBalance = (emp: Employee) => {
-    const info = computeEmployeeLeaveBalance(emp, leaveRequests);
-    // If they have taken any EL, their effective balance is 0
-    return info.taken > 0 ? { ...info, balance: 0 } : info;
-  };
+  // Compute all leave balances (EL + SL + CL) for a single employee
+  const computeAllLeaves = (emp: Employee) => computeTotalLeaveBalances(emp, leaveRequests, new Date());
 
   const handleSyncAllEmployeeShifts = async () => {
     if (!canEditShifts) return;
@@ -241,24 +234,66 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
     }
   };
 
-  // Filtered Employees for the Attendance Ledger (excluding Executive Leadership & Founders)
+  // Department normalizer for Attendance Ledger: IT for all technical staff & Managing Director, HR separate
+  const getAttendanceDepartment = (emp: Employee): string => {
+    const raw = (emp.department || '').trim().toLowerCase();
+    const desig = (emp.designation || '').toLowerCase();
+    const name = (emp.fullName || '').toLowerCase();
+
+    // HR is separate
+    if (raw.includes('hr') || desig.includes('hr') || name.includes('hr department')) {
+      return 'HR';
+    }
+    // All engineers / developers / designers / tech staff / Managing Director Gaurav Sir -> IT
+    return 'IT';
+  };
+
+  // Filtered Employees for the Attendance Ledger (including Managing Director Gaurav Sir)
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
       if (!emp.fullName || emp.fullName.trim() === '') return false;
-      if (emp.status === 'Terminated') return false;
-      if (isExecutiveOrLeadership(emp)) return false;
+      if (emp.status === 'Terminated' || emp.status === 'Inactive') return false;
+
+      const isGaurav =
+        (emp.fullName || '').toLowerCase().includes('gaurav') ||
+        (emp.designation || '').toLowerCase().includes('managing director') ||
+        emp.employeeId === 'KSS2407001';
+
+      // Keep Gaurav Sir in ledger so he can be filtered by Managing Director; exclude other super admins/founders if needed
+      if (isExecutiveOrLeadership(emp) && !isGaurav) return false;
+
+      const empDept = getAttendanceDepartment(emp);
 
       const matchesSearch =
         (emp.fullName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (emp.employeeId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        empDept.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (emp.department || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (emp.designation || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchesDept = deptFilter === 'ALL' || emp.department === deptFilter;
-      const matchesDesignation = designationFilter === 'ALL' || emp.designation === designationFilter;
-      const matchesEmpType = empTypeFilter === 'ALL' || emp.employmentType === empTypeFilter;
-      const matchesSpec = specializationFilter === 'ALL' || 
-        (emp.skills || []).includes(specializationFilter);
+      const matchesDept =
+        deptFilter === 'ALL' ||
+        empDept.toLowerCase() === deptFilter.toLowerCase() ||
+        (emp.department || '').toLowerCase() === deptFilter.toLowerCase();
+
+      const desigLower = (emp.designation || '').toLowerCase();
+      const filterDesigLower = designationFilter.toLowerCase();
+
+      const matchesDesignation =
+        designationFilter === 'ALL' ||
+        desigLower === filterDesigLower ||
+        (emp.designation || '').trim() === designationFilter.trim();
+
+      const effectiveEmpType = computeEmploymentType(emp);
+      const matchesEmpType = empTypeFilter === 'ALL' || effectiveEmpType === empTypeFilter;
+
+      const matchesSpec =
+        specializationFilter === 'ALL' ||
+        (emp.skills || []).some(s => s.toLowerCase() === specializationFilter.toLowerCase()) ||
+        (specializationFilter === 'Frontend Development' && ((emp.skills || []).includes('Frontend Development') || desigLower.includes('frontend'))) ||
+        (specializationFilter === 'Backend Development' && ((emp.skills || []).includes('Backend Development') || desigLower.includes('backend'))) ||
+        (specializationFilter === 'Full Stack Development' && ((emp.skills || []).includes('Full Stack Development') || desigLower.includes('full stack') || desigLower.includes('software'))) ||
+        (specializationFilter === 'AI & ML' && ((emp.skills || []).some(s => s.toLowerCase().includes('ai') || s.toLowerCase().includes('machine learning')) || desigLower.includes('ai') || desigLower.includes('ml')));
 
       return matchesSearch && matchesDept && matchesDesignation && matchesEmpType && matchesSpec;
     });
@@ -540,7 +575,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                 </tr>
               ) : (
                 filteredEmployees.map(emp => {
-                  const leaveInfo = computeLeaveBalance(emp);
+                  const leaveInfo = computeAllLeaves(emp);
 
                   // Today's attendance record for this employee
                   const todayRec =
@@ -596,22 +631,33 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                       <td className="py-3.5 px-5 font-semibold text-slate-300">
                         <div className="flex items-center gap-1.5">
                           <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                          <span>{emp.department || 'General'}</span>
+                          <span>{getAttendanceDepartment(emp)}</span>
                         </div>
                       </td>
 
                       {/* 4. Designation */}
                       <td className="py-3.5 px-5">
-                        <span className="px-2.5 py-1 bg-slate-800 text-slate-200 border border-slate-700/60 rounded-lg text-[11px] font-semibold">
+                        <span className="px-2.5 py-1 bg-slate-800 text-slate-200 border border-slate-700/60 rounded-lg text-[11px] font-semibold whitespace-nowrap inline-block">
                           {emp.designation || '—'}
                         </span>
                       </td>
 
-                      {/* 5. Employment Type */}
+                      {/* 5. Employment Type (Dynamic: Intern -> Trainee -> Full-Time) */}
                       <td className="py-3.5 px-5">
-                        <span className="px-2.5 py-1 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 rounded-lg text-[11px] font-bold">
-                          {emp.employmentType || '—'}
-                        </span>
+                        {(() => {
+                          const effectiveEmpType = computeEmploymentType(emp);
+                          return (
+                            <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border inline-block ${
+                              effectiveEmpType === 'Intern'
+                                ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25'
+                                : effectiveEmpType === 'Trainee'
+                                ? 'bg-amber-500/10 text-amber-300 border-amber-500/25'
+                                : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                            }`}>
+                              {effectiveEmpType}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* 6. Specialization */}
@@ -636,19 +682,33 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                         </div>
                       </td>
 
-                      {/* 7. Leave Balance + Active/Inactive status */}
+                      {/* 7. Leave Balance + Status (Clickable -> Opens Calendar) */}
                       <td className="py-3.5 px-5">
                         <div className="flex items-center gap-2 flex-wrap">
-                          {/* Active / Inactive tag */}
+                          {/* Active / Inactive badge */}
                           <span className={`px-2.5 py-1 rounded-lg border text-xs font-bold ${statusBadge}`}>
                             {statusLabel}
                           </span>
 
-                          {/* EL balance chip */}
-                          <div className="inline-flex items-center gap-1.5 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800">
-                            <Palmtree className="w-3 h-3 text-purple-400 shrink-0" />
-                            <span className="text-[11px] font-black text-purple-300 font-mono">{leaveInfo.balance} EL Left</span>
-                          </div>
+                          {/* Total Leave Button: Click to open calendar */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              triggerHaptic();
+                              setHistoryEmployee(emp);
+                            }}
+                            className="group inline-flex items-center gap-1.5 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 hover:from-indigo-900/50 hover:to-purple-900/50 px-3 py-1.5 rounded-xl border border-indigo-500/30 hover:border-indigo-400/80 transition-all cursor-pointer shadow-xs active:scale-95"
+                            title={`Click to view ${emp.fullName}'s attendance & leave calendar`}
+                          >
+                            <Calendar className="w-3.5 h-3.5 text-indigo-400 group-hover:text-indigo-300 group-hover:scale-110 transition-all shrink-0" />
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Leave:</span>
+                            <span className={`text-xs font-black font-mono ${
+                              leaveInfo.totalBalance === 0 ? 'text-rose-400' :
+                              leaveInfo.totalBalance >= 3 ? 'text-emerald-400' : 'text-indigo-300'
+                            }`}>
+                              {leaveInfo.totalBalance} {leaveInfo.totalBalance === 1 ? 'Day' : 'Days'} Left
+                            </span>
+                          </button>
                         </div>
                       </td>
 

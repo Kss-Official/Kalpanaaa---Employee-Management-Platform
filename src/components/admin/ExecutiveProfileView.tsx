@@ -7,15 +7,10 @@ import {
   Building2,
   Calendar,
   CreditCard,
-  ShieldCheck,
-  User,
   Star,
-  Briefcase,
-  Clock,
   Award
 } from 'lucide-react';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
-import { getWorkDate } from '../../lib/attendanceEngine';
 
 /**
  * ExecutiveProfileView — Profile page for CEO / CTO / MD (SUPER_ADMIN).
@@ -28,11 +23,10 @@ import { getWorkDate } from '../../lib/attendanceEngine';
  * Shows only:
  *  - Personal identity card
  *  - Role & department info
- *  - Quick company stats
  *  - ID card viewer shortcut
  */
 export const ExecutiveProfileView: React.FC = () => {
-  const { activeEmployee, employees, attendance } = useAuth();
+  const { activeEmployee } = useAuth();
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   if (!activeEmployee) {
@@ -42,12 +36,6 @@ export const ExecutiveProfileView: React.FC = () => {
       </div>
     );
   }
-
-  // Quick stats
-  const totalEmployees = employees.length;
-  const today = getWorkDate(new Date());
-  const presentToday = attendance.filter(a => a.date === today && (a.status === 'Present' || a.status === 'Late' || a.status === 'Work From Home')).length;
-  const absentToday = totalEmployees - presentToday;
 
   const roleLabel =
     activeEmployee.role === 'SUPER_ADMIN'
@@ -59,20 +47,6 @@ export const ExecutiveProfileView: React.FC = () => {
         day: '2-digit', month: 'long', year: 'numeric'
       })
     : 'N/A';
-
-  const stats = [
-    { label: 'Total Employees', value: totalEmployees, icon: User, color: 'blue' },
-    { label: 'Present Today',   value: presentToday,   icon: ShieldCheck, color: 'emerald' },
-    { label: 'Absent Today',    value: absentToday,    icon: Clock,       color: 'rose' },
-    { label: 'Departments',     value: [...new Set(employees.map(e => e.department).filter(Boolean))].length, icon: Briefcase, color: 'purple' },
-  ];
-
-  const colorMap: Record<string, string> = {
-    blue:    'bg-blue-500/10 border-blue-500/30 text-blue-400',
-    emerald: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
-    rose:    'bg-rose-500/10 border-rose-500/30 text-rose-400',
-    purple:  'bg-purple-500/10 border-purple-500/30 text-purple-400',
-  };
 
   return (
     <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
@@ -226,33 +200,6 @@ export const ExecutiveProfileView: React.FC = () => {
           </p>
         </motion.div>
       </div>
-
-      {/* ── Company At-a-Glance Stats ─────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-        className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl"
-      >
-        <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
-          <ShieldCheck className="w-5 h-5 text-emerald-400" />
-          Company Overview — Live Snapshot
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map(({ label, value, icon: Icon, color }) => (
-            <div
-              key={label}
-              className={`p-4 rounded-2xl border ${colorMap[color]} space-y-2`}
-            >
-              <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${colorMap[color]}`}>
-                <Icon className="w-4 h-4" />
-              </div>
-              <div className="text-2xl font-black text-white">{value}</div>
-              <p className="text-[11px] font-semibold text-slate-400 leading-tight">{label}</p>
-            </div>
-          ))}
-        </div>
-      </motion.div>
 
       {/* ── Attendance History Modal ───────────────────────────── */}
       {showHistoryModal && activeEmployee && (

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Employee, AttendanceRecord, AttendanceStatus } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -22,13 +22,315 @@ import {
   Edit3,
   Check,
   Save,
-  AlertCircle
+  AlertCircle,
+  Palmtree,
+  Stethoscope,
+  CheckCircle2,
+  XCircle,
+  Info,
+  CalendarDays,
+  Layers
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
-import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType, COMPANY_START_DATE } from '../../lib/attendanceEngine';
+import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType, COMPANY_START_DATE, computeTotalLeaveBalances } from '../../lib/attendanceEngine';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { useHaptic } from '../../hooks/useHaptic';
+
+/* ─── Leave Balance KPI Box + Detail Modal ─── */
+const LeaveBalanceKpiBox: React.FC<{
+  employee: any;
+  leaveRequests: any[];
+  year: number;
+  month: number;
+  onOpen: () => void;
+}> = ({ employee, leaveRequests, year, month, onOpen }) => {
+  const [open, setOpen] = React.useState(false);
+  const [tab, setTab] = React.useState<'All' | 'Earn Leave' | 'Sick Leave' | 'Casual Leave' | 'WFH'>('All');
+
+  const refDate = React.useMemo(() => new Date(year, month - 1, 1), [year, month]);
+  const overview = React.useMemo(
+    () => computeTotalLeaveBalances(employee, leaveRequests, refDate),
+    [employee, leaveRequests, refDate]
+  );
+
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  const allReqs = React.useMemo(() => {
+    return (leaveRequests || []).filter((l: any) => {
+      if (!l) return false;
+      return (
+        (l.employeeId && (l.employeeId === employee.id || l.employeeId === employee.employeeId)) ||
+        (l.employeeUid && (l.employeeUid === (employee as any).uid || l.employeeUid === employee.id)) ||
+        (l.employeeName && employee.fullName && l.employeeName.trim().toLowerCase() === employee.fullName.trim().toLowerCase())
+      );
+    });
+  }, [leaveRequests, employee]);
+
+  return (
+    <>
+      {/* KPI Trigger Box */}
+      <button
+        type="button"
+        onClick={() => { onOpen(); setOpen(true); }}
+        className="bg-gradient-to-br from-indigo-950 via-purple-950/80 to-slate-900 hover:from-indigo-900 hover:to-purple-900 p-2 rounded-xl border border-indigo-500/40 hover:border-indigo-400 transition-all cursor-pointer group text-center shadow-lg active:scale-95 flex flex-col justify-between relative overflow-hidden"
+        title="Click to view leave balance: Earn Leave, Sick Leave, Casual Leave"
+      >
+        <div className="absolute -right-5 -top-5 w-12 h-12 bg-indigo-500/10 rounded-full blur-sm pointer-events-none" />
+        <div className="flex items-center justify-center gap-1">
+          <span className="text-[10px] font-black text-indigo-300 uppercase tracking-wider">Leaves Left</span>
+          <Sparkles className="w-3 h-3 text-indigo-400 group-hover:rotate-12 transition-transform" />
+        </div>
+        <div className="flex items-center justify-center my-0.5">
+          <span className="text-base font-black text-white group-hover:text-indigo-200 font-mono transition-colors">
+            {overview.totalBalance} Days
+          </span>
+        </div>
+        <div className="text-[9px] font-bold text-indigo-400 group-hover:text-indigo-300 transition-colors">
+          EL {overview.earnLeave.balance} • SL {overview.sickLeave.balance} • CL {overview.casualLeave.balance}
+        </div>
+      </button>
+
+      {/* Leave Balance Detail Modal */}
+      <AnimatePresence>
+        {open && (
+          <div className="fixed inset-0 z-[300] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 16 }}
+              transition={{ duration: 0.2 }}
+              className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto"
+            >
+              {/* Header */}
+              <div className="p-5 sm:p-6 border-b border-slate-800 flex items-start justify-between gap-4 bg-slate-950/60 shrink-0">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                    <Sparkles className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">Leave Quota & Balance Ledger</h2>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                        {overview.totalBalance} Days Available
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-slate-300">{employee.fullName}</span>
+                      <span>•</span>
+                      <span className="font-mono text-blue-400">{employee.employeeId}</span>
+                      <span>•</span>
+                      <span>{employee.designation || 'Staff'}</span>
+                      <span>•</span>
+                      <span className="text-slate-500">Joined: {employee.joiningDate || '2026-07-27'}</span>
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setOpen(false)} className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer shrink-0">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Scrollable Body */}
+              <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1">
+
+                {/* Hero Summary */}
+                <div className="bg-gradient-to-br from-indigo-950/60 via-slate-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+                  <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" /> Total Combined Leave Balance
+                      </span>
+                      <div className="flex items-baseline gap-2 mt-1">
+                        <span className="text-4xl font-black text-white font-mono tracking-tight">{overview.totalBalance}</span>
+                        <span className="text-sm font-bold text-slate-300">{overview.totalBalance === 1 ? 'Day Left' : 'Days Left'}</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">Earn Leave + Sick Leave + Casual Leave combined balance.</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 shrink-0">
+                      <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-center">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Credited</span>
+                        <span className="text-base font-black text-emerald-400 font-mono mt-0.5 block">{overview.totalCredited} Days</span>
+                      </div>
+                      <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-center">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Used</span>
+                        <span className="text-base font-black text-rose-400 font-mono mt-0.5 block">{overview.totalTaken} Days</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3 Category Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Earn Leave */}
+                  <div className="bg-slate-950/80 border border-purple-500/30 hover:border-purple-500/50 transition-all rounded-2xl p-4 flex flex-col gap-3">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                          <Palmtree className="w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-black text-purple-300 uppercase tracking-wider">Earn Leave (EL)</span>
+                      </div>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-300 border border-purple-500/30">Monthly</span>
+                    </div>
+                    <div className="text-center py-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
+                      <span className="text-2xl font-black text-purple-300 font-mono">{overview.earnLeave.balance} <span className="text-xs text-slate-400 font-sans">Days</span></span>
+                    </div>
+                    <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
+                      <div className="flex justify-between"><span className="text-slate-400">Total Credited:</span><span className="font-bold font-mono text-white">{overview.earnLeave.credited} Days</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Approved Taken:</span><span className="font-bold font-mono text-rose-400">{overview.earnLeave.taken} Days</span></div>
+                      <div className="flex justify-between pt-1 border-t border-slate-800"><span className="text-slate-400">{monthNames[month - 1]} Balance:</span><span className="font-bold font-mono text-purple-300">{overview.earnLeave.monthlyBalance} Left</span></div>
+                    </div>
+                    <div className="text-[10px] text-slate-400 flex items-start gap-1.5">
+                      <Info className="w-3.5 h-3.5 text-purple-400 shrink-0 mt-0.5" />
+                      <span>1 day credited on the 1st of every calendar month.</span>
+                    </div>
+                  </div>
+
+                  {/* Sick Leave */}
+                  <div className="bg-slate-950/80 border border-rose-500/30 hover:border-rose-500/50 transition-all rounded-2xl p-4 flex flex-col gap-3">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                          <Stethoscope className="w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-black text-rose-300 uppercase tracking-wider">Sick Leave (SL)</span>
+                      </div>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/30">Recurring</span>
+                    </div>
+                    <div className="text-center py-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
+                      <span className="text-2xl font-black text-rose-300 font-mono">{overview.sickLeave.balance} <span className="text-xs text-slate-400 font-sans">Days</span></span>
+                    </div>
+                    <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
+                      <div className="flex justify-between"><span className="text-slate-400">Total Credited:</span><span className="font-bold font-mono text-white">{overview.sickLeave.credited} Days</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Approved Taken:</span><span className="font-bold font-mono text-rose-400">{overview.sickLeave.taken} Days</span></div>
+                      <div className="flex justify-between pt-1 border-t border-slate-800"><span className="text-slate-400">Status:</span><span className="font-bold text-emerald-400">Active</span></div>
+                    </div>
+                    <div className="text-[10px] text-slate-400 flex items-start gap-1.5">
+                      <Info className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                      <span>1 day traineeship SL + 1 day every 3 recurring months.</span>
+                    </div>
+                  </div>
+
+                  {/* Casual Leave */}
+                  <div className="bg-slate-950/80 border border-cyan-500/30 hover:border-cyan-500/50 transition-all rounded-2xl p-4 flex flex-col gap-3">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                          <Coffee className="w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-black text-cyan-300 uppercase tracking-wider">Casual Leave (CL)</span>
+                      </div>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">Bi-Monthly</span>
+                    </div>
+                    <div className="text-center py-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
+                      <span className="text-2xl font-black text-cyan-300 font-mono">{overview.casualLeave.balance} <span className="text-xs text-slate-400 font-sans">Days</span></span>
+                    </div>
+                    <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
+                      <div className="flex justify-between"><span className="text-slate-400">Total Credited:</span><span className="font-bold font-mono text-white">{overview.casualLeave.credited} Days</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Approved Taken:</span><span className="font-bold font-mono text-rose-400">{overview.casualLeave.taken} Days</span></div>
+                      <div className="flex justify-between pt-1 border-t border-slate-800"><span className="text-slate-400">Policy:</span><span className="font-bold text-cyan-400">6 Days / Year</span></div>
+                    </div>
+                    <div className="text-[10px] text-slate-400 flex items-start gap-1.5">
+                      <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                      <span>1 day credited every 2 months (6 per year).</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Applied Leaves Table */}
+                <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays className="w-4 h-4 text-blue-400" />
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider">Applied Leaves & Approval Status</h3>
+                    </div>
+                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px] font-bold overflow-x-auto shrink-0">
+                      {(['All', 'Earn Leave', 'Sick Leave', 'Casual Leave', 'WFH'] as const).map(t => (
+                        <button key={t} onClick={() => setTab(t)}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap ${tab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const filtered = allReqs.filter((req: any) => {
+                      if (tab === 'All') return true;
+                      const t = req.type || req.leaveCategory || '';
+                      if (tab === 'Earn Leave') return t === 'Earn Leave' || t === 'Leave';
+                      return t === tab;
+                    });
+                    if (!filtered.length) return (
+                      <div className="py-10 text-center text-slate-500 text-xs">
+                        <Layers className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
+                        <p>No leave requests found{tab !== 'All' ? ` for ${tab}` : ''}.</p>
+                      </div>
+                    );
+                    return (
+                      <div className="space-y-2.5">
+                        {filtered.map((req: any) => {
+                          const isApproved = req.status === 'Approved' ||
+                            (['Approved','N/A','Bypassed'].includes(req.pmStatus) &&
+                             ['Approved','N/A','Bypassed'].includes(req.hrStatus) &&
+                             req.ceoStatus === 'Approved' && req.ctoStatus === 'Approved');
+                          const isRejected = req.status === 'Rejected' || req.pmStatus === 'Rejected' || req.hrStatus === 'Rejected' || req.ceoStatus === 'Rejected' || req.ctoStatus === 'Rejected';
+                          const rType = req.type || req.leaveCategory || 'Leave';
+                          return (
+                            <div key={req.id} className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors">
+                              <div className="flex items-start gap-3">
+                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${rType === 'Sick Leave' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : rType === 'Casual Leave' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' : rType === 'WFH' ? 'bg-sky-500/10 text-sky-400 border-sky-500/30' : 'bg-purple-500/10 text-purple-400 border-purple-500/30'}`}>
+                                  {rType === 'Sick Leave' ? <Stethoscope className="w-4 h-4" /> : rType === 'Casual Leave' ? <Coffee className="w-4 h-4" /> : rType === 'WFH' ? <Sparkles className="w-4 h-4" /> : <Palmtree className="w-4 h-4" />}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-white text-xs">{rType === 'Leave' ? 'Earn Leave' : rType}</span>
+                                    <span className="font-mono text-[11px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700/60">{req.startDate}{req.endDate && req.endDate !== req.startDate ? ` → ${req.endDate}` : ''}</span>
+                                  </div>
+                                  {req.reason && <p className="text-[11px] text-slate-400 mt-1 line-clamp-1 italic">&ldquo;{req.reason}&rdquo;</p>}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                                <div className="hidden lg:flex items-center gap-1 text-[10px] text-slate-500">
+                                  <span className="bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">PM: {req.pmStatus || '—'}</span>
+                                  <span className="bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">HR: {req.hrStatus || '—'}</span>
+                                  <span className="bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">CEO: {req.ceoStatus || '—'}</span>
+                                  <span className="bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">CTO: {req.ctoStatus || '—'}</span>
+                                </div>
+                                {isApproved
+                                  ? <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"><CheckCircle2 className="w-3.5 h-3.5" />Approved</span>
+                                  : isRejected
+                                    ? <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30"><XCircle className="w-3.5 h-3.5" />Rejected</span>
+                                    : <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30"><Clock className="w-3.5 h-3.5" />Pending</span>
+                                }
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-950/60 shrink-0">
+                <span className="text-[11px] text-slate-500">Kalpanaaa Attendance & Leave Ledger • Real-time</span>
+                <button onClick={() => setOpen(false)} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer">Close</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
 
 interface EmployeeMonthlyAttendanceModalProps {
   employee: Employee;
@@ -74,6 +376,22 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   const [isSavingCorrection, setIsSavingCorrection] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const [quickFeedback, setQuickFeedback] = useState<string | null>(null);
+
+  // Leave Balance Details Modal State
+  const [isLeaveBalanceModalOpen, setIsLeaveBalanceModalOpen] = useState(false);
+  const [leaveCategoryTab, setLeaveCategoryTab] = useState<'All' | 'Earn Leave' | 'Sick Leave' | 'Casual Leave' | 'WFH'>('All');
+
+  // KPI Click → Calendar Highlight
+  const calendarRef = useRef<HTMLDivElement>(null);
+  const [kpiHighlightFilter, setKpiHighlightFilter] = useState<string | null>(null);
+
+  const handleKpiClick = (filter: string) => {
+    triggerHaptic();
+    setKpiHighlightFilter(prev => prev === filter ? null : filter);
+    setTimeout(() => {
+      calendarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  };
 
   // Joining Date editing state
   const [joiningDateValue, setJoiningDateValue] = useState<string>(employee.joiningDate || (employee as any).joining_date || '2026-07-27');
@@ -637,28 +955,87 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                 </button>
               </div>
 
-              {/* Monthly Turnout KPIs */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 w-full lg:w-auto text-center text-xs">
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+              {/* Monthly Turnout KPIs + Leave Balance Box */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2 w-full lg:w-auto text-center text-xs">
+                <button
+                  type="button"
+                  onClick={() => handleKpiClick('Present')}
+                  className={`p-2.5 rounded-xl border flex flex-col justify-center transition-all cursor-pointer active:scale-95 ${
+                    kpiHighlightFilter === 'Present'
+                      ? 'bg-emerald-500/20 border-emerald-400 shadow-lg shadow-emerald-500/20'
+                      : 'bg-slate-900 border-slate-800 hover:border-emerald-500/40'
+                  }`}
+                  title="Click to highlight Present days in calendar"
+                >
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present</span>
                   <span className="text-base font-black text-emerald-400 font-mono">{presentDays} Days</span>
-                </div>
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+                  {kpiHighlightFilter === 'Present' && <span className="text-[9px] text-emerald-400 font-bold mt-0.5">↓ Highlighted</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiClick('Late')}
+                  className={`p-2.5 rounded-xl border flex flex-col justify-center transition-all cursor-pointer active:scale-95 ${
+                    kpiHighlightFilter === 'Late'
+                      ? 'bg-amber-500/20 border-amber-400 shadow-lg shadow-amber-500/20'
+                      : 'bg-slate-900 border-slate-800 hover:border-amber-500/40'
+                  }`}
+                  title="Click to highlight Late days in calendar"
+                >
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Late</span>
                   <span className="text-base font-black text-amber-400 font-mono">{lateDays} Days</span>
-                </div>
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+                  {kpiHighlightFilter === 'Late' && <span className="text-[9px] text-amber-400 font-bold mt-0.5">↓ Highlighted</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiClick('WFH')}
+                  className={`p-2.5 rounded-xl border flex flex-col justify-center transition-all cursor-pointer active:scale-95 ${
+                    kpiHighlightFilter === 'WFH'
+                      ? 'bg-sky-500/20 border-sky-400 shadow-lg shadow-sky-500/20'
+                      : 'bg-slate-900 border-slate-800 hover:border-sky-500/40'
+                  }`}
+                  title="Click to highlight WFH days in calendar"
+                >
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">WFH</span>
                   <span className="text-base font-black text-sky-400 font-mono">{wfhDays} Days</span>
-                </div>
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+                  {kpiHighlightFilter === 'WFH' && <span className="text-[9px] text-sky-400 font-bold mt-0.5">↓ Highlighted</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiClick('Leave')}
+                  className={`p-2.5 rounded-xl border flex flex-col justify-center transition-all cursor-pointer active:scale-95 ${
+                    kpiHighlightFilter === 'Leave'
+                      ? 'bg-purple-500/20 border-purple-400 shadow-lg shadow-purple-500/20'
+                      : 'bg-slate-900 border-slate-800 hover:border-purple-500/40'
+                  }`}
+                  title="Click to highlight Leave days in calendar"
+                >
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Leave</span>
                   <span className="text-base font-black text-purple-400 font-mono">{leaveDays} Days</span>
-                </div>
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 col-span-2 sm:col-span-1">
+                  {kpiHighlightFilter === 'Leave' && <span className="text-[9px] text-purple-400 font-bold mt-0.5">↓ Highlighted</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiClick('Holiday')}
+                  className={`p-2.5 rounded-xl border flex flex-col justify-center transition-all cursor-pointer active:scale-95 ${
+                    kpiHighlightFilter === 'Holiday'
+                      ? 'bg-slate-700/60 border-slate-400 shadow-lg shadow-slate-500/20'
+                      : 'bg-slate-900 border-slate-800 hover:border-slate-600'
+                  }`}
+                  title="Click to highlight Holiday / Off days in calendar"
+                >
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Holiday / Off</span>
                   <span className="text-base font-black text-slate-300 font-mono">{holidayDays} Days</span>
-                </div>
+                  {kpiHighlightFilter === 'Holiday' && <span className="text-[9px] text-slate-300 font-bold mt-0.5">↓ Highlighted</span>}
+                </button>
+
+                {/* 🌟 Interactive Leave Balance Section Box */}
+                <LeaveBalanceKpiBox
+                  employee={employee}
+                  leaveRequests={leaveRequests}
+                  year={year}
+                  month={month}
+                  onOpen={() => { triggerHaptic(); setIsLeaveBalanceModalOpen(true); }}
+                />
               </div>
             </div>
 
@@ -768,13 +1145,21 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
             </div>
 
             {/* Monthly Calendar Grid & Day Inspector */}
-            <div className="space-y-4">
+            <div ref={calendarRef} className="space-y-4 scroll-mt-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
                 <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                   <Calendar className="w-4 h-4 text-blue-400" />
                   <span>Click any date below to inspect &amp; edit attendance</span>
                 </h4>
                 <div className="flex items-center gap-3 text-[10px] text-slate-400 flex-wrap">
+                  {kpiHighlightFilter && (
+                    <button
+                      onClick={() => setKpiHighlightFilter(null)}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-blue-500/15 text-blue-300 border border-blue-500/30 rounded-full font-bold hover:bg-blue-500/25 transition-colors cursor-pointer"
+                    >
+                      Showing: {kpiHighlightFilter} <X className="w-3 h-3" />
+                    </button>
+                  )}
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400" /> Present</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Late</span>
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> WFH</span>
@@ -878,6 +1263,19 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
                   const isSelected = selectedDateStr === dateFormatted;
 
+                  // KPI highlight: does this day match the active filter?
+                  const isKpiHighlighted = kpiHighlightFilter !== null && (() => {
+                    if (kpiHighlightFilter === 'Present') return statusLabel === 'Present';
+                    if (kpiHighlightFilter === 'Late') return statusLabel === 'Late';
+                    if (kpiHighlightFilter === 'WFH') return statusLabel === 'WFH';
+                    if (kpiHighlightFilter === 'Leave') return statusLabel === 'Leave';
+                    if (kpiHighlightFilter === 'Holiday') return statusLabel === 'Holiday' || statusLabel === 'Weekly Off' || isNonWorking;
+                    return false;
+                  })();
+
+                  // Dim non-matching cells when a filter is active
+                  const isDimmed = kpiHighlightFilter !== null && !isKpiHighlighted;
+
                   return (
                     <div
                       key={dayNum}
@@ -886,7 +1284,19 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                         setActiveScope('day');
                       }}
                       className={`p-2 min-h-[60px] rounded-2xl border flex flex-col justify-between transition-all cursor-pointer ${statusBg} ${
-                        isSelected ? 'ring-2 ring-blue-500 border-blue-400 scale-[1.02] shadow-lg' : 'hover:scale-[1.02]'
+                        isSelected ? 'ring-2 ring-blue-500 border-blue-400 scale-[1.02] shadow-lg' :
+                        isKpiHighlighted ? 'ring-2 ring-offset-1 ring-offset-slate-950 scale-[1.03] shadow-xl z-10 relative' :
+                        'hover:scale-[1.02]'
+                      } ${
+                        isKpiHighlighted ? (
+                          kpiHighlightFilter === 'Present' ? 'ring-emerald-400 shadow-emerald-500/30' :
+                          kpiHighlightFilter === 'Late' ? 'ring-amber-400 shadow-amber-500/30' :
+                          kpiHighlightFilter === 'WFH' ? 'ring-sky-400 shadow-sky-500/30' :
+                          kpiHighlightFilter === 'Leave' ? 'ring-purple-400 shadow-purple-500/30' :
+                          'ring-slate-400 shadow-slate-500/20'
+                        ) : ''
+                      } ${
+                        isDimmed ? 'opacity-30' : ''
                       } ${isFuture && !rec ? 'opacity-50' : ''}`}
                     >
                       <div className="flex items-center justify-between">

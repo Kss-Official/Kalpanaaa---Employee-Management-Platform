@@ -1,8 +1,8 @@
 export type UserRole = 'SUPER_ADMIN' | 'HR_ADMIN' | 'PROJECT_MANAGER' | 'EMPLOYEE';
 
-export type EmploymentType = 'Full-Time' | 'Part-Time' | 'Contract' | 'Intern';
+export type EmploymentType = 'Full-Time' | 'Part-Time' | 'Contract' | 'Intern' | 'Trainee';
 
-export type EmployeeStatus = 'Active' | 'On Leave' | 'Terminated' | 'Suspended';
+export type EmployeeStatus = 'Active' | 'On Leave' | 'Inactive' | 'Suspended' | 'Terminated';
 
 export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Half Day' | 'On Leave' | 'Holiday' | 'Work From Home';
 
