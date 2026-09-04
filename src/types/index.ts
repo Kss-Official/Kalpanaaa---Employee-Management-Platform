@@ -193,6 +193,8 @@ export interface Employee {
   role: UserRole;
   qrToken: string;
   approvedWfhDates?: string[]; // YYYY-MM-DD format
+  sickLeaveBalance?: number;
+  earnLeaveBalance?: number;
   currentSessionId?: string; // For backward compatibility
   desktopSessionId?: string; // Active Laptop/Desktop session ID
   mobileSessionId?: string;  // Active Mobile/Tablet session ID

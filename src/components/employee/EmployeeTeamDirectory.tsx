@@ -1,8 +1,78 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Mail, Phone, Building2, Search, Users, ChevronDown, Star, Crown, Shield } from 'lucide-react';
+import { Mail, Phone, Building2, Search, Users, ChevronDown, Star, Crown, Shield, Layers, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
+import { isAuthorizedTechLead } from '../../lib/hierarchy';
+import { Employee } from '../../types';
+
+// ─── Specialization Groups & Helpers (Matching Attendance Ledger & Admin Directory) ────
+const SPEC_GROUPS: { color: string; items: string[] }[] = [
+  { color: 'blue',   items: ['Frontend Development', 'Backend Development', 'Full Stack Development', 'Web Development', 'App Development'] },
+  { color: 'violet', items: ['AI & ML', 'Machine Learning', 'Deep Learning', 'Generative AI', 'NLP', 'Computer Vision', 'AI Automation', 'Chatbot Development'] },
+  { color: 'pink',   items: ['UI Design', 'UX Design', 'UI/UX Design', 'Product Design', 'Figma'] },
+  { color: 'amber',  items: ['Manual Testing', 'Automation Testing', 'API Testing'] },
+  { color: 'cyan',   items: ['Cloud Computing', 'DevOps', 'AWS', 'Azure', 'CI/CD'] },
+  { color: 'red',    items: ['Application Security', 'Network Security', 'Cybersecurity'] },
+  { color: 'teal',   items: ['IT Consulting', 'Technology Consulting', 'Solution Architecture', 'Application Support'] },
+  { color: 'lime',   items: ['SEO', 'Social Media Marketing', 'Content Marketing', 'Digital Marketing'] },
+  { color: 'indigo', items: ['Project Management', 'Technical Leadership', 'HR Operations', 'Talent Acquisition', 'Client Management'] },
+];
+
+const getDirectorySpecColor = (spec: string): string => {
+  if (spec === 'UI/UX Design' || spec === 'UI Design' || spec === 'UX Design')
+    return 'bg-pink-500/15 text-pink-300 border-pink-500/25';
+  for (const g of SPEC_GROUPS) {
+    if (g.items.includes(spec)) {
+      const map: Record<string, string> = {
+        blue:   'bg-blue-500/15 text-blue-300 border-blue-500/25',
+        violet: 'bg-violet-500/15 text-violet-300 border-violet-500/25',
+        pink:   'bg-pink-500/15 text-pink-300 border-pink-500/25',
+        amber:  'bg-amber-500/15 text-amber-300 border-amber-500/25',
+        cyan:   'bg-cyan-500/15 text-cyan-300 border-cyan-500/25',
+        red:    'bg-red-500/15 text-red-300 border-red-500/25',
+        teal:   'bg-teal-500/15 text-teal-300 border-teal-500/25',
+        lime:   'bg-lime-500/15 text-lime-300 border-lime-500/25',
+        indigo: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/25',
+      };
+      return map[g.color] || 'bg-slate-700/40 text-slate-300 border-slate-600/30';
+    }
+  }
+  return 'bg-slate-700/40 text-slate-300 border-slate-600/30';
+};
+
+const getDirectorySpecializations = (skills: string[] = [], emp?: Partial<Employee>): string[] => {
+  const designationText = (emp?.designation || '').toLowerCase();
+  const name = (emp?.fullName || '').toLowerCase();
+  const empId = emp?.employeeId || '';
+  const role = emp?.role;
+
+  // Project Manager: strictly Project Management, never Technical Leadership
+  if (role === 'PROJECT_MANAGER' || designationText.includes('project manager') || empId === 'KSS2407003' || name.includes('koushik')) {
+    return ['Project Management'];
+  }
+
+  // Tech Leads: strictly Technical Leadership
+  if (isAuthorizedTechLead(emp) || (role as string) === 'TECH_LEAD' || designationText.includes('tech lead') || designationText.includes('technical lead') || empId === 'KSS2407011' || empId === 'KSS2407012' || name.includes('jason kenneth') || name.includes('satya ranjan')) {
+    return ['Technical Leadership'];
+  }
+
+  // Jigyansha: Generative AI
+  if (empId === 'KSS2407014' || name.includes('jigyansha') || name.includes('jingyasha')) {
+    return ['Generative AI'];
+  }
+
+  const result: string[] = [];
+  let hasDesign = false;
+  for (const s of skills) {
+    if (s === 'UI Design' || s === 'UX Design' || s === 'UI/UX Design') {
+      if (!hasDesign) { result.push('UI/UX Design'); hasDesign = true; }
+    } else if (SPEC_GROUPS.some(g => g.items.includes(s)) || s.includes('Development') || s.includes('AI') || s.includes('Design')) {
+      if (!result.includes(s)) result.push(s);
+    }
+  }
+  return result;
+};
 
 /**
  * Whole-word title test. `includes()` cannot be used against `designation`:
@@ -10,8 +80,8 @@ import { isExecutiveOrLeadership } from '../../lib/attendanceEngine';
  * "Coordinator" contains "coo" -- both were landing in the CTO/MD tab and
  * wearing an executive badge.
  */
-const hasTitle = (desig: string, ...words: string[]) =>
-  new RegExp('\\b(' + words.join('|') + ')\\b').test(desig);
+const hasTitle = (title: string, ...words: string[]) =>
+  new RegExp('\\b(' + words.join('|') + ')\\b').test(title);
 
 const ROLE_FILTERS = [
   { label: 'ALL', key: 'ALL', match: () => true },
@@ -26,6 +96,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDept, setSelectedDept] = useState<string>('ALL');
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [specializationFilter, setSpecializationFilter] = useState<string>('ALL');
 
   // Extract unique departments
   const rawDepts = Array.from(new Set(employees.map(e => e.department).filter(Boolean)));
@@ -47,6 +118,11 @@ export const EmployeeTeamDirectory: React.FC = () => {
         (emp.email?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
         (emp.phone?.toLowerCase() || '').includes(searchTerm.toLowerCase());
 
+      if (specializationFilter !== 'ALL') {
+        const specs = getDirectorySpecializations(emp.skills || [], emp);
+        if (!specs.includes(specializationFilter)) return false;
+      }
+
       if (selectedRole && selectedRole !== 'ALL') {
         const roleFilter = ROLE_FILTERS.find(r => r.key === selectedRole);
         return matchesSearch && (roleFilter?.match(emp as any) ?? false);
@@ -55,7 +131,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
       const matchesDept = selectedDept === 'ALL' || (emp.department?.toLowerCase() || '') === selectedDept.toLowerCase();
       return matchesDept && matchesSearch;
     });
-  }, [employees, searchTerm, selectedRole, selectedDept]);
+  }, [employees, searchTerm, selectedRole, selectedDept, specializationFilter]);
 
   // Separate standard workforce from CEO & CTO
   const standardEmployees = useMemo(() => {
@@ -199,7 +275,47 @@ export const EmployeeTeamDirectory: React.FC = () => {
           </select>
           <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
+
+        {/* Specialization Select Dropdown */}
+        <div className="relative shrink-0 w-52 sm:w-60 h-9">
+          <Layers className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <select
+            value={specializationFilter}
+            onChange={e => setSpecializationFilter(e.target.value)}
+            className="w-full h-full appearance-none bg-slate-900/80 border border-slate-800 text-white text-xs font-bold pl-8 pr-8 rounded-xl cursor-pointer focus:outline-hidden focus:border-blue-500 transition-all shadow-sm truncate leading-none"
+          >
+            <option value="ALL">All Specializations</option>
+            {SPEC_GROUPS.map(grp => (
+              <optgroup key={grp.color} label={grp.items[0]} className="bg-slate-900 font-bold text-slate-400">
+                {grp.items.map(item => (
+                  <option key={item} value={item} className="bg-slate-950 text-white font-medium">
+                    {item}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+        </div>
       </div>
+
+      {/* Active Specialization Filter Chip */}
+      {specializationFilter !== 'ALL' && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 font-medium">Filtered by:</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+            <Layers className="w-3 h-3" />
+            <span>{specializationFilter}</span>
+            <button
+              onClick={() => setSpecializationFilter('ALL')}
+              className="hover:text-white cursor-pointer ml-1"
+              title="Clear Specialization Filter"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </span>
+        </div>
+      )}
 
       {/* ── 1. MAIN WORKFORCE SECTION (Top to Bottom) ───────────── */}
       <div className="space-y-4">
@@ -212,6 +328,15 @@ export const EmployeeTeamDirectory: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {standardEmployees.map((member, idx) => {
             const roleBadge = getRoleBadge(member);
+            const specs = getDirectorySpecializations(member.skills || [], member);
+            const deptDisplay = (member.role === 'PROJECT_MANAGER' || (member.designation || '').toLowerCase().includes('project manager') || member.employeeId === 'KSS2407003' || (member.fullName || '').toLowerCase().includes('koushik'))
+              ? 'IT'
+              : (member.department || '—');
+            const desigDisplay = (member.fullName && (member.fullName.toLowerCase().includes('jigyansha') || member.fullName.toLowerCase().includes('jingyasha')))
+              ? 'AI/ML Developer'
+              : (member.designation || '—');
+            const managerDisplay = member.reportingManager || 'D. Koushik';
+
             return (
               <motion.div
                 initial={{ opacity: 0, y: 14 }}
@@ -242,15 +367,31 @@ export const EmployeeTeamDirectory: React.FC = () => {
                       )}
                     </div>
 
-                    <p className="text-xs font-semibold text-slate-400 truncate mt-0.5" title={member.designation}>
-                      {member.designation}
+                    <p className="text-xs font-semibold text-slate-400 truncate mt-0.5" title={desigDisplay}>
+                      {desigDisplay}
                     </p>
+
+                    {/* Specialization Tags */}
+                    {specs.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {specs.map(s => (
+                          <span key={s} className={`px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap ${getDirectorySpecColor(s)}`}>
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-1.5 text-[11px] font-medium text-slate-400 border-t border-slate-800/60 pt-2">
-                    <div className="flex items-center gap-2 truncate" title={member.department}>
+                    <div className="flex items-center gap-2 truncate" title={deptDisplay}>
                       <Building2 className="w-3.5 h-3.5 shrink-0 text-slate-500 group-hover:text-blue-400 transition-colors" />
-                      <span className="truncate">{member.department}</span>
+                      <span className="truncate">{deptDisplay}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 truncate" title={`Reporting Manager: ${managerDisplay}`}>
+                      <Users className="w-3.5 h-3.5 shrink-0 text-slate-500 group-hover:text-blue-400 transition-colors" />
+                      <span className="truncate">Manager: <strong className="text-slate-300 font-semibold">{managerDisplay}</strong></span>
                     </div>
 
                     <div className="flex items-center gap-2 truncate" title={member.email}>

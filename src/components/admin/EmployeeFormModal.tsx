@@ -66,6 +66,14 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     role: employeeToEdit?.role || ('EMPLOYEE' as UserRole),
     resumeUrl: employeeToEdit?.resumeUrl || '',
     approvedWfhDates: employeeToEdit?.approvedWfhDates || [],
+    specialization: (() => {
+      if (employeeToEdit?.specialization) return employeeToEdit.specialization;
+      if (employeeToEdit?.skills && employeeToEdit.skills.length > 0) return employeeToEdit.skills[0];
+      const desigLower = (employeeToEdit?.designation || '').toLowerCase();
+      if (employeeToEdit?.role === 'PROJECT_MANAGER' || desigLower.includes('project manager')) return 'Project Management';
+      if ((employeeToEdit?.role as string) === 'TECH_LEAD' || desigLower.includes('tech lead') || desigLower.includes('technical lead')) return 'Technical Leadership';
+      return 'Full Stack Development';
+    })(),
     password: '',
   });
 
@@ -81,15 +89,24 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     } else {
       setFormData(prev => {
         const newData = { ...prev, [e.target.name]: e.target.value };
-        if (!isEdit && e.target.name === 'designation') {
+        if (e.target.name === 'role' && e.target.value === 'PROJECT_MANAGER') {
+          newData.specialization = 'Project Management';
+          newData.department = 'IT';
+        }
+        if (e.target.name === 'designation') {
+          const valLower = e.target.value.toLowerCase();
           if (['Chief Executive Officer (CEO)', 'Chief Technology Officer (CTO)'].includes(e.target.value)) {
-            newData.role = 'SUPER_ADMIN';
-          } else if (e.target.value === 'Project Manager') {
-            newData.role = 'PROJECT_MANAGER';
+            if (!isEdit) newData.role = 'SUPER_ADMIN';
+          } else if (e.target.value === 'Project Manager' || valLower.includes('project manager')) {
+            if (!isEdit) newData.role = 'PROJECT_MANAGER';
+            newData.department = 'IT';
+            newData.specialization = 'Project Management';
+          } else if (valLower.includes('tech lead') || valLower.includes('technical lead')) {
+            newData.specialization = 'Technical Leadership';
           } else if (e.target.value.includes('HR')) {
-            newData.role = 'HR_ADMIN';
+            if (!isEdit) newData.role = 'HR_ADMIN';
           } else {
-            newData.role = 'EMPLOYEE';
+            if (!isEdit) newData.role = 'EMPLOYEE';
           }
         }
         return newData;
@@ -184,8 +201,15 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       return;
     }
 
+    const finalSkills = formData.specialization ? [formData.specialization] : [];
+    const submissionData = {
+      ...formData,
+      skills: finalSkills,
+      specialization: formData.specialization
+    };
+
     if (isEdit && employeeToEdit) {
-      await updateEmployee(employeeToEdit.id, formData);
+      await updateEmployee(employeeToEdit.id, submissionData);
       if (formData.password && formData.password.trim().length >= 6) {
         const passRes = await setEmployeeInitialPassword(formData.email, formData.password);
         if (!passRes.success) {
@@ -194,7 +218,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         }
       }
     } else {
-      const res = await addEmployee(formData as any);
+      const res = await addEmployee(submissionData as any);
       if (res && res.success === false) {
         setErrorMsg(res.message);
         return;
@@ -460,6 +484,32 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                       placeholder="e.g. D. Koushik"
                       className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Primary Specialization <span className="text-rose-500">*</span></label>
+                    <select
+                      name="specialization"
+                      value={formData.specialization}
+                      onChange={handleChange}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500 font-bold"
+                    >
+                      <option value="Project Management">Project Management</option>
+                      <option value="Technical Leadership">Technical Leadership</option>
+                      <option value="Generative AI">Generative AI</option>
+                      <option value="Frontend Development">Frontend Development</option>
+                      <option value="Backend Development">Backend Development</option>
+                      <option value="Full Stack Development">Full Stack Development</option>
+                      <option value="UI/UX Design">UI/UX Design</option>
+                      <option value="Manual Testing">Manual Testing</option>
+                      <option value="Automation Testing">Automation Testing</option>
+                      <option value="Cloud Computing">Cloud Computing</option>
+                      <option value="DevOps">DevOps</option>
+                      <option value="Application Security">Application Security</option>
+                      <option value="IT Consulting">IT Consulting</option>
+                      <option value="Digital Marketing">Digital Marketing</option>
+                      <option value="HR Operations">HR Operations</option>
+                    </select>
                   </div>
 
                   <div>

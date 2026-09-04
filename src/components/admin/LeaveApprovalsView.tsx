@@ -254,7 +254,10 @@ export const LeaveApprovalsView: React.FC = () => {
     return true;
   });
 
-  const [activeTab, setActiveTab] = useState<'pending' | 'past'>('pending');
+  const rejectedRequests = pastRequests.filter(req => isRequestRejected(req));
+  const historyRequests = pastRequests.filter(req => isRequestFullyApproved(req));
+
+  const [activeTab, setActiveTab] = useState<'pending' | 'past' | 'rejected'>('pending');
 
   return (
     <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
@@ -329,11 +332,11 @@ export const LeaveApprovalsView: React.FC = () => {
             </select>
           </div>
 
-          {/* Pending / History Toggle */}
+          {/* Pending / History / Rejected Toggle */}
           <div className="flex items-center justify-center gap-1 bg-[var(--bg-elevated)] p-1 rounded-xl border border-[var(--border-subtle)] w-full sm:w-auto">
             <button
               onClick={() => { triggerHaptic(); setActiveTab('pending'); }}
-              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
                 activeTab === 'pending' 
                   ? 'bg-[var(--accent-blue)] text-white shadow-[var(--shadow-glow-blue)]' 
                   : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
@@ -343,13 +346,23 @@ export const LeaveApprovalsView: React.FC = () => {
             </button>
             <button
               onClick={() => { triggerHaptic(); setActiveTab('past'); }}
-              className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
                 activeTab === 'past' 
                   ? 'bg-[var(--accent-blue)] text-white shadow-[var(--shadow-glow-blue)]' 
                   : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              History
+              History {historyRequests.length > 0 && `(${historyRequests.length})`}
+            </button>
+            <button
+              onClick={() => { triggerHaptic(); setActiveTab('rejected'); }}
+              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
+                activeTab === 'rejected' 
+                  ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/30' 
+                  : 'text-[var(--text-tertiary)] hover:text-rose-400'
+              }`}
+            >
+              Rejected {rejectedRequests.length > 0 && `(${rejectedRequests.length})`}
             </button>
           </div>
         </div>
@@ -459,7 +472,7 @@ export const LeaveApprovalsView: React.FC = () => {
             </motion.div>
           )}
 
-          {activeTab === 'past' && pastRequests.length === 0 && (
+          {activeTab === 'past' && historyRequests.length === 0 && (
              <motion.div 
               initial={{ opacity: 0, scale: 0.95 }} 
               animate={{ opacity: 1, scale: 1 }} 
@@ -470,11 +483,26 @@ export const LeaveApprovalsView: React.FC = () => {
                 <FileText className="w-10 h-10 text-[var(--text-tertiary)] opacity-50" strokeWidth={1.5} />
               </div>
               <h3 className="text-xl font-bold text-[var(--text-primary)] mb-2">No History</h3>
-              <p className="text-[var(--text-secondary)] text-sm max-w-xs">No processed requests found in the system yet.</p>
+              <p className="text-[var(--text-secondary)] text-sm max-w-xs">No approved history requests found in the system yet.</p>
             </motion.div>
           )}
 
-          {(activeTab === 'pending' ? pendingRequests : pastRequests).map((req, i) => {
+          {activeTab === 'rejected' && rejectedRequests.length === 0 && (
+             <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }} 
+              animate={{ opacity: 1, scale: 1 }} 
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="py-20 flex flex-col items-center justify-center text-center bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-3xl"
+            >
+              <div className="w-24 h-24 mb-6 rounded-full bg-[var(--bg-elevated)] flex items-center justify-center border border-[var(--border-subtle)] shadow-[var(--shadow-md)]">
+                <XCircle className="w-10 h-10 text-rose-400 opacity-50" strokeWidth={1.5} />
+              </div>
+              <h3 className="text-xl font-bold text-[var(--text-primary)] mb-2">No Rejected Requests</h3>
+              <p className="text-[var(--text-secondary)] text-sm max-w-xs">No rejected leave or WFH requests found.</p>
+            </motion.div>
+          )}
+
+          {(activeTab === 'pending' ? pendingRequests : activeTab === 'rejected' ? rejectedRequests : historyRequests).map((req, i) => {
             const emp = employees.find(e => e.id === req.employeeId || e.employeeId === req.employeeId);
             const isWfh = isWfhType(req.type) || isWfhType(req.leaveCategory);
             const statusColor = req.status === 'Approved' ? 'var(--accent-emerald)' : req.status === 'Rejected' ? 'var(--accent-rose)' : 'var(--accent-amber)';

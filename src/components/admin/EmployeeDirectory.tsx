@@ -5,6 +5,7 @@ import { Employee, EmployeeStatus } from '../../types';
 import { motion } from 'framer-motion';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { isExecutiveOrLeadership, computeEmploymentType } from '../../lib/attendanceEngine';
+import { isAuthorizedTechLead } from '../../lib/hierarchy';
 import { 
   Search, 
   Plus, 
@@ -101,7 +102,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     }
 
     // Tech Leads: strictly Technical Leadership
-    if ((role as string) === 'TECH_LEAD' || designationText.includes('tech lead') || empId === 'KSS2407011' || empId === 'KSS2407012' || name.includes('jason kenneth') || name.includes('satya ranjan')) {
+    if (isAuthorizedTechLead(emp) || (role as string) === 'TECH_LEAD' || designationText.includes('tech lead') || designationText.includes('technical lead') || empId === 'KSS2407011' || empId === 'KSS2407012' || name.includes('jason kenneth') || name.includes('satya ranjan')) {
       return ['Technical Leadership'];
     }
 

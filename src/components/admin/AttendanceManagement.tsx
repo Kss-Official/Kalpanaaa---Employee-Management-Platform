@@ -36,6 +36,7 @@ import { toISTTimeString } from '../../lib/absoluteTime';
 import { EmployeeProfileModal } from './EmployeeProfileModal';
 import { EmployeeFormModal } from './EmployeeFormModal';
 import { EmployeeIdCardModal } from './EmployeeIdCardModal';
+import { isAuthorizedTechLead } from '../../lib/hierarchy';
 
 // ─── Dropdown Constants ────────────────────────────────────────────────────────
 
@@ -126,7 +127,7 @@ function getAttendanceSpecializations(skills: string[] = [], emp?: Partial<Emplo
   }
 
   // Tech Leads: strictly Technical Leadership
-  if ((role as string) === 'TECH_LEAD' || desig.includes('tech lead') || empId === 'KSS2407011' || empId === 'KSS2407012' || name.includes('jason kenneth') || name.includes('satya ranjan')) {
+  if (isAuthorizedTechLead(emp) || (role as string) === 'TECH_LEAD' || desig.includes('tech lead') || desig.includes('technical lead') || empId === 'KSS2407011' || empId === 'KSS2407012' || name.includes('jason kenneth') || name.includes('satya ranjan')) {
     return ['Technical Leadership'];
   }
 
