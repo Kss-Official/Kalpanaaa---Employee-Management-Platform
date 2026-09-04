@@ -66,31 +66,23 @@ export const EmployeeTeamDirectory: React.FC = () => {
     const getExecutiveRank = (emp: any): number => {
       const name = (emp?.fullName || '').toLowerCase();
       const id = (emp?.employeeId || '').toLowerCase();
-      const email = (emp?.email || '').toLowerCase();
-      const desig = (emp?.designation || '').toLowerCase();
-      const role = (emp?.executiveRole || '').toLowerCase();
+      const execRole = (emp?.executiveRole || '').toUpperCase();
 
-      // 1. Gaurav Sir is FIRST (Left side)
+      // 1. Gaurav Sir is FIRST (Left side: CTO / Founder)
       if (
         name.includes('gaurav') ||
         id === 'kss2407001' ||
-        email.includes('founder') ||
-        email.includes('gaurav') ||
-        desig.includes('managing director') ||
-        (desig.includes('cto') && !desig.includes('contractor')) ||
-        role === 'cto'
+        execRole === 'CTO'
       ) {
         return 1;
       }
 
-      // 2. Akshit Sir is SECOND (Right side)
+      // 2. Akshit Sir is SECOND (Right side: CEO)
       if (
         name.includes('akshit') ||
         id === 'kss2407002' ||
         id === 'ceo001' ||
-        email.includes('akshit') ||
-        desig.includes('ceo') ||
-        role === 'ceo'
+        execRole === 'CEO'
       ) {
         return 2;
       }

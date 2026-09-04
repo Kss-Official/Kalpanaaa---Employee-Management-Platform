@@ -180,6 +180,7 @@ export interface Employee {
   emergencyRelationship: string;
   bio?: string;
   skills?: string[];
+  specialization?: string;
   preferredShift?: string;
   linkedinUrl?: string;
 

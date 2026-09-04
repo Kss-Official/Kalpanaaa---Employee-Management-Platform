@@ -17,7 +17,9 @@ import {
   List,
   Calendar,
   Crown,
-  Star
+  Star,
+  X,
+  Layers
 } from 'lucide-react';
 
 interface EmployeeDirectoryProps {
@@ -37,6 +39,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const isAdmin = role === 'SUPER_ADMIN' || role === 'HR_ADMIN';
   const [searchTerm, setSearchTerm] = useState('');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
+  const [specializationFilter, setSpecializationFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
   const [showPrintAllBarcodes, setShowPrintAllBarcodes] = useState(false);
@@ -86,7 +89,27 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     return 'bg-slate-700/40 text-slate-300 border-slate-600/30';
   };
 
-  const getDirectorySpecializations = (skills: string[] = []): string[] => {
+  const getDirectorySpecializations = (skills: string[] = [], emp?: Partial<Employee>): string[] => {
+    const designationText = (emp?.designation || '').toLowerCase();
+    const name = (emp?.fullName || '').toLowerCase();
+    const empId = emp?.employeeId || '';
+    const role = emp?.role;
+
+    // Project Manager: strictly Project Management, never Technical Leadership
+    if (role === 'PROJECT_MANAGER' || designationText.includes('project manager') || empId === 'KSS2407003' || name.includes('koushik')) {
+      return ['Project Management'];
+    }
+
+    // Tech Leads: strictly Technical Leadership
+    if ((role as string) === 'TECH_LEAD' || designationText.includes('tech lead') || empId === 'KSS2407011' || empId === 'KSS2407012' || name.includes('jason kenneth') || name.includes('satya ranjan')) {
+      return ['Technical Leadership'];
+    }
+
+    // Jigyansha: Generative AI
+    if (empId === 'KSS2407014' || name.includes('jigyansha') || name.includes('jingyasha')) {
+      return ['Generative AI'];
+    }
+
     const result: string[] = [];
     let hasDesign = false;
     for (const s of skills) {
@@ -129,9 +152,25 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       const empStatus = formatEmployeeStatus(emp.status);
       const matchesStatus = statusFilter === 'ALL' || empStatus === statusFilter;
 
-      return matchesSearch && matchesDept && matchesStatus;
+      const normalizedSpecs = getDirectorySpecializations(emp.skills || [], emp);
+      const matchesSpec =
+        specializationFilter === 'ALL' ||
+        normalizedSpecs.some(s => s.toLowerCase() === specializationFilter.toLowerCase()) ||
+        (specializationFilter === 'UI/UX Design' && (
+          normalizedSpecs.includes('UI/UX Design') ||
+          (emp.skills || []).some(s => s.toLowerCase().includes('ui') || s.toLowerCase().includes('ux')) ||
+          (emp.designation || '').toLowerCase().includes('ui') ||
+          (emp.designation || '').toLowerCase().includes('ux') ||
+          (emp.designation || '').toLowerCase().includes('design')
+        )) ||
+        (specializationFilter === 'Frontend Development' && (normalizedSpecs.includes('Frontend Development') || (emp.designation || '').toLowerCase().includes('frontend'))) ||
+        (specializationFilter === 'Backend Development' && (normalizedSpecs.includes('Backend Development') || (emp.designation || '').toLowerCase().includes('backend'))) ||
+        (specializationFilter === 'Full Stack Development' && (normalizedSpecs.includes('Full Stack Development') || (emp.designation || '').toLowerCase().includes('full stack') || (emp.designation || '').toLowerCase().includes('software'))) ||
+        (specializationFilter === 'AI & ML' && (normalizedSpecs.some(s => s.toLowerCase().includes('ai') || s.toLowerCase().includes('machine learning')) || (emp.designation || '').toLowerCase().includes('ai') || (emp.designation || '').toLowerCase().includes('ml')));
+
+      return matchesSearch && matchesDept && matchesStatus && matchesSpec;
     });
-  }, [employees, searchTerm, deptFilter, statusFilter]);
+  }, [employees, searchTerm, deptFilter, statusFilter, specializationFilter]);
 
   const standardEmployees = useMemo(() => {
     return filteredEmployees.filter(emp => !isExecutiveLeadership(emp));
@@ -141,31 +180,23 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     const getExecutiveRank = (emp: any): number => {
       const name = (emp?.fullName || '').toLowerCase();
       const id = (emp?.employeeId || '').toLowerCase();
-      const email = (emp?.email || '').toLowerCase();
-      const desig = (emp?.designation || '').toLowerCase();
-      const role = (emp?.executiveRole || '').toLowerCase();
+      const execRole = (emp?.executiveRole || '').toUpperCase();
 
-      // 1. Gaurav Sir is FIRST (Left side)
+      // 1. Gaurav Sir is FIRST (Left side: CTO / Founder)
       if (
         name.includes('gaurav') ||
         id === 'kss2407001' ||
-        email.includes('founder') ||
-        email.includes('gaurav') ||
-        desig.includes('managing director') ||
-        (desig.includes('cto') && !desig.includes('contractor')) ||
-        role === 'cto'
+        execRole === 'CTO'
       ) {
         return 1;
       }
 
-      // 2. Akshit Sir is SECOND (Right side)
+      // 2. Akshit Sir is SECOND (Right side: CEO)
       if (
         name.includes('akshit') ||
         id === 'kss2407002' ||
         id === 'ceo001' ||
-        email.includes('akshit') ||
-        desig.includes('ceo') ||
-        role === 'ceo'
+        execRole === 'CEO'
       ) {
         return 2;
       }
@@ -246,7 +277,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         </div>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
-          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto">
             {/* Department Filter */}
             <select
               value={deptFilter}
@@ -256,6 +287,20 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
               <option value="ALL">All Departments</option>
               {departments.map(d => (
                 <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+
+            {/* Specialization Filter */}
+            <select
+              value={specializationFilter}
+              onChange={e => setSpecializationFilter(e.target.value)}
+              className="px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-300 font-bold focus:outline-hidden focus:border-blue-500 cursor-pointer w-full"
+            >
+              <option value="ALL">All Specializations</option>
+              {SPEC_GROUPS.map(group => (
+                <optgroup key={group.items[0]} label={`── Group (${group.color})`}>
+                  {group.items.map(s => <option key={s} value={s}>{s}</option>)}
+                </optgroup>
               ))}
             </select>
 
@@ -273,6 +318,28 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Active filter chips */}
+      {(deptFilter !== 'ALL' || statusFilter !== 'ALL' || specializationFilter !== 'ALL') && (
+        <div className="flex items-center gap-2 flex-wrap pt-1">
+          <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Active filters:</span>
+          {deptFilter !== 'ALL' && (
+            <button onClick={() => setDeptFilter('ALL')} className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 text-blue-300 border border-blue-500/25 rounded-full text-[10px] font-bold hover:bg-blue-500/25 transition-colors cursor-pointer">
+              {deptFilter} <X className="w-2.5 h-2.5" />
+            </button>
+          )}
+          {specializationFilter !== 'ALL' && (
+            <button onClick={() => setSpecializationFilter('ALL')} className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-colors cursor-pointer ${getDirectorySpecColor(specializationFilter)}`}>
+              {specializationFilter} <X className="w-2.5 h-2.5" />
+            </button>
+          )}
+          {statusFilter !== 'ALL' && (
+            <button onClick={() => setStatusFilter('ALL')} className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/15 text-purple-300 border border-purple-500/25 rounded-full text-[10px] font-bold hover:bg-purple-500/25 transition-colors cursor-pointer">
+              {statusFilter} <X className="w-2.5 h-2.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── 1. MAIN WORKFORCE TABLE (Top to Bottom) ──────────────── */}
       <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 overflow-hidden shadow-sm">
@@ -292,6 +359,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                 <th className="py-3.5 px-3 text-center whitespace-nowrap">Department</th>
                 <th className="py-3.5 px-3 text-center whitespace-nowrap">Designation</th>
                 <th className="py-3.5 px-3 text-center whitespace-nowrap">Employment Type</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Reporting Manager</th>
                 <th className="py-3.5 px-3 text-center whitespace-nowrap">Specialization</th>
                 <th className="py-3.5 px-3 text-center whitespace-nowrap">Status</th>
                 <th className="py-3.5 px-4 text-center whitespace-nowrap">Actions</th>
@@ -300,18 +368,28 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             <tbody className="divide-y divide-slate-800/40 text-[11px]">
               {standardEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-500 font-medium">
+                  <td colSpan={10} className="py-12 text-center text-slate-500 font-medium">
                     No workforce personnel match your search criteria.
                   </td>
                 </tr>
               ) : (
                 standardEmployees.map(emp => {
-                  const specs = getDirectorySpecializations(emp.skills || []);
+                  const specs = getDirectorySpecializations(emp.skills || [], emp);
                   const shownSpecs = specs.slice(0, 2);
                   const extraCount = specs.length - shownSpecs.length;
                   const doj = emp.joiningDate
                     ? new Date(emp.joiningDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
                     : '—';
+
+                  const deptDisplay = ((emp.designation || '').toLowerCase().includes('project manager') || emp.employeeId === 'KSS2407003' || (emp.fullName || '').toLowerCase().includes('koushik'))
+                    ? 'IT'
+                    : (emp.department || '—');
+
+                  const desigDisplay = (emp.fullName && (emp.fullName.toLowerCase().includes('jigyansha') || emp.fullName.toLowerCase().includes('jingyasha')))
+                    ? 'AI/ML Developer'
+                    : (emp.designation || '—');
+
+                  const reportingManagerDisplay = emp.reportingManager || 'D. Koushik';
 
                   return (
                     <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group align-middle">
@@ -350,14 +428,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                       {/* 4. Department */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         <span className="text-xs font-semibold text-slate-300 whitespace-nowrap">
-                          {emp.department || '—'}
+                          {deptDisplay}
                         </span>
                       </td>
 
                       {/* 5. Designation */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         <span className="px-2 py-1 bg-slate-800 text-slate-200 border border-slate-700/60 rounded-lg text-[11px] font-semibold whitespace-nowrap inline-block">
-                          {emp.designation || '—'}
+                          {desigDisplay}
                         </span>
                       </td>
 
@@ -377,6 +455,13 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                             </span>
                           );
                         })()}
+                      </td>
+
+                      {/* Reporting Manager */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="text-xs font-semibold text-slate-300 whitespace-nowrap">
+                          {reportingManagerDisplay}
+                        </span>
                       </td>
 
                       {/* 7. Specialization */}

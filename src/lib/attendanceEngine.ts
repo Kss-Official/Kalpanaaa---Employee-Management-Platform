@@ -157,11 +157,11 @@ export function computeEmployeeLeaveBalance(
   if (!emp) return { credited: 0, taken: 0, balance: 0, history: [] };
 
   const history = computeEarnLeaveMonthlyCreditHistory(emp, refDate);
-  const currentMonthPrefix = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}`;
-  const currentEntry = history.find(h => h.monthKey === currentMonthPrefix);
-  const credited = currentEntry ? currentEntry.creditedDays : 0;
+  const credited = history
+    .filter(h => h.status === 'Credited')
+    .reduce((acc, h) => acc + h.creditedDays, 0);
 
-  // Filter approved leaves taken in the current month (supports legacy 'Leave' and 'Earn Leave')
+  // Filter approved leaves taken across tenure (supports legacy 'Leave' and 'Earn Leave')
   const approvedLeavesTaken = (leaveRequests || []).filter(l => {
     if (!l) return false;
     const isEmp = 
@@ -173,8 +173,7 @@ export function computeEmployeeLeaveBalance(
        (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
        l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
     const isEarnLeave = l.type === 'Leave' || l.type === 'Earn Leave' || (l as any).leaveCategory === 'Earn Leave';
-    const isInMonth = l.startDate ? l.startDate.startsWith(currentMonthPrefix) : true;
-    return isEmp && isApproved && isEarnLeave && isInMonth;
+    return isEmp && isApproved && isEarnLeave;
   }).length;
 
   const balance = Math.max(0, credited - approvedLeavesTaken);

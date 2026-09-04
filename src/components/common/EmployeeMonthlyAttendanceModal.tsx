@@ -962,7 +962,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
               </div>
 
               {/* Monthly Turnout KPIs + Leave Balance Box */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2 w-full lg:w-auto text-center text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-2 w-full lg:w-auto text-center text-xs">
                 <button
                   type="button"
                   onClick={() => handleKpiClick('Present')}
@@ -1032,6 +1032,20 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Holiday / Off</span>
                   <span className="text-base font-black text-slate-300 font-mono">{holidayDays} Days</span>
                   {kpiHighlightFilter === 'Holiday' && <span className="text-[9px] text-slate-300 font-bold mt-0.5">↓ Highlighted</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiClick('Absent')}
+                  className={`p-2.5 rounded-xl border flex flex-col justify-center transition-all cursor-pointer active:scale-95 ${
+                    kpiHighlightFilter === 'Absent'
+                      ? 'bg-rose-500/20 border-rose-400 shadow-lg shadow-rose-500/20'
+                      : 'bg-slate-900 border-slate-800 hover:border-rose-500/40'
+                  }`}
+                  title="Click to highlight Absent days in calendar"
+                >
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Absent</span>
+                  <span className="text-base font-black text-rose-400 font-mono">{absentDays} Days</span>
+                  {kpiHighlightFilter === 'Absent' && <span className="text-[9px] text-rose-400 font-bold mt-0.5">↓ Highlighted</span>}
                 </button>
 
                 {/* 🌟 Interactive Leave Balance Section Box */}
@@ -1276,6 +1290,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                     if (kpiHighlightFilter === 'WFH') return statusLabel === 'WFH';
                     if (kpiHighlightFilter === 'Leave') return statusLabel === 'Leave';
                     if (kpiHighlightFilter === 'Holiday') return statusLabel === 'Holiday' || statusLabel === 'Weekly Off' || isNonWorking;
+                    if (kpiHighlightFilter === 'Absent') return statusLabel === 'Absent';
                     return false;
                   })();
 

@@ -52,7 +52,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     designation: employeeToEdit?.designation || 'Software Engineer',
     joiningDate: employeeToEdit?.joiningDate || new Date().toISOString().split('T')[0],
     employmentType: employeeToEdit?.employmentType || ('Full-Time' as EmploymentType),
-    reportingManager: employeeToEdit?.reportingManager || 'Rahul Sharma',
+    reportingManager: employeeToEdit?.reportingManager || 'D. Koushik',
     workLocation: employeeToEdit?.workLocation || 'Kalpanaaa Headquarters',
     status: employeeToEdit?.status || ('Active' as EmployeeStatus),
     shift: employeeToEdit?.shift || 'Day Shift (10:00 AM – 7:00 PM)',
@@ -413,6 +413,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                       onChange={handleChange}
                       className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                     >
+                      <option value="IT">IT</option>
                       <option value="Engineering">Engineering</option>
                       <option value="HR & Operations">HR & Operations</option>
                       <option value="Project Management">Project Management</option>
@@ -445,6 +446,18 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                       value={formData.shift}
                       onChange={handleChange}
                       placeholder="Day Shift (10:00 AM – 7:00 PM)"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Reporting Manager</label>
+                    <input
+                      type="text"
+                      name="reportingManager"
+                      value={formData.reportingManager}
+                      onChange={handleChange}
+                      placeholder="e.g. D. Koushik"
                       className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-blue-500"
                     />
                   </div>

@@ -44,7 +44,8 @@ import {
   MAX_BREAK_MINUTES,
   COMPANY_TIMEZONE,
   COMPANY_START_DATE,
-  isWfhType
+  isWfhType,
+  isExecutiveOrLeadership
 } from '../lib/attendanceEngine';
 import { runAttendanceMigration } from '../lib/attendanceMigration';
 import { classifyError, shouldFallbackToLocalLogin } from '../lib/errors';
@@ -1155,6 +1156,110 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // LIVE AUTOCORRECT JIGYANSHA (AI/ML Developer, Generative AI specialization)
+              if (
+                data.id === '8RxH6z3ZzUTmM26iqta1DhCPa8l1' ||
+                data.employeeId === 'KSS2407014' ||
+                (data.fullName && data.fullName.toLowerCase().includes('jigyansha')) ||
+                (data.fullName && data.fullName.toLowerCase().includes('jingyasha'))
+              ) {
+                let jChanged = false;
+                if (data.designation !== 'AI/ML Developer') {
+                  data.designation = 'AI/ML Developer';
+                  jChanged = true;
+                }
+                const currentSkills = Array.isArray(data.skills) ? data.skills : [];
+                if (!currentSkills.includes('Generative AI') || currentSkills.includes('Full Stack Development')) {
+                  data.skills = ['Generative AI'];
+                  data.specialization = 'Generative AI';
+                  jChanged = true;
+                }
+                if (jChanged && canMigrate) {
+                  setDoc(doc(db, 'employees', data.id), {
+                    designation: 'AI/ML Developer',
+                    skills: ['Generative AI'],
+                    specialization: 'Generative AI'
+                  }, { merge: true }).catch(() => { });
+                }
+              }
+
+              // LIVE AUTOCORRECT TECH LEADS (Technical Leadership specialization)
+              const isTechLead =
+                (data.role as string) === 'TECH_LEAD' ||
+                (data.designation && data.designation.toLowerCase().includes('tech lead')) ||
+                data.employeeId === 'KSS2407011' ||
+                data.employeeId === 'KSS2407012' ||
+                (data.fullName && data.fullName.toLowerCase().includes('jason kenneth')) ||
+                (data.fullName && data.fullName.toLowerCase().includes('satya ranjan'));
+              if (isTechLead) {
+                let tlChanged = false;
+                const currentSkills = Array.isArray(data.skills) ? data.skills : [];
+                if (!currentSkills.includes('Technical Leadership') || currentSkills.includes('Full Stack Development')) {
+                  data.skills = ['Technical Leadership'];
+                  data.specialization = 'Technical Leadership';
+                  tlChanged = true;
+                }
+                if (tlChanged && canMigrate) {
+                  setDoc(doc(db, 'employees', data.id), {
+                    skills: ['Technical Leadership'],
+                    specialization: 'Technical Leadership'
+                  }, { merge: true }).catch(() => { });
+                }
+              }
+
+              // LIVE AUTOCORRECT PROJECT MANAGER D. KOUSHIK (IT Department, Project Management specialization, remove Technical Leadership)
+              const isProjectManager =
+                data.role === 'PROJECT_MANAGER' ||
+                data.employeeId === 'KSS2407003' ||
+                (data.designation && data.designation.toLowerCase().includes('project manager')) ||
+                (data.fullName && data.fullName.toLowerCase().includes('koushik'));
+              if (isProjectManager) {
+                let pmChanged = false;
+                if (data.department !== 'IT') {
+                  data.department = 'IT';
+                  pmChanged = true;
+                }
+                if (data.designation !== 'Project Manager') {
+                  data.designation = 'Project Manager';
+                  pmChanged = true;
+                }
+                const currentSkills = Array.isArray(data.skills) ? data.skills : [];
+                if (!currentSkills.includes('Project Management') || currentSkills.includes('Technical Leadership') || currentSkills.includes('Software Engineering')) {
+                  data.skills = ['Project Management'];
+                  data.specialization = 'Project Management';
+                  pmChanged = true;
+                }
+                if (pmChanged && canMigrate) {
+                  setDoc(doc(db, 'employees', data.id), {
+                    department: 'IT',
+                    designation: 'Project Manager',
+                    skills: ['Project Management'],
+                    specialization: 'Project Management'
+                  }, { merge: true }).catch(() => { });
+                }
+              }
+
+              // LIVE AUTOCORRECT WORKFORCE REPORTING MANAGER TO D. KOUSHIK
+              if (
+                !isExecutiveOrLeadership(data) &&
+                !isProjectManager &&
+                (!data.reportingManager ||
+                 data.reportingManager === 'Rahul Sharma' ||
+                 data.reportingManager === 'Sarah Jenkins' ||
+                 data.reportingManager.toLowerCase().includes('rahul') ||
+                 data.reportingManager.toLowerCase().includes('sarah') ||
+                 data.reportingManager.toLowerCase().includes('manager'))
+              ) {
+                data.reportingManager = 'D. Koushik';
+                data.reportingManagerUid = 'uid-KSS2407003';
+                if (canMigrate) {
+                  setDoc(doc(db, 'employees', data.id), {
+                    reportingManager: 'D. Koushik',
+                    reportingManagerUid: 'uid-KSS2407003'
+                  }, { merge: true }).catch(() => { });
+                }
+              }
+
               fetched.push(data);
             });
 
@@ -1200,7 +1305,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 fullName: 'D. Koushik',
                 email: 'd.koushik@kalpanaaasoftwaresolutions.in',
                 role: 'PROJECT_MANAGER',
-                department: 'Software Engineering',
+                department: 'IT',
                 designation: 'Project Manager',
                 status: 'Active',
                 phone: '+91 98765 00003',
@@ -1222,7 +1327,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 createdAt: '2024-07-01T09:00:00Z',
                 updatedAt: new Date().toISOString(),
                 profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
-                resumeUrl: ''
+                resumeUrl: '',
+                skills: ['Project Management'],
+                specialization: 'Project Management'
               };
 
               deduplicated.push(officialKoushik);
