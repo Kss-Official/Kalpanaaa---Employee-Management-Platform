@@ -169,7 +169,7 @@ interface AuthContextType {
   quickDemoLogin: (role: UserRole | 'CEO' | 'CTO') => void;
   logout: () => void;
   addEmployee: (emp: Omit<Employee, 'id' | 'createdAt' | 'updatedAt' | 'qrToken'> & { password?: string }) => Promise<{ success: boolean; message?: string } | Employee>;
-  updateEmployee: (id: string, updates: Partial<Employee>) => void;
+  updateEmployee: (id: string, updates: Partial<Employee>) => Promise<void>;
   deleteEmployee: (id: string) => void;
   recordCheckIn: (employeeId: string, lat?: number, lon?: number, accuracy?: number, method?: AttendanceMethod, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
   recordCheckOut: (employeeId: string, lat?: number, lon?: number, accuracy?: number, customDate?: string) => Promise<{ success: boolean; message: string; record?: AttendanceRecord }>;
@@ -1061,6 +1061,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const fetched: Employee[] = [];
             snapshot.forEach(docSnap => {
               const data = { id: docSnap.id, ...docSnap.data() } as Employee;
+
+              // PURGE ABHINAYA V ACCOUNT PERMANENTLY (No longer with company)
+              if (
+                data.id === '3ZHI3aTB37StHjR97WEBJQSWT9H3' ||
+                (data as any).isDeleted ||
+                !data.fullName ||
+                data.fullName.trim() === '' ||
+                data.fullName.toLowerCase().includes('abhinaya') ||
+                (data.email && data.email.toLowerCase().includes('abhinaya'))
+              ) {
+                if (canMigrate) deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                return;
+              }
 
               // PURGE ONLY OLD DUMMY EMP-003 RECORD (with old typo domain)
               if (
@@ -2628,52 +2641,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newEmp;
   };
 
-  const updateEmployee = async (id: string, updates: Partial<Employee>) => {
+  const updateEmployee = async (id: string, updates: Partial<Employee>): Promise<void> => {
     // TOP 1% SECURITY: XSS Sanitization
     const sanitizedUpdates = sanitizeInput(updates);
 
     const incomingResume = typeof sanitizedUpdates.resumeUrl === 'string' ? sanitizedUpdates.resumeUrl : '';
 
-    let matched = false;
-    let targetDocId = id;
+    // 1. Locate target employee from in-memory cache/ref or state
+    const existingEmp = employeesRef.current.find(e => 
+      e.id === id || e.employeeId === id || (e.uid && e.uid === id)
+    ) || employees.find(e => 
+      e.id === id || e.employeeId === id || (e.uid && e.uid === id)
+    );
 
+    const targetDocId = existingEmp?.id || id;
+
+    // 2. Prepare payload containing ONLY the fields being updated
+    // Critical: Do NOT include untouched fields (e.g. role, salary, ctc, panNumber, bankAccountNumber, etc.)
+    // because Firestore security rules evaluate diff(resource.data).affectedKeys() and will reject
+    // employee self-service profile edits if protected fields are present in the update payload.
+    const fieldsToUpdate: Record<string, any> = { ...sanitizedUpdates };
+    delete fieldsToUpdate.resumeUrl; // handle resume separately below
+    
+    const cleanPayload = cleanFirestorePayload({
+      ...fieldsToUpdate,
+      updatedAt: new Date().toISOString()
+    });
+
+    // 3. Persist update directly to Firestore Cloud Database
+    try {
+      await setDoc(doc(db, 'employees', targetDocId), cleanPayload, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `employees/${targetDocId}`);
+      throw err;
+    }
+
+    // 4. Update in-memory employees state immediately
     setEmployees(prev => prev.map(e => {
-      if (e.id === id || e.employeeId === id || (e.uid && e.uid === id)) {
-        matched = true;
-        targetDocId = e.id || id;
-        const updated = { ...e, ...sanitizedUpdates, updatedAt: new Date().toISOString() };
-
-        const payload: Record<string, any> = { ...updated };
-        if (!('profilePhotoUrl' in sanitizedUpdates)) delete payload.profilePhotoUrl;
-        delete payload.resumeUrl;
-
-        // Persist update to Firestore
-        setDoc(doc(db, 'employees', targetDocId), payload, { merge: true }).catch(err => {
-          handleFirestoreError(err, OperationType.UPDATE, `employees/${targetDocId}`);
-        });
-
-        return updated;
+      if (e.id === targetDocId || e.id === id || e.employeeId === id || (e.uid && e.uid === id)) {
+        return { ...e, ...cleanPayload };
       }
       return e;
     }));
 
-    if (!matched) {
-      await setDoc(doc(db, 'employees', id), { ...sanitizedUpdates, updatedAt: new Date().toISOString() }, { merge: true }).catch(err => {
-        handleFirestoreError(err, OperationType.UPDATE, `employees/${id}`);
-      });
-    }
+    // 5. Update activeEmployee state immediately if this affects the active logged-in employee
+    setActiveEmployee(prev => {
+      if (prev && (prev.id === targetDocId || prev.id === id || prev.employeeId === id || (prev.uid && prev.uid === id))) {
+        const updated = { ...prev, ...cleanPayload };
+        try {
+          localStorage.setItem('kss_v1_session', updated.id);
+        } catch {}
+        return updated;
+      }
+      return prev;
+    });
 
-    // Relocate the resume, then record the outcome on the parent: a marker if it
-    // landed in the subcollection, or the blob inline if that was rejected (which
-    // it is until the subcollection rule is deployed). Either way the resume is
-    // never lost, and the admin form's required-field check still passes.
+    // 6. Handle resume storage out-of-band if present
     if (incomingResume) {
-      writeEmployeeResume(id, incomingResume, `${id}-resume`).then(storedOutOfBand => {
+      try {
+        const storedOutOfBand = await writeEmployeeResume(targetDocId, incomingResume, `${targetDocId}-resume`);
         const marker = storedOutOfBand ? { hasResume: true } : { resumeUrl: incomingResume };
-        setDoc(doc(db, 'employees', id), marker, { merge: true }).catch(err => {
-          handleFirestoreError(err, OperationType.UPDATE, `employees/${id}`);
-        });
-      });
+        await setDoc(doc(db, 'employees', targetDocId), marker, { merge: true });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `employees/${targetDocId}/resume`);
+      }
     }
 
     addAuditLog('EMPLOYEE_UPDATED', `Employee ID: ${id}`, `Fields updated: ${Object.keys(updates).join(', ')}`);

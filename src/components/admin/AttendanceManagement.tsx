@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Employee, AttendanceRecord, AttendanceStatus } from '../../types';
-import { 
-  Search, 
-  FileDown, 
-  Clock, 
-  Edit3, 
+import {
+  Search,
+  FileDown,
+  FileSpreadsheet,
+  Clock,
+  Edit3,
   History,
   Calendar,
   Save,
@@ -44,7 +45,7 @@ const DEPARTMENTS = [
 ];
 
 const DESIGNATIONS = [
-  'Managing Director', 'Project Manager', 'Tech Lead',
+  'Project Manager', 'Tech Lead',
   'Software Engineer', 'Software Developer', 'Senior Software Engineer',
   'Senior Software Developer',
   'UI/UX Designer', 'Senior UI/UX Designer',
@@ -112,21 +113,43 @@ const SPECIALIZATION_GROUPS: { label: string; color: string; items: string[] }[]
 
 const ALL_SPECIALIZATIONS = SPECIALIZATION_GROUPS.flatMap(g => g.items);
 
+// Helper to normalize skills for Attendance Ledger (merges 'UI Design' and 'UX Design' into 'UI/UX Design')
+function getAttendanceSpecializations(skills: string[] = []): string[] {
+  const result: string[] = [];
+  let hasDesign = false;
+  for (const s of skills) {
+    if (s === 'UI Design' || s === 'UX Design' || s === 'UI/UX Design') {
+      if (!hasDesign) {
+        result.push('UI/UX Design');
+        hasDesign = true;
+      }
+    } else if (ALL_SPECIALIZATIONS.includes(s) || s.includes('Development') || s.includes('AI') || s.includes('Design')) {
+      if (!result.includes(s)) {
+        result.push(s);
+      }
+    }
+  }
+  return result;
+}
+
 // Helper: get colour classes for a specialization tag
 function getSpecializationColor(spec: string): string {
+  if (spec === 'UI/UX Design' || spec === 'UI Design' || spec === 'UX Design') {
+    return 'bg-pink-500/15 text-pink-300 border-pink-500/25';
+  }
   for (const group of SPECIALIZATION_GROUPS) {
     if (group.items.includes(spec)) {
       const c = group.color;
       const map: Record<string, string> = {
-        blue:   'bg-blue-500/15 text-blue-300 border-blue-500/25',
+        blue: 'bg-blue-500/15 text-blue-300 border-blue-500/25',
         violet: 'bg-violet-500/15 text-violet-300 border-violet-500/25',
-        pink:   'bg-pink-500/15 text-pink-300 border-pink-500/25',
-        amber:  'bg-amber-500/15 text-amber-300 border-amber-500/25',
-        cyan:   'bg-cyan-500/15 text-cyan-300 border-cyan-500/25',
-        red:    'bg-red-500/15 text-red-300 border-red-500/25',
-        teal:   'bg-teal-500/15 text-teal-300 border-teal-500/25',
+        pink: 'bg-pink-500/15 text-pink-300 border-pink-500/25',
+        amber: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
+        cyan: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/25',
+        red: 'bg-red-500/15 text-red-300 border-red-500/25',
+        teal: 'bg-teal-500/15 text-teal-300 border-teal-500/25',
         orange: 'bg-orange-500/15 text-orange-300 border-orange-500/25',
-        lime:   'bg-lime-500/15 text-lime-300 border-lime-500/25',
+        lime: 'bg-lime-500/15 text-lime-300 border-lime-500/25',
         indigo: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/25',
       };
       return map[c] || 'bg-slate-700/40 text-slate-300 border-slate-600/30';
@@ -204,11 +227,67 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
   // Compute all leave balances (EL + SL + CL) for a single employee
   const computeAllLeaves = (emp: Employee) => computeTotalLeaveBalances(emp, leaveRequests, new Date());
 
+  // ─── Compute per-employee attendance stats from attendance records ────────────
+  const computeEmpAttendanceStats = (emp: Employee) => {
+    const empRecs = attendance.filter(rec =>
+      rec.employeeId === emp.id ||
+      rec.employeeCode === emp.employeeId ||
+      (rec.employeeName && emp.fullName &&
+        rec.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase())
+    );
+    let holidays = 0, wfhDays = 0, halfDays = 0, lopDays = 0;
+    empRecs.forEach(rec => {
+      if (rec.status === 'Holiday') holidays++;
+      else if (rec.status === 'Work From Home' || rec.isWfh) wfhDays++;
+      else if (rec.status === 'Half Day') halfDays++;
+      else if (rec.status === 'Loss of Pay' || rec.status === 'LOP') lopDays++;
+    });
+    return { holidays, wfhDays, halfDays, lopDays };
+  };
+
+  // ─── Excel/CSV Export for Attendance Ledger ──────────────────────────────────
+  const handleExportLedgerExcel = () => {
+    triggerHaptic();
+    const headers = [
+      'Employee Name', 'Emp ID', 'DOJ',
+      'Holidays (in cycle)', 'WFH Days',
+      'EL (Earned Leave)', 'CL (Casual Leave)', 'SL (Sick Leave)',
+      'Half Day', 'LOP'
+    ];
+    const rows = filteredEmployees.map(emp => {
+      const leaves = computeAllLeaves(emp);
+      const stats = computeEmpAttendanceStats(emp);
+      const doj = emp.joiningDate
+        ? new Date(emp.joiningDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+        : '—';
+      return [
+        `"${emp.fullName}"`,
+        emp.employeeId || '—',
+        doj,
+        stats.holidays,
+        stats.wfhDays,
+        leaves.earnLeave.balance,
+        leaves.casualLeave.balance,
+        leaves.sickLeave.balance,
+        stats.halfDays,
+        stats.lopDays
+      ].join(',');
+    });
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `Attendance_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleSyncAllEmployeeShifts = async () => {
     if (!canEditShifts) return;
     triggerHaptic();
     if (!window.confirm('Update all active employees to standard shift (10:00 AM – 7:00 PM) and verify zero-base leave credit policy?')) return;
-    
+
     setIsSyncingAll(true);
     setSyncFeedback(null);
     try {
@@ -248,19 +327,23 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
     return 'IT';
   };
 
-  // Filtered Employees for the Attendance Ledger (including Managing Director Gaurav Sir)
+  // Filtered Employees for the Attendance Ledger (Excludes Executive Leadership / Founders per directive)
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
       if (!emp.fullName || emp.fullName.trim() === '') return false;
       if (emp.status === 'Terminated' || emp.status === 'Inactive') return false;
 
-      const isGaurav =
+      // Exclude Executive Leadership / Founders (Gaurav Sir, Akshit Sir, etc.) from attendance ledger
+      if (
+        isExecutiveOrLeadership(emp) ||
         (emp.fullName || '').toLowerCase().includes('gaurav') ||
         (emp.designation || '').toLowerCase().includes('managing director') ||
-        emp.employeeId === 'KSS2407001';
-
-      // Keep Gaurav Sir in ledger so he can be filtered by Managing Director; exclude other super admins/founders if needed
-      if (isExecutiveOrLeadership(emp) && !isGaurav) return false;
+        (emp.designation || '').toLowerCase().includes('founder') ||
+        emp.employeeId === 'KSS2407001' ||
+        emp.employeeId === 'KSS2407002'
+      ) {
+        return false;
+      }
 
       const empDept = getAttendanceDepartment(emp);
 
@@ -287,13 +370,19 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
       const effectiveEmpType = computeEmploymentType(emp);
       const matchesEmpType = empTypeFilter === 'ALL' || effectiveEmpType === empTypeFilter;
 
+      const normalizedSpecs = getAttendanceSpecializations(emp.skills || []);
       const matchesSpec =
         specializationFilter === 'ALL' ||
-        (emp.skills || []).some(s => s.toLowerCase() === specializationFilter.toLowerCase()) ||
-        (specializationFilter === 'Frontend Development' && ((emp.skills || []).includes('Frontend Development') || desigLower.includes('frontend'))) ||
-        (specializationFilter === 'Backend Development' && ((emp.skills || []).includes('Backend Development') || desigLower.includes('backend'))) ||
-        (specializationFilter === 'Full Stack Development' && ((emp.skills || []).includes('Full Stack Development') || desigLower.includes('full stack') || desigLower.includes('software'))) ||
-        (specializationFilter === 'AI & ML' && ((emp.skills || []).some(s => s.toLowerCase().includes('ai') || s.toLowerCase().includes('machine learning')) || desigLower.includes('ai') || desigLower.includes('ml')));
+        normalizedSpecs.some(s => s.toLowerCase() === specializationFilter.toLowerCase()) ||
+        (specializationFilter === 'UI/UX Design' && (
+          normalizedSpecs.includes('UI/UX Design') ||
+          (emp.skills || []).some(s => s.toLowerCase().includes('ui') || s.toLowerCase().includes('ux')) ||
+          desigLower.includes('ui') || desigLower.includes('ux') || desigLower.includes('design')
+        )) ||
+        (specializationFilter === 'Frontend Development' && (normalizedSpecs.includes('Frontend Development') || desigLower.includes('frontend'))) ||
+        (specializationFilter === 'Backend Development' && (normalizedSpecs.includes('Backend Development') || desigLower.includes('backend'))) ||
+        (specializationFilter === 'Full Stack Development' && (normalizedSpecs.includes('Full Stack Development') || desigLower.includes('full stack') || desigLower.includes('software'))) ||
+        (specializationFilter === 'AI & ML' && (normalizedSpecs.some(s => s.toLowerCase().includes('ai') || s.toLowerCase().includes('machine learning')) || desigLower.includes('ai') || desigLower.includes('ml')));
 
       return matchesSearch && matchesDept && matchesDesignation && matchesEmpType && matchesSpec;
     });
@@ -351,17 +440,17 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
       const duplicates = attendance.filter(
         r => r.id !== record.id && r.date === record.date &&
-        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
-         (!!r.employeeCode && r.employeeCode === emp.employeeId) ||
-         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-         (!!r.uid && (r.uid === emp.uid || r.uid === emp.id)))
+          ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+            (!!r.employeeCode && r.employeeCode === emp.employeeId) ||
+            (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+            (!!r.uid && (r.uid === emp.uid || r.uid === emp.id)))
       );
       for (const dup of duplicates) {
         updateAttendanceRecord(dup.id, {
           checkOutAt: null as any,
           workingMinutes: 0,
           status: 'Present',
-        }).catch(() => {});
+        }).catch(() => { });
       }
 
       addAuditLog(
@@ -384,7 +473,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
   return (
     <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
-      
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -409,15 +498,22 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
               title="Update all employees to 10:00 AM – 7:00 PM shift"
             >
               <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>{isSyncingAll ? 'Updating All...' : 'Sync All Shifts (10am–7pm)'}</span>
+              <span>{isSyncingAll ? 'Updating All...' : 'Sync All Shifts'}</span>
             </button>
           )}
+          <button
+            onClick={handleExportLedgerExcel}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-emerald-900/40 w-full sm:w-auto shrink-0"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Export Excel</span>
+          </button>
           <button
             onClick={() => generateAttendanceReportPdf(attendance, settings, 'Attendance Master Roster Statement')}
             className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-blue-900/40 w-full sm:w-auto shrink-0"
           >
             <FileDown className="w-4 h-4" />
-            <span>Export Ledger Statement</span>
+            <span>Export PDF</span>
           </button>
         </div>
       </div>
@@ -553,29 +649,38 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
       {/* ── Attendance Ledger Table ── */}
       <div className="bg-slate-900/90 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1100px]">
+          <table className="w-full border-collapse" style={{ minWidth: '1500px' }}>
             <thead>
               <tr className="bg-slate-950/80 border-b border-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                <th className="py-4 px-5">Employee Name</th>
-                <th className="py-4 px-5">Emp ID</th>
-                <th className="py-4 px-5">Department</th>
-                <th className="py-4 px-5">Designation</th>
-                <th className="py-4 px-5">Employment Type</th>
-                <th className="py-4 px-5">Specialization</th>
-                <th className="py-4 px-5 min-w-[200px]">Status & Leave Balance</th>
-                <th className="py-4 px-5 text-right">Actions</th>
+                <th className="py-3.5 px-4 text-left whitespace-nowrap">Employee Name</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Employee ID</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Date of Joining</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Department</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Designation</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Employment Type</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Specialization</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Status</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Holidays</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">WFH Days</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Earned Leave</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Casual Leave</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Sick Leave</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Half Day</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Loss of Pay</th>
+                <th className="py-3.5 px-4 text-center whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-xs">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-14 text-center text-slate-500 font-medium">
+                  <td colSpan={16} className="py-14 text-center text-slate-500 font-medium">
                     No employees match your search criteria.
                   </td>
                 </tr>
               ) : (
                 filteredEmployees.map(emp => {
                   const leaveInfo = computeAllLeaves(emp);
+                  const stats = computeEmpAttendanceStats(emp);
 
                   // Today's attendance record for this employee
                   const todayRec =
@@ -598,57 +703,67 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                     !!todayRec.checkInAt &&
                     !!todayRec.checkOutAt;
 
-                  const isUpdatingThis = quickActionLoading === emp.id;
-
-                  // Specializations (skills array)
-                  const specializations = (emp.skills || []).filter(s => ALL_SPECIALIZATIONS.includes(s));
+                  // Specializations: Normalized to merge UI Design + UX Design into UI/UX Design
+                  const specializations = getAttendanceSpecializations(emp.skills || []);
                   const shownSpecs = specializations.slice(0, 2);
                   const extraCount = specializations.length - shownSpecs.length;
 
+                  // Format DOJ
+                  const dojDisplay = emp.joiningDate
+                    ? new Date(emp.joiningDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '—';
+
                   return (
                     <tr key={emp.id} className="hover:bg-slate-800/40 transition-colors group align-middle">
-                      {/* 1. Employee Name & Avatar (no role/designation subtitle) */}
-                      <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-3.5">
+
+                      {/* 1. Employee Name & Avatar */}
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
                           <img
                             src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=0f172a&color=fff`}
                             alt={emp.fullName}
-                            className="w-10 h-10 rounded-xl object-cover border border-slate-700/60 group-hover:border-blue-500/60 transition-all shadow-sm shrink-0"
+                            className="w-8 h-8 rounded-xl object-cover border border-slate-700/60 group-hover:border-blue-500/60 transition-all shadow-sm shrink-0"
                           />
-                          <div className="font-bold text-white group-hover:text-blue-300 transition-colors leading-tight">
+                          <span className="font-bold text-white group-hover:text-blue-300 transition-colors whitespace-nowrap">
                             {emp.fullName}
-                          </div>
+                          </span>
                         </div>
                       </td>
 
-                      {/* 2. Emp ID */}
-                      <td className="py-3.5 px-5">
-                        <span className="font-mono text-xs font-bold text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">
+                      {/* 2. Employee ID */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="font-mono text-xs font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded-lg border border-blue-500/20 whitespace-nowrap inline-block">
                           {emp.employeeId || '—'}
                         </span>
                       </td>
 
-                      {/* 3. Department */}
-                      <td className="py-3.5 px-5 font-semibold text-slate-300">
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                          <span>{getAttendanceDepartment(emp)}</span>
-                        </div>
+                      {/* 3. Date of Joining */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="font-mono text-xs text-slate-300 whitespace-nowrap">
+                          {dojDisplay}
+                        </span>
                       </td>
 
-                      {/* 4. Designation */}
-                      <td className="py-3.5 px-5">
-                        <span className="px-2.5 py-1 bg-slate-800 text-slate-200 border border-slate-700/60 rounded-lg text-[11px] font-semibold whitespace-nowrap inline-block">
+                      {/* 4. Department */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="text-xs font-semibold text-slate-300 whitespace-nowrap">
+                          {emp.department || '—'}
+                        </span>
+                      </td>
+
+                      {/* 5. Designation */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="px-2 py-1 bg-slate-800 text-slate-200 border border-slate-700/60 rounded-lg text-[11px] font-semibold whitespace-nowrap inline-block">
                           {emp.designation || '—'}
                         </span>
                       </td>
 
-                      {/* 5. Employment Type (Dynamic: Intern -> Trainee -> Full-Time) */}
-                      <td className="py-3.5 px-5">
+                      {/* 5. Employment Type */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
                         {(() => {
                           const effectiveEmpType = computeEmploymentType(emp);
                           return (
-                            <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border inline-block ${
+                            <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border whitespace-nowrap inline-block ${
                               effectiveEmpType === 'Intern'
                                 ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25'
                                 : effectiveEmpType === 'Trainee'
@@ -662,19 +777,19 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                       </td>
 
                       {/* 6. Specialization */}
-                      <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <div className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
                           {shownSpecs.length === 0 ? (
                             <span className="text-slate-600 text-[11px]">—</span>
                           ) : (
                             <>
                               {shownSpecs.map(s => (
-                                <span key={s} className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${getSpecializationColor(s)}`}>
+                                <span key={s} className={`px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap inline-block ${getSpecializationColor(s)}`}>
                                   {s}
                                 </span>
                               ))}
                               {extraCount > 0 && (
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-700/40 text-slate-400 border border-slate-600/30">
+                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-700/40 text-slate-400 border border-slate-600/30 whitespace-nowrap inline-block">
                                   +{extraCount}
                                 </span>
                               )}
@@ -683,54 +798,75 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                         </div>
                       </td>
 
-                      {/* 7. Status & Leave Balance (Clickable -> Opens Calendar) */}
-                      <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          {/* Active / Inactive badge */}
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold ${statusBadge}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                              isActive
-                                ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
-                                : 'bg-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.8)]'
-                            }`} />
-                            <span>{statusLabel}</span>
-                          </span>
-
-                          {/* Total Leave Button: Click to open calendar */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              triggerHaptic();
-                              setHistoryEmployee(emp);
-                            }}
-                            className="group inline-flex items-center gap-1.5 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 hover:from-indigo-900/50 hover:to-purple-900/50 px-3 py-1.5 rounded-xl border border-indigo-500/30 hover:border-indigo-400/80 transition-all cursor-pointer shadow-xs active:scale-95"
-                            title={`Click to view ${emp.fullName}'s attendance & leave calendar`}
-                          >
-                            <Calendar className="w-3.5 h-3.5 text-indigo-400 group-hover:text-indigo-300 group-hover:scale-110 transition-all shrink-0" />
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Leave:</span>
-                            <span className={`text-xs font-black font-mono ${
-                              leaveInfo.totalBalance === 0 ? 'text-rose-400' :
-                              leaveInfo.totalBalance >= 3 ? 'text-emerald-400' : 'text-indigo-300'
-                            }`}>
-                              {leaveInfo.totalBalance} {leaveInfo.totalBalance === 1 ? 'Day' : 'Days'} Left
-                            </span>
-                          </button>
-                        </div>
+                      {/* 7. Status */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold whitespace-nowrap ${statusBadge}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isActive
+                              ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                              : 'bg-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.8)]'
+                          }`} />
+                          <span className="whitespace-nowrap">{statusLabel}</span>
+                        </span>
                       </td>
 
-                      {/* 8. Actions */}
-                      <td className="py-3.5 px-5 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                      {/* 8. Holidays */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="text-xs font-bold text-slate-400 tabular-nums">{stats.holidays}</span>
+                      </td>
+
+                      {/* 9. WFH Days */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="text-xs font-bold text-sky-400 tabular-nums">{stats.wfhDays}</span>
+                      </td>
+
+                      {/* 10. EL */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className={`text-xs font-black tabular-nums ${
+                          leaveInfo.earnLeave.balance === 0 ? 'text-rose-400' :
+                          leaveInfo.earnLeave.balance >= 2 ? 'text-emerald-400' : 'text-amber-300'
+                        }`}>{leaveInfo.earnLeave.balance}</span>
+                      </td>
+
+                      {/* 11. CL */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className={`text-xs font-black tabular-nums ${
+                          leaveInfo.casualLeave.balance === 0 ? 'text-rose-400' :
+                          leaveInfo.casualLeave.balance >= 2 ? 'text-emerald-400' : 'text-amber-300'
+                        }`}>{leaveInfo.casualLeave.balance}</span>
+                      </td>
+
+                      {/* 12. SL */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className={`text-xs font-black tabular-nums ${
+                          leaveInfo.sickLeave.balance === 0 ? 'text-rose-400' :
+                          leaveInfo.sickLeave.balance >= 2 ? 'text-emerald-400' : 'text-amber-300'
+                        }`}>{leaveInfo.sickLeave.balance}</span>
+                      </td>
+
+                      {/* 13. Half Day */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="text-xs font-bold text-orange-400 tabular-nums">{stats.halfDays}</span>
+                      </td>
+
+                      {/* 14. LOP */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="text-xs font-bold text-rose-400 tabular-nums">{stats.lopDays}</span>
+                      </td>
+
+                      {/* 15. Actions */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <div className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
 
                           {/* ── Force Undo Checkout Button ── */}
                           {hasUndoableCheckout && todayRec && (
                             <button
                               onClick={() => handleOpenUndoCheckout(emp, todayRec)}
-                              className="group/undo px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 hover:border-amber-400/60 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                              className="group/undo px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 hover:border-amber-400/60 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap"
                               title={`Undo today's checkout for ${emp.fullName}`}
                             >
                               <RotateCcw className="w-3.5 h-3.5 group-hover/undo:-rotate-45 transition-transform duration-200" />
-                              <span>Undo Checkout</span>
+                              <span>Undo</span>
                             </button>
                           )}
 
@@ -746,10 +882,10 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                           {/* Shift Log */}
                           <button
                             onClick={() => setHistoryEmployee(emp)}
-                            className="px-3.5 py-1.5 bg-blue-600/15 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                            className="px-2.5 py-1.5 bg-blue-600/15 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap"
                           >
                             <History className="w-3.5 h-3.5 text-blue-400" />
-                            <span>Shift Log</span>
+                            <span>Log</span>
                           </button>
 
                           {/* Edit Shift (pencil) */}
@@ -792,7 +928,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
             <div className="space-y-3">
               <label className="block text-xs font-bold text-slate-300">Preset Shift Schedule or Custom Timings:</label>
-              
+
               <div className="grid grid-cols-1 gap-2">
                 {[
                   'Day Shift (10:00 AM – 7:00 PM)',
@@ -805,11 +941,10 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                     key={preset}
                     type="button"
                     onClick={() => setShiftTimingValue(preset)}
-                    className={`px-3 py-2 text-xs font-bold rounded-xl border text-left flex items-center justify-between cursor-pointer transition-all ${
-                      shiftTimingValue === preset
+                    className={`px-3 py-2 text-xs font-bold rounded-xl border text-left flex items-center justify-between cursor-pointer transition-all ${shiftTimingValue === preset
                         ? 'bg-blue-600 text-white border-blue-500'
                         : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800'
-                    }`}
+                      }`}
                   >
                     <span>{preset}</span>
                     {shiftTimingValue === preset && <Check className="w-3.5 h-3.5 text-white" />}
@@ -855,7 +990,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
       {undoCheckoutTarget && (
         <div className="fixed inset-0 z-[200] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl max-w-lg w-full space-y-5 animate-in fade-in zoom-in-95 duration-200">
-            
+
             {/* Modal Header */}
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -939,11 +1074,10 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
             {/* Feedback */}
             {undoFeedback && (
-              <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold border ${
-                undoFeedback.type === 'success'
+              <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold border ${undoFeedback.type === 'success'
                   ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
                   : 'bg-red-500/10 text-red-300 border-red-500/30'
-              }`}>
+                }`}>
                 {undoFeedback.type === 'success'
                   ? <Check className="w-3.5 h-3.5" />
                   : <AlertTriangle className="w-3.5 h-3.5" />}

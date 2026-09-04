@@ -188,8 +188,14 @@ export const HRPayrollView: React.FC = () => {
     return 45000;
   };
 
-  // Filter out Executive Leadership (CEO, CTO, COO Rahul Pathak, Founders) from employee payroll
-  const operationalEmployees = employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e));
+  // Filter out Executive Leadership (CEO, CTO, COO Rahul Pathak, Founders) and Inactive/Purged accounts from employee payroll
+  const operationalEmployees = employees.filter(e => 
+    e.status !== 'Terminated' && 
+    e.status !== 'Inactive' && 
+    e.id !== '3ZHI3aTB37StHjR97WEBJQSWT9H3' &&
+    !e.fullName?.toLowerCase().includes('abhinaya') &&
+    !isExecutiveOrLeadership(e)
+  );
 
   const disbursements = operationalEmployees.map(emp => {
     const custom = manualAdjustments[emp.id];

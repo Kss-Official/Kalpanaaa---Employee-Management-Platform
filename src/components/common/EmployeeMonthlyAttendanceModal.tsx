@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Employee, AttendanceRecord, AttendanceStatus } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -393,10 +393,16 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     }, 80);
   };
 
-  // Joining Date editing state
+  // Joining Date editing state — stays in sync with live context updates after save
   const [joiningDateValue, setJoiningDateValue] = useState<string>(employee.joiningDate || (employee as any).joining_date || '2026-07-27');
   const [isSavingJoiningDate, setIsSavingJoiningDate] = useState(false);
   const [joiningDateToast, setJoiningDateToast] = useState<string | null>(null);
+
+  // Re-sync local state whenever the employee record is updated in context (e.g., after save)
+  useEffect(() => {
+    const fresh = employee.joiningDate || (employee as any).joining_date || '2026-07-27';
+    setJoiningDateValue(fresh);
+  }, [employee.joiningDate, (employee as any).joining_date]);
 
   const handleSaveJoiningDate = async () => {
     if (!joiningDateValue) return;

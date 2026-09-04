@@ -51,6 +51,54 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   // and removed from the operational roster below it.
   const isExecutiveLeadership = (emp: any) => isExecutiveOrLeadership(emp);
 
+  // ─── Specialization helpers (same logic as Attendance Ledger) ─────────────────
+  const SPEC_GROUPS: { color: string; items: string[] }[] = [
+    { color: 'blue',   items: ['Frontend Development', 'Backend Development', 'Full Stack Development', 'Web Development', 'App Development'] },
+    { color: 'violet', items: ['AI & ML', 'Machine Learning', 'Deep Learning', 'Generative AI', 'NLP', 'Computer Vision', 'AI Automation', 'Chatbot Development'] },
+    { color: 'pink',   items: ['UI Design', 'UX Design', 'UI/UX Design', 'Product Design', 'Figma'] },
+    { color: 'amber',  items: ['Manual Testing', 'Automation Testing', 'API Testing'] },
+    { color: 'cyan',   items: ['Cloud Computing', 'DevOps', 'AWS', 'Azure', 'CI/CD'] },
+    { color: 'red',    items: ['Application Security', 'Network Security', 'Cybersecurity'] },
+    { color: 'teal',   items: ['IT Consulting', 'Technology Consulting', 'Solution Architecture', 'Application Support'] },
+    { color: 'lime',   items: ['SEO', 'Social Media Marketing', 'Content Marketing', 'Digital Marketing'] },
+    { color: 'indigo', items: ['Project Management', 'Technical Leadership', 'HR Operations', 'Talent Acquisition', 'Client Management'] },
+  ];
+
+  const getDirectorySpecColor = (spec: string): string => {
+    if (spec === 'UI/UX Design' || spec === 'UI Design' || spec === 'UX Design')
+      return 'bg-pink-500/15 text-pink-300 border-pink-500/25';
+    for (const g of SPEC_GROUPS) {
+      if (g.items.includes(spec)) {
+        const map: Record<string, string> = {
+          blue:   'bg-blue-500/15 text-blue-300 border-blue-500/25',
+          violet: 'bg-violet-500/15 text-violet-300 border-violet-500/25',
+          pink:   'bg-pink-500/15 text-pink-300 border-pink-500/25',
+          amber:  'bg-amber-500/15 text-amber-300 border-amber-500/25',
+          cyan:   'bg-cyan-500/15 text-cyan-300 border-cyan-500/25',
+          red:    'bg-red-500/15 text-red-300 border-red-500/25',
+          teal:   'bg-teal-500/15 text-teal-300 border-teal-500/25',
+          lime:   'bg-lime-500/15 text-lime-300 border-lime-500/25',
+          indigo: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/25',
+        };
+        return map[g.color] || 'bg-slate-700/40 text-slate-300 border-slate-600/30';
+      }
+    }
+    return 'bg-slate-700/40 text-slate-300 border-slate-600/30';
+  };
+
+  const getDirectorySpecializations = (skills: string[] = []): string[] => {
+    const result: string[] = [];
+    let hasDesign = false;
+    for (const s of skills) {
+      if (s === 'UI Design' || s === 'UX Design' || s === 'UI/UX Design') {
+        if (!hasDesign) { result.push('UI/UX Design'); hasDesign = true; }
+      } else if (SPEC_GROUPS.some(g => g.items.includes(s)) || s.includes('Development') || s.includes('AI') || s.includes('Design')) {
+        if (!result.includes(s)) result.push(s);
+      }
+    }
+    return result;
+  };
+
   const formatEmployeeStatus = (status?: string): EmployeeStatus => {
     if (!status || status.toLowerCase() === 'check' || status.toLowerCase() === 'checked in' || status.toLowerCase() === 'active') {
       return 'Active';
@@ -235,115 +283,173 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse" style={{ minWidth: '1300px' }}>
             <thead>
               <tr className="bg-slate-950/40 border-b border-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                <th className="py-3.5 px-6">Employee</th>
-                <th className="py-3.5 px-6">ID Code</th>
-                <th className="py-3.5 px-6">Department &amp; Role</th>
-                <th className="py-3.5 px-6">Employment</th>
-                <th className="py-3.5 px-6">Status</th>
-                <th className="py-3.5 px-6 text-right">Actions</th>
+                <th className="py-3.5 px-4 text-left whitespace-nowrap">Employee Name</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Employee ID</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Date of Joining</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Department</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Designation</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Employment Type</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Specialization</th>
+                <th className="py-3.5 px-3 text-center whitespace-nowrap">Status</th>
+                <th className="py-3.5 px-4 text-center whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/40 text-[11px]">
               {standardEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-500 font-medium">
+                  <td colSpan={9} className="py-12 text-center text-slate-500 font-medium">
                     No workforce personnel match your search criteria.
                   </td>
                 </tr>
               ) : (
-                standardEmployees.map(emp => (
-                  <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group">
-                    <td className="py-3 px-6">
-                      <div className="flex items-center gap-3.5">
-                        <img
-                          src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=0f172a&color=fff`}
-                          alt={emp.fullName}
-                          className="w-8 h-8 rounded-full object-cover border border-slate-700/50"
-                        />
-                        <div
-                          onClick={() => onSelectEmployee(emp)}
-                          className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors"
-                        >
-                          {emp.fullName}
-                        </div>
-                      </div>
-                    </td>
+                standardEmployees.map(emp => {
+                  const specs = getDirectorySpecializations(emp.skills || []);
+                  const shownSpecs = specs.slice(0, 2);
+                  const extraCount = specs.length - shownSpecs.length;
+                  const doj = emp.joiningDate
+                    ? new Date(emp.joiningDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '—';
 
-                    <td className="py-3 px-6">
-                      <span className="font-mono font-bold text-slate-400">
-                        {emp.employeeId}
-                      </span>
-                    </td>
+                  return (
+                    <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors group align-middle">
 
-                    <td className="py-3 px-6">
-                      <div className="font-bold text-slate-300">{emp.department}</div>
-                      <div className="text-[10px] text-slate-500 font-medium">{emp.designation}</div>
-                    </td>
-
-                    <td className="py-3 px-6">
-                      {(() => {
-                        const effectiveType = computeEmploymentType(emp);
-                        return (
-                          <div className={`font-bold text-xs ${
-                            effectiveType === 'Intern' ? 'text-cyan-400' :
-                            effectiveType === 'Trainee' ? 'text-amber-400' :
-                            'text-slate-300'
-                          }`}>
-                            {effectiveType}
+                      {/* 1. Employee Name */}
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=0f172a&color=fff`}
+                            alt={emp.fullName}
+                            className="w-8 h-8 rounded-full object-cover border border-slate-700/50 shrink-0"
+                          />
+                          <div
+                            onClick={() => onSelectEmployee(emp)}
+                            className="font-bold text-white text-xs hover:text-blue-400 cursor-pointer transition-colors whitespace-nowrap"
+                          >
+                            {emp.fullName}
                           </div>
-                        );
-                      })()}
-                      <div className="text-[10px] text-slate-500 font-mono">Shift: {emp.shift?.split(' ')[0] || 'General'}</div>
-                    </td>
+                        </div>
+                      </td>
 
-                    <td className="py-3 px-6">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-1.5 h-1.5 rounded-full ${getStatusIndicator(emp.status)}`} />
-                        <span className="text-slate-300 font-bold">{formatEmployeeStatus(emp.status)}</span>
-                      </div>
-                    </td>
+                      {/* 2. Employee ID */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="font-mono text-xs font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded-lg border border-blue-500/20 whitespace-nowrap inline-block">
+                          {emp.employeeId || '—'}
+                        </span>
+                      </td>
 
-                    <td className="py-3 px-6 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => onSelectEmployee(emp)}
-                          className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                          title="View Full Profile"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        {isAdmin && (
-                          <>
-                            <button
-                              onClick={() => setAttendanceModalEmp(emp)}
-                              className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                              title="View Monthly Attendance History"
-                            >
-                              <Calendar className="w-4 h-4 text-blue-400" />
-                            </button>
-                            <button
-                              onClick={() => onOpenIdCardModal(emp)}
-                              className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                              title="Print ID Badge Card"
-                            >
-                              <CreditCard className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => onOpenEditModal(emp)}
-                              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
-                              title="Edit Employee Data"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      {/* 3. Date of Joining */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="font-mono text-xs text-slate-300 whitespace-nowrap">
+                          {doj}
+                        </span>
+                      </td>
+
+                      {/* 4. Department */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="text-xs font-semibold text-slate-300 whitespace-nowrap">
+                          {emp.department || '—'}
+                        </span>
+                      </td>
+
+                      {/* 5. Designation */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <span className="px-2 py-1 bg-slate-800 text-slate-200 border border-slate-700/60 rounded-lg text-[11px] font-semibold whitespace-nowrap inline-block">
+                          {emp.designation || '—'}
+                        </span>
+                      </td>
+
+                      {/* 6. Employment Type */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        {(() => {
+                          const effectiveType = computeEmploymentType(emp);
+                          return (
+                            <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border whitespace-nowrap inline-block ${
+                              effectiveType === 'Intern'
+                                ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25'
+                                : effectiveType === 'Trainee'
+                                ? 'bg-amber-500/10 text-amber-300 border-amber-500/25'
+                                : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                            }`}>
+                              {effectiveType}
+                            </span>
+                          );
+                        })()}
+                      </td>
+
+                      {/* 7. Specialization */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <div className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
+                          {shownSpecs.length === 0 ? (
+                            <span className="text-slate-600 text-[11px]">—</span>
+                          ) : (
+                            <>
+                              {shownSpecs.map(s => (
+                                <span key={s} className={`px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap inline-block ${getDirectorySpecColor(s)}`}>
+                                  {s}
+                                </span>
+                              ))}
+                              {extraCount > 0 && (
+                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-700/40 text-slate-400 border border-slate-600/30 whitespace-nowrap inline-block">
+                                  +{extraCount}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 8. Status */}
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <div className="inline-flex items-center justify-center gap-1.5">
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getStatusIndicator(emp.status)}`} />
+                          <span className="text-slate-300 font-bold text-xs whitespace-nowrap">{formatEmployeeStatus(emp.status)}</span>
+                        </div>
+                      </td>
+
+                      {/* 9. Actions */}
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => onSelectEmployee(emp)}
+                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                            title="View Full Profile"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {isAdmin && (
+                            <>
+                              <button
+                                onClick={() => setAttendanceModalEmp(emp)}
+                                className="px-2.5 py-1.5 flex items-center gap-1.5 text-slate-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 hover:border-blue-400/40 rounded-lg cursor-pointer text-[11px] font-bold transition-all whitespace-nowrap"
+                                title="View Attendance History"
+                              >
+                                <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                <span>Attendance</span>
+                              </button>
+                              <button
+                                onClick={() => onOpenIdCardModal(emp)}
+                                className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                                title="Print ID Badge Card"
+                              >
+                                <CreditCard className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => onOpenEditModal(emp)}
+                                className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg cursor-pointer"
+                                title="Edit Employee Data"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

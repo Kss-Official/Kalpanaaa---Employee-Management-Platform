@@ -212,6 +212,38 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   const [isCapturingCamera, setIsCapturingCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Keep profile form fields synchronized with activeEmployee from Cloud DB
+  useEffect(() => {
+    if (activeEmployee) {
+      setFullName(activeEmployee.fullName || '');
+      setPhone(activeEmployee.phone || '');
+      setGender(activeEmployee.gender || 'Prefer not to say');
+      setDateOfBirth(activeEmployee.dateOfBirth || '');
+      if (activeEmployee.profilePhotoUrl) {
+        setProfilePhoto(activeEmployee.profilePhotoUrl);
+      }
+      setPermanentAddress(activeEmployee.permanentAddress || '');
+      setCurrentAddress(activeEmployee.currentAddress || '');
+      setCity(activeEmployee.city || '');
+      setState(activeEmployee.state || '');
+      setPostalCode(activeEmployee.postalCode || '');
+      setEmergencyContact(activeEmployee.emergencyContact || '');
+      setEmergencyRelationship(activeEmployee.emergencyRelationship || '');
+      if (activeEmployee.bio) {
+        setBio(activeEmployee.bio);
+      }
+      if (activeEmployee.skills && Array.isArray(activeEmployee.skills)) {
+        setSkills(activeEmployee.skills);
+      }
+      if (activeEmployee.preferredShift || activeEmployee.shift) {
+        setPreferredShift(activeEmployee.preferredShift || activeEmployee.shift);
+      }
+      if (activeEmployee.linkedinUrl) {
+        setLinkedinUrl(activeEmployee.linkedinUrl);
+      }
+    }
+  }, [activeEmployee]);
+
   const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Late' | 'Absent' | 'Leave'>('All');
 
   const isCeoOrCto = activeEmployee?.role === 'SUPER_ADMIN' ||
@@ -936,31 +968,45 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     setSkills(skills.filter(s => s !== skillToRemove));
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!activeEmployee) return;
     setIsSaving(true);
-    updateEmployee(activeEmployee.id, {
-      fullName,
-      phone,
-      gender: gender as any,
-      dateOfBirth,
-      profilePhotoUrl: profilePhoto,
-      permanentAddress,
-      currentAddress,
-      city,
-      state,
-      postalCode,
-      emergencyContact,
-      emergencyRelationship,
-      bio,
-      skills,
-      preferredShift,
-      linkedinUrl
-    });
-    setSavedSuccess(true);
-    setIsSaving(false);
-    setIsEditingProfileSheet(false);
-    setTimeout(() => setSavedSuccess(false), 2500);
+    triggerHaptic('medium');
+    try {
+      await updateEmployee(activeEmployee.id, {
+        fullName,
+        phone,
+        gender: gender as any,
+        dateOfBirth,
+        profilePhotoUrl: profilePhoto,
+        permanentAddress,
+        currentAddress,
+        city,
+        state,
+        postalCode,
+        emergencyContact,
+        emergencyRelationship,
+        bio,
+        skills,
+        preferredShift,
+        linkedinUrl
+      });
+      triggerHaptic('success');
+      setSavedSuccess(true);
+      setActionFeedback({ success: true, message: '✓ Profile details saved and synchronized to cloud database!' });
+      setIsEditingProfileSheet(false);
+      setTimeout(() => {
+        setSavedSuccess(false);
+        setActionFeedback(null);
+      }, 3500);
+    } catch (err: any) {
+      triggerHaptic('error');
+      console.error('[EmployeePortal] Profile save error:', err);
+      setActionFeedback({ success: false, message: `Failed to save profile: ${err?.message || 'Database error'}` });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -2604,10 +2650,20 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
 
                   <button
                     type="submit"
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-blue-900/40"
+                    disabled={isSaving}
+                    className="px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-blue-900/40"
                   >
-                    <Save className="w-4 h-4" />
-                    <span>Save &amp; Update Profile Sheet</span>
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Saving to Cloud Database...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Save &amp; Update Profile Sheet</span>
+                      </>
+                    )}
                   </button>
                 </div>
 
