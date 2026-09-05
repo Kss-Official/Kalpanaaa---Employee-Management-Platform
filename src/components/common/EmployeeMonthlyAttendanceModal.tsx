@@ -29,7 +29,8 @@ import {
   XCircle,
   Info,
   CalendarDays,
-  Layers
+  Layers,
+  RotateCcw
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
@@ -345,7 +346,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   onClose,
   isInline = false
 }) => {
-  const { attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection, updateEmployee } = useAuth();
+  const { attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection, unmarkAttendanceRecord, updateEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const isSuperAdmin = role === 'SUPER_ADMIN' || activeEmployee?.role === 'SUPER_ADMIN';
@@ -636,6 +637,10 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     const currentJoinDate = joiningDateValue || employee.joiningDate || (employee as any).joining_date;
     const effectiveStartDate = currentJoinDate && currentJoinDate > COMPANY_START_DATE ? currentJoinDate : COMPANY_START_DATE;
     const isPreInception = dateFormatted < effectiveStartDate;
+    if (isPreInception) {
+      // Days before company start (27 July 2026) or before employee joining date are unmarked (not present, late, or absent)
+      continue;
+    }
 
     const wfhReq = empLeaveRequests.find(l => (isWfhType(l.type) || isWfhType(l.leaveCategory)) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
     const hasLeave = empLeaveRequests.some(l => !isWfhType(l.type) && !isWfhType(l.leaveCategory) && dateFormatted >= (l.startDate || (l as any).fromDate) && dateFormatted <= (l.endDate || (l as any).toDate || l.startDate));
@@ -653,11 +658,8 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
       } else if (rec.status === 'Holiday' || nonWorking) {
         holidayDays++;
       } else if (rec.status === 'Absent' || !isFuture) {
-        if (!isPreInception) absentDays++;
+        absentDays++;
       }
-    } else if (isPreInception) {
-      // Days before company start (27 July 2026) or before employee joining date are unmarked (not absent)
-      continue;
     } else {
       if (hasLeave) {
         leaveDays++;
@@ -772,6 +774,29 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
     } catch (err: any) {
       console.error('Quick status override error:', err);
       setQuickFeedback(`Failed: ${err?.message || 'Error updating status'}`);
+    } finally {
+      setIsSavingCorrection(false);
+    }
+  };
+
+  // 1-Click Unmark / Clear Attendance Record for Selected Date
+  const handleUnmarkDate = async (dateStr: string) => {
+    triggerHaptic();
+    setIsSavingCorrection(true);
+    setQuickFeedback(null);
+
+    try {
+      const existingRecord = recordsByDate.get(dateStr);
+      const res = await unmarkAttendanceRecord(employee.id, dateStr, existingRecord?.id);
+      if (res.success) {
+        setQuickFeedback(`✓ Attendance unmarked for ${dateStr}`);
+        setTimeout(() => setQuickFeedback(null), 4000);
+      } else {
+        setQuickFeedback(`Error: ${res.message}`);
+      }
+    } catch (err: any) {
+      console.error('Error unmarking date:', err);
+      setQuickFeedback(`Failed: ${err?.message || 'Error unmarking date'}`);
     } finally {
       setIsSavingCorrection(false);
     }
@@ -1219,7 +1244,11 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                   let statusLabel = 'Absent';
                   let statusDot = 'bg-rose-500';
 
-                  if (rec) {
+                  if (isPreInception) {
+                    statusBg = 'bg-slate-950/40 border-slate-900/60 text-slate-600';
+                    statusLabel = '—';
+                    statusDot = 'bg-slate-800';
+                  } else if (rec) {
                     if (isApprovedLeave || rec.status === 'On Leave') {
                       statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
                       statusLabel = 'Leave';
@@ -1245,20 +1274,10 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       statusLabel = 'Half Day';
                       statusDot = 'bg-orange-400';
                     } else if (rec.status === 'Absent') {
-                      if (isPreInception) {
-                        statusBg = 'bg-slate-950/40 border-slate-900/60 text-slate-600';
-                        statusLabel = '—';
-                        statusDot = 'bg-slate-800';
-                      } else {
-                        statusBg = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
-                        statusLabel = 'Absent';
-                        statusDot = 'bg-rose-400';
-                      }
+                      statusBg = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
+                      statusLabel = 'Absent';
+                      statusDot = 'bg-rose-400';
                     }
-                  } else if (isPreInception) {
-                    statusBg = 'bg-slate-950/40 border-slate-900/60 text-slate-600';
-                    statusLabel = '—';
-                    statusDot = 'bg-slate-800';
                   } else if (isApprovedLeave) {
                     statusBg = 'bg-purple-500/10 border-purple-500/30 text-purple-300';
                     statusLabel = 'Leave';
@@ -1356,11 +1375,15 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                     <div>
                       <h5 className="text-xs font-black text-white">Selected Date: {selectedDateStr}</h5>
                       <p className="text-[11px] text-slate-400">
-                        Current Status: <strong className="text-slate-200">{selectedDayRecord?.status || (empLeaveRequests.some(l => (l.type || '').toUpperCase() !== 'WFH' && selectedDateStr >= (l.startDate || (l as any).fromDate) && selectedDateStr <= (l.endDate || (l as any).toDate || l.startDate)) ? 'On Leave' : 'No record / Absent')}</strong>
-                        {selectedDayRecord?.checkInAt && (
+                        Current Status: <strong className="text-slate-200">
+                          {selectedDateStr < (joiningDateValue || employee.joiningDate || (employee as any).joining_date || COMPANY_START_DATE) && !selectedDayRecord
+                            ? 'Before Joining Date (Unmarked)'
+                            : (selectedDayRecord?.status || (empLeaveRequests.some(l => (l.type || '').toUpperCase() !== 'WFH' && selectedDateStr >= (l.startDate || (l as any).fromDate) && selectedDateStr <= (l.endDate || (l as any).toDate || l.startDate)) ? 'On Leave' : (selectedDateStr < (joiningDateValue || employee.joiningDate || (employee as any).joining_date || COMPANY_START_DATE) ? 'Before Joining Date (Unmarked)' : 'No record / Absent')))}
+                        </strong>
+                        {selectedDayRecord?.checkInAt && !(selectedDateStr < (joiningDateValue || employee.joiningDate || (employee as any).joining_date || COMPANY_START_DATE)) && (
                           <> • In: <span className="text-emerald-400 font-mono">{toISTTimeString(selectedDayRecord.checkInAt)}</span></>
                         )}
-                        {selectedDayRecord?.checkOutAt && (
+                        {selectedDayRecord?.checkOutAt && !(selectedDateStr < (joiningDateValue || employee.joiningDate || (employee as any).joining_date || COMPANY_START_DATE)) && (
                           <> • Out: <span className="text-blue-400 font-mono">{toISTTimeString(selectedDayRecord.checkOutAt)}</span></>
                         )}
                       </p>
@@ -1411,6 +1434,17 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                       >
                         <span className="w-2 h-2 rounded-full bg-rose-400" />
                         <span>Mark Absent</span>
+                      </button>
+
+                      {/* 1-Click: Unmark Button */}
+                      <button
+                        disabled={isSavingCorrection}
+                        onClick={() => handleUnmarkDate(selectedDateStr)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                        title="Unmark this date (removes attendance record and reverts to unmarked / default)"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Unmark</span>
                       </button>
 
                       {/* Full Edit Modal Trigger */}
@@ -1541,22 +1575,37 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
               )}
 
               {/* Actions */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsEditingAttendance(false)}
-                  className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
                   disabled={isSavingCorrection}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-md shadow-blue-900/40"
+                  onClick={async () => {
+                    await handleUnmarkDate(selectedDateStr);
+                    setIsEditingAttendance(false);
+                  }}
+                  className="px-3 py-2 text-xs font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl cursor-pointer flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50"
+                  title="Unmark / remove attendance record for this date"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{isSavingCorrection ? 'Saving...' : 'Save & Live Sync'}</span>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Unmark Date</span>
                 </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingAttendance(false)}
+                    className="px-4 py-2 text-xs font-bold text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingCorrection}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-md shadow-blue-900/40"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{isSavingCorrection ? 'Saving...' : 'Save & Live Sync'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>

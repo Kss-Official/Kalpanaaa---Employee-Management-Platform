@@ -184,6 +184,11 @@ interface AuthContextType {
     record: AttendanceRecord & { isSynthetic?: boolean },
     updates: Partial<AttendanceRecord>
   ) => Promise<{ success: boolean; message: string }>;
+  unmarkAttendanceRecord: (
+    employeeId: string,
+    date: string,
+    recordId?: string
+  ) => Promise<{ success: boolean; message: string }>;
   updateSettings: (newSettings: Partial<CompanySettings>) => void;
   saveCompanyWorkZone: (zone: Partial<WorkZone>) => Promise<void>;
   addAuditLog: (action: string, target: string, details: string) => void;
@@ -1481,8 +1486,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const employeeId = matchedEmp?.id || data.employeeId || canonicalUid;
 
               const dateStr = getWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (recId.includes('_') ? recId.split('_')[1] : new Date()));
-              if (dateStr < COMPANY_START_DATE) {
-                // Root-level auto-cleanup of pre-inception attendance records
+              const isJasonEmp = canonicalUid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || employeeCode === 'KSS2407011' || employeeCode === 'KSS2407014' || (employeeName && employeeName.toLowerCase().includes('jason'));
+              const empJoinDate = matchedEmp?.joiningDate || (isJasonEmp ? '2026-08-17' : undefined);
+
+              if (dateStr < COMPANY_START_DATE || (empJoinDate && dateStr < empJoinDate)) {
+                // Root-level auto-cleanup of pre-inception / pre-joining attendance records
                 deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
                 return;
               }
@@ -2061,13 +2069,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDoc(doc(db, 'employees', emp.id), { earnLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
       }
 
-      // 1f. Ensure Jason Kenneth N has sickLeaveBalance = 0 in employees state & Firestore
+      // 1f. Ensure Jason Kenneth N has sickLeaveBalance = 0 and joiningDate = '2026-08-17' in employees state & Firestore
       const isJason = emp.id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || emp.employeeId === 'KSS2407011' || emp.employeeId === 'KSS2407014' || (emp.fullName && emp.fullName.toLowerCase().includes('jason'));
-      if (isJason && emp.sickLeaveBalance !== 0) {
-        setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, sickLeaveBalance: 0 } : e));
-        setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, sickLeaveBalance: 0 } : prev);
-        setDoc(doc(db, 'employees', emp.id), { sickLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
+      if (isJason && (emp.sickLeaveBalance !== 0 || !emp.joiningDate || emp.joiningDate !== '2026-08-17')) {
+        setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, sickLeaveBalance: 0, joiningDate: '2026-08-17' } : e));
+        setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, sickLeaveBalance: 0, joiningDate: '2026-08-17' } : prev);
+        setDoc(doc(db, 'employees', emp.id), { sickLeaveBalance: 0, joiningDate: '2026-08-17', updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
       }
+    });
+
+    // 1g. Purge any attendance records for Jason Kenneth N before his joining date (2026-08-17)
+    const jasonPreJoiningRecords = attendance.filter(a => {
+      const isJ = a.employeeId === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' ||
+                  a.employeeCode === 'KSS2407011' ||
+                  a.employeeCode === 'KSS2407014' ||
+                  (a.employeeName && a.employeeName.toLowerCase().includes('jason'));
+      return isJ && a.date < '2026-08-17';
+    });
+    if (jasonPreJoiningRecords.length > 0) {
+      setAttendance(prev => prev.filter(a => !jasonPreJoiningRecords.some(r => r.id === a.id)));
+      jasonPreJoiningRecords.forEach(r => {
+        if (r.id) {
+          deleteDoc(doc(db, 'attendance', r.id)).catch(() => {});
+        }
+      });
+    }
+
+    // Proactively clean up specific legacy/known Firestore attendance IDs for Jason before August 17
+    const preDates = ['2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14', '2026-08-15'];
+    const jasonIds = ['KfAB95lpbJOeylpKQaWX4GXOPGt2', 'KSS2407011', 'KSS2407014'];
+    preDates.forEach(d => {
+      jasonIds.forEach(id => {
+        deleteDoc(doc(db, 'attendance', `${id}_${d}`)).catch(() => {});
+      });
     });
 
     // 2. Canonical August leave requests sync and dummy leave purge
@@ -3876,6 +3910,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  /**
+   * Unmark attendance record for an employee on a given date.
+   * Completely removes the record from Firestore and React state,
+   * restoring the date to its default unmarked/pre-joining state.
+   */
+  const unmarkAttendanceRecord = async (
+    employeeId: string,
+    date: string,
+    recordId?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    try {
+      const emp = findEmployee(employeeId);
+      const canonicalUid = emp ? getCanonicalEmployeeUid(emp, undefined) : employeeId;
+      const targetDocId = recordId || getAttendanceDocId(canonicalUid, date);
+
+      // 1. Delete document from Firestore
+      await deleteDoc(doc(db, 'attendance', targetDocId)).catch(() => {});
+
+      // Proactively delete alternative doc ID formats (legacy code/id prefixes)
+      if (emp?.employeeId) {
+        await deleteDoc(doc(db, 'attendance', `${emp.employeeId}_${date}`)).catch(() => {});
+      }
+      if (emp?.id && emp.id !== targetDocId) {
+        await deleteDoc(doc(db, 'attendance', `${emp.id}_${date}`)).catch(() => {});
+      }
+
+      // 2. Remove from local attendance state immediately
+      setAttendance(prev => prev.filter(a => {
+        if (a.id === targetDocId) return false;
+        const matchesEmp = a.employeeId === employeeId || 
+                           a.employeeCode === employeeId || 
+                           (emp && (a.employeeId === emp.id || a.employeeCode === emp.employeeId));
+        return !(matchesEmp && a.date === date);
+      }));
+
+      // 3. Remove from approvedWfhDates if present
+      if (emp?.approvedWfhDates && emp.approvedWfhDates.includes(date)) {
+        const cleaned = emp.approvedWfhDates.filter(d => d !== date);
+        updateEmployee(emp.id, { approvedWfhDates: cleaned });
+      }
+
+      addAuditLog(
+        'ATTENDANCE_CORRECTION',
+        emp?.fullName || employeeId,
+        `Unmarked attendance record for ${date}`
+      );
+
+      return { success: true, message: `Attendance for ${date} has been unmarked.` };
+    } catch (err: any) {
+      console.error('unmarkAttendanceRecord error:', err);
+      return { success: false, message: err?.message || 'Failed to unmark attendance record.' };
+    }
+  };
+
   const updateSettings = (newSettings: Partial<CompanySettings>) => {
     const updated = { ...settings, ...newSettings };
     setSettings(updated);
@@ -4451,6 +4539,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       endBreak,
       updateAttendanceRecord,
       applyAttendanceCorrection,
+      unmarkAttendanceRecord,
       updateSettings,
       saveCompanyWorkZone,
       submitLeaveRequest,
