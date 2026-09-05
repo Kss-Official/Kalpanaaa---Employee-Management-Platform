@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-
+import { MobileBlockGate } from './components/common/MobileBlockGate';
 import { registerSW } from 'virtual:pwa-register';
 import { logErrorToFirestore } from './lib/diagnostics';
 
@@ -53,6 +53,8 @@ window.addEventListener('unhandledrejection', (event) => {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <MobileBlockGate>
+      <App />
+    </MobileBlockGate>
   </StrictMode>,
 );

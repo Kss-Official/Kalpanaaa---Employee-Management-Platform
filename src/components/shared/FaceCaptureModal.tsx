@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Camera, CheckCircle2, AlertTriangle, X, ScanFace, RefreshCw, Loader2, UserCheck, ShieldAlert, Sparkles } from 'lucide-react';
+import { motion } from 'motion/react';
+import { CheckCircle2, AlertTriangle, X, ScanFace, RefreshCw, Loader2, UserCheck, ShieldAlert, Sparkles, ShieldX } from 'lucide-react';
 import { useHaptic } from '../../hooks/useHaptic';
 import {
   loadFaceModels,
@@ -62,16 +62,10 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
     if (employeeId && isOpen) {
       const storedDesc = getEmployeeDescriptor(employeeId);
       const enrolled = storedDesc !== null || (cloudDescriptor && cloudDescriptor.length === 128);
-      setIsEnrolled(enrolled);
+      setIsEnrolled(!!enrolled);
 
-      // If user has not enrolled their face template yet, automatically enter Enrollment Mode!
-      if (!enrolled && !isTestMode) {
-        setCurrentModeIsEnroll(true);
-        if (statusStep === 'NOT_ENROLLED') {
-          setStatusStep('CENTER_FACE');
-          setFeedbackText('Position your face inside the frame to register...');
-        }
-      }
+      // SECURITY: Never silently auto-enroll. Only enter enrollment mode when explicitly requested.
+      // Unenrolled employees will see the NOT_ENROLLED state and must click "Register Face" explicitly.
 
       if (!storedDesc && profilePhotoUrl) {
         extractDescriptorFromImageUrl(profilePhotoUrl).then(desc => {
@@ -79,7 +73,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
         });
       }
     }
-  }, [employeeId, profilePhotoUrl, isOpen, cloudDescriptor, isTestMode]);
+  }, [employeeId, profilePhotoUrl, isOpen, cloudDescriptor]);
 
   // Load Models & Start Camera Stream
   useEffect(() => {
@@ -113,10 +107,14 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
           });
         } catch {
           // Fallback to generic video
-          mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false
-          });
+          try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false
+            });
+          } catch {
+            throw new Error('Camera access denied. Please allow camera permission in browser settings and try again.');
+          }
         }
 
         if (isMounted && mediaStream) {
@@ -212,19 +210,31 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
           setFeedbackText(`Face detected! Processing facial landmarks... (${scanCount}/2)`);
 
           if (scanCount >= 2) {
-            // Mode A: Enrollment Mode or First Time Scan -> Save face descriptor as reference template
-            if (currentModeIsEnroll || (!isEnrolled && !isTestMode)) {
+            // Mode A: Explicit Enrollment Mode — user deliberately clicked "Register Face"
+            if (currentModeIsEnroll) {
               active = false;
               clearInterval(interval);
               handlePerformEnrollment(scan.descriptor);
               return;
             }
 
-            // Mode B: Verification Mode -> Match against registered face descriptor
+            // Mode B: Not enrolled + NOT in enrollment mode → hard block, no silent auto-enroll
+            // SECURITY FIX: Previously, !isEnrolled triggered silent enrollment of any face. Removed.
+            if (!isEnrolled) {
+              active = false;
+              clearInterval(interval);
+              setStatusStep('NOT_ENROLLED');
+              setFeedbackText('No biometric face template registered for this account. Please register your face first.');
+              triggerHaptic('error');
+              return;
+            }
+
+            // Mode C: Strict Verification — must match enrolled descriptor
             const match = verifyFaceAgainstEnrolled(scan.descriptor, employeeId, profileDescriptor, cloudDescriptor);
 
-            if (match.isMatch || !match.enrolled) {
-              const conf = match.confidencePercent || 96;
+            // SECURITY FIX: Removed `|| !match.enrolled` bypass — unenrolled is NOT a pass condition.
+            if (match.isMatch) {
+              const conf = match.confidencePercent;
               setConfidencePercent(conf);
               setStatusStep('VERIFIED');
               setFeedbackText(
@@ -242,6 +252,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
                 onClose();
               }, 1200);
             } else {
+              // Hard mismatch — no bypass, employee must retry with their own face
               setStatusStep('FAILED');
               setConfidencePercent(match.confidencePercent);
               setFeedbackText(`❌ Biometric Mismatch (${match.confidencePercent}% Confidence). Face does not match registered profile!`);
@@ -252,6 +263,7 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
           }
         } else {
           if (statusStep === 'SCANNING') {
+            scanCount = 0;
             setStatusStep('CENTER_FACE');
             setFeedbackText('Position your face clearly inside the frame...');
             setConfidencePercent(null);
@@ -346,34 +358,30 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
             </div>
           )}
 
-          {/* Overlay: Fatal Camera Error */}
+          {/* Overlay: Fatal Camera Error — informational only, no bypass action */}
           {errorMsg && (
             <div className="absolute inset-0 bg-slate-950/95 z-30 flex flex-col items-center justify-center p-6 text-center space-y-4">
-              <div className="relative w-24 h-24 rounded-full overflow-hidden border-2 border-slate-700 shadow-xl">
-                <img
-                  src={profilePhotoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'}
-                  alt={employeeName}
-                  className="w-full h-full object-cover opacity-80"
-                />
+              <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center">
+                <ShieldX className="w-8 h-8 text-rose-400" />
               </div>
-              <div className="space-y-1">
-                <p className="text-xs text-rose-400 font-semibold max-w-xs mx-auto">{errorMsg}</p>
-                <p className="text-[10px] text-slate-400">You can complete check-in using your verified profile picture descriptor.</p>
+              <div className="space-y-2">
+                <p className="text-sm font-bold text-rose-300">Camera Access Required</p>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto">{errorMsg}</p>
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  Biometric face verification requires camera access. Please grant permission in your browser settings and reload.
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  const dummyVector: number[] = profileDescriptor ? Array.from(profileDescriptor) : Array.from({ length: 128 }, () => Math.random() * 0.1);
-                  saveEmployeeDescriptor(employeeId, new Float32Array(dummyVector));
-                  onEnrollSuccess?.(dummyVector);
-                  setIsEnrolled(true);
-                  onSuccess();
-                  onClose();
+                  setErrorMsg(null);
+                  setStatusStep('LOADING_MODELS');
+                  setFeedbackText('Retrying camera access...');
                 }}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer"
               >
-                <UserCheck className="w-4 h-4" />
-                <span>Verify via Profile Photo &amp; Check In</span>
+                <RefreshCw className="w-4 h-4" />
+                <span>Retry Camera Access</span>
               </button>
             </div>
           )}
@@ -421,76 +429,43 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
               Cancel
             </button>
 
-            {statusStep === 'NOT_ENROLLED' || !isEnrolled ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setCurrentModeIsEnroll(true);
-                    setStatusStep('CENTER_FACE');
-                    setFeedbackText('Position your face inside frame to register...');
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-blue-900/40"
-                >
-                  <Sparkles className="w-3.5 h-3.5" /> Register Face via Camera
-                </button>
-
-                <button
-                  onClick={() => {
-                    const dummyVector: number[] = profileDescriptor ? Array.from(profileDescriptor) : Array.from({ length: 128 }, () => Math.random() * 0.1);
-                    saveEmployeeDescriptor(employeeId, new Float32Array(dummyVector));
-                    onEnrollSuccess?.(dummyVector);
-                    setIsEnrolled(true);
-                    onSuccess();
-                    onClose();
-                  }}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-900/40"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Auto-Enroll &amp; Check In
-                </button>
-              </div>
+            {/* NOT_ENROLLED: offer ONLY explicit registration — no bypass whatsoever */}
+            {(statusStep === 'NOT_ENROLLED' || (!isEnrolled && statusStep !== 'LOADING_MODELS' && statusStep !== 'ERROR')) ? (
+              <button
+                onClick={() => {
+                  setCurrentModeIsEnroll(true);
+                  setStatusStep('CENTER_FACE');
+                  setFeedbackText('Position your face inside frame to register...');
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-blue-900/40"
+              >
+                <Sparkles className="w-3.5 h-3.5" /> Register Face via Camera
+              </button>
             ) : statusStep === 'FAILED' ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setStatusStep('CENTER_FACE')}
-                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" /> Retry Scan
-                </button>
-                <button
-                  onClick={() => {
-                    triggerHaptic('success');
-                    onSuccess();
-                    onClose();
-                  }}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-900/40"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Direct Verify &amp; Check In
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setCurrentModeIsEnroll(true);
-                    setStatusStep('CENTER_FACE');
-                    setFeedbackText('Position your face to re-register template...');
-                  }}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center gap-1"
-                >
-                  <Sparkles className="w-3 h-3 text-blue-400" /> Re-Register
-                </button>
-                <button
-                  onClick={() => {
-                    triggerHaptic('success');
-                    onSuccess();
-                    onClose();
-                  }}
-                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-950/40"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Quick Face Verify
-                </button>
-              </div>
-            )}
+              /* FAILED: only retry scan — no bypass or override allowed */
+              <button
+                onClick={() => {
+                  setStatusStep('CENTER_FACE');
+                  setConfidencePercent(null);
+                  setFeedbackText('Position your face inside the frame...');
+                }}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Retry Scan
+              </button>
+            ) : statusStep !== 'VERIFIED' && statusStep !== 'LOADING_MODELS' && statusStep !== 'ERROR' ? (
+              /* Enrolled + scanning: only offer re-registration of their own face */
+              <button
+                onClick={() => {
+                  setCurrentModeIsEnroll(true);
+                  setStatusStep('CENTER_FACE');
+                  setFeedbackText('Position your face to re-register template...');
+                }}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+              >
+                <Sparkles className="w-3 h-3 text-blue-400" /> Re-Register Face
+              </button>
+            ) : null}
           </div>
         </div>
       </motion.div>
