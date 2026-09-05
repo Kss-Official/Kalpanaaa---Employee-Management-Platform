@@ -27,11 +27,6 @@ import {
   Compass,
   Heart,
   Briefcase,
-  Laptop,
-  Monitor,
-  Copy,
-  Check,
-  X
 } from 'lucide-react';
 
 interface LandingViewProps {
@@ -42,26 +37,10 @@ interface LandingViewProps {
 export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSplash }) => {
   const { activeEmployee, role, attendance, employees, quickDemoLogin } = useAuth();
 
-  const [isMobileModalOpen, setIsMobileModalOpen] = React.useState(false);
-  const [pendingTab, setPendingTab] = React.useState<'signin' | 'signup' | 'demo'>('signin');
-  const [copiedLink, setCopiedLink] = React.useState(false);
-
   const handleAuthClick = (tab: 'signin' | 'signup' | 'demo' = 'signin') => {
-    if (typeof window !== 'undefined' && window.innerWidth < 768) {
-      setPendingTab(tab);
-      setIsMobileModalOpen(true);
-    } else {
-      onGetStarted(tab);
-    }
+    onGetStarted(tab);
   };
 
-  const handleCopyLink = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText('https://www.kalpanaaasoftwaresolutions.in/');
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
-    }
-  };
 
   const todayStr = todayInIST();
   const todayAttendance = attendance.filter(a => a.date === todayStr);
@@ -422,60 +401,6 @@ export const LandingView: React.FC<LandingViewProps> = ({ onGetStarted, onShowSp
         <p>© {new Date().getFullYear()} Kalpanaaa Software Solutions. Private Internal Employee Workspace.</p>
       </footer>
 
-      {/* Mobile Screen Required Modal */}
-      {isMobileModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5 text-center relative overflow-hidden">
-            <div className="absolute top-0 right-0 left-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
-            
-            <button
-              onClick={() => setIsMobileModalOpen(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-950 text-slate-400 hover:text-white border border-slate-800 transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="w-14 h-14 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mx-auto shadow-lg shadow-blue-500/10">
-              <Laptop className="w-7 h-7" />
-            </div>
-
-            <div className="space-y-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-amber-500/10 border border-amber-500/20 text-amber-300">
-                <Monitor className="w-3 h-3" />
-                Desktop View Required
-              </span>
-              <h3 className="text-lg font-black text-white tracking-tight">Kindly Use Desktop or Laptop</h3>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                The <strong className="text-white">Kalpanaaa HRMS Platform</strong> is optimized for desktop and laptop displays for secure facial biometrics, operations, and dashboard access.
-              </p>
-            </div>
-
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-left text-[11px] text-slate-400">
-              <span>Please open <strong>https://www.kalpanaaasoftwaresolutions.in/</strong> on your computer.</span>
-            </div>
-
-            <div className="space-y-2 pt-1">
-              <button
-                onClick={handleCopyLink}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-900/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {copiedLink ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
-                <span>{copiedLink ? '✓ Link Copied!' : 'Copy Portal URL'}</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setIsMobileModalOpen(false);
-                  onGetStarted(pendingTab);
-                }}
-                className="w-full py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-semibold rounded-xl border border-slate-800 transition-colors cursor-pointer"
-              >
-                Continue anyway on mobile
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );
