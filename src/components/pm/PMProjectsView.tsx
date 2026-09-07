@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -230,13 +230,35 @@ export const PMProjectsView: React.FC = () => {
     setIsModalOpen(false);
   };
 
-  const filteredTasks = tasks.filter(t => {
-    const matchesSearch =
-      (t.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.projectName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.assigneeName || '').toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch;
-  });
+  const filteredTasks = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return tasks;
+    return tasks.filter(t => {
+      return (
+        (t.title || '').toLowerCase().includes(q) ||
+        (t.projectName || '').toLowerCase().includes(q) ||
+        (t.assigneeName || '').toLowerCase().includes(q)
+      );
+    });
+  }, [tasks, searchTerm]);
+
+  const tasksByColumn = useMemo(() => {
+    const map: Record<TaskStatus, ProjectTask[]> = {
+      'Backlog': [],
+      'To Do': [],
+      'In Progress': [],
+      'In Review': [],
+      'Done': []
+    };
+    for (const t of filteredTasks) {
+      if (map[t.status]) {
+        map[t.status].push(t);
+      } else {
+        map[t.status] = [t];
+      }
+    }
+    return map;
+  }, [filteredTasks]);
 
   return (
     <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
@@ -294,7 +316,7 @@ export const PMProjectsView: React.FC = () => {
         /* Kanban Board Columns */
         <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
           {columns.map(col => {
-            const colTasks = filteredTasks.filter(t => t.status === col);
+            const colTasks = tasksByColumn[col] || [];
             const colBadgeColor = col === 'Backlog' ? 'text-slate-400 bg-slate-500/10 border-slate-500/20' :
               col === 'To Do' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
               col === 'In Progress' ? 'text-blue-400 bg-blue-500/10 border-blue-500/20' :

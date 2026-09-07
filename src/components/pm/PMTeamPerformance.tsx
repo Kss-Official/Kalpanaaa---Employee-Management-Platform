@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { isExecutiveOrLeadership, formatShiftTiming } from '../../lib/attendanceEngine';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -88,24 +88,36 @@ export const PMTeamPerformance: React.FC = () => {
   // Extract unique departments for filter buttons. Executive Leadership is
   // excluded here too, so this surface agrees with the admin/HR dashboards and
   // the payroll ledger instead of quietly reporting a larger team.
-  const validEmployees = employees.filter(
-    e => e && e.fullName && e.fullName.trim().length > 0 && !isExecutiveOrLeadership(e)
-  );
-  const departments = ['ALL', ...Array.from(new Set(validEmployees.map(e => e.department).filter(Boolean)))];
+  const validEmployees = useMemo(() => {
+    return employees.filter(
+      e => e && e.fullName && e.fullName.trim().length > 0 && !isExecutiveOrLeadership(e)
+    );
+  }, [employees]);
 
-  const filteredEmployees = validEmployees.filter(emp => {
-    const matchesSearch = 
-      (emp.fullName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (emp.employeeId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (emp.designation || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (emp.email || '').toLowerCase().includes(searchTerm.toLowerCase());
+  const departments = useMemo(() => {
+    return ['ALL', ...Array.from(new Set(validEmployees.map(e => e.department).filter(Boolean)))];
+  }, [validEmployees]);
 
-    const matchesDept = selectedDept === 'ALL' || emp.department === selectedDept;
+  const filteredEmployees = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return validEmployees.filter(emp => {
+      const matchesDept = selectedDept === 'ALL' || emp.department === selectedDept;
+      if (!matchesDept) return false;
 
-    return matchesSearch && matchesDept;
-  });
+      if (!q) return true;
 
-  const selectedEmp = validEmployees.find(e => e.id === selectedEmpId) || filteredEmployees[0] || validEmployees[0];
+      return (
+        (emp.fullName || '').toLowerCase().includes(q) ||
+        (emp.employeeId || '').toLowerCase().includes(q) ||
+        (emp.designation || '').toLowerCase().includes(q) ||
+        (emp.email || '').toLowerCase().includes(q)
+      );
+    });
+  }, [validEmployees, searchTerm, selectedDept]);
+
+  const selectedEmp = useMemo(() => {
+    return validEmployees.find(e => e.id === selectedEmpId) || filteredEmployees[0] || validEmployees[0];
+  }, [validEmployees, selectedEmpId, filteredEmployees]);
 
   const handleSaveNote = (e: React.FormEvent) => {
     e.preventDefault();

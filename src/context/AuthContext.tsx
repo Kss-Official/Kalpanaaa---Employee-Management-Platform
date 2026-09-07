@@ -226,52 +226,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 department: 'Executive Management'
               };
             }
-            if (emp.employeeId && (emp.employeeId.startsWith('KS2407') || emp.employeeId.startsWith('KS2707'))) {
-              return {
-                ...emp,
-                employeeId: emp.employeeId.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407')
-              };
+            let updated = { ...emp };
+            if (updated.employeeId && (updated.employeeId.startsWith('KS2407') || updated.employeeId.startsWith('KS2707'))) {
+              updated.employeeId = updated.employeeId.replace('KS2707', 'KSS2407').replace('KS2407', 'KSS2407');
             }
-            if (emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'))) {
+
+            const empName = (updated.fullName || (updated as any).name || '').toLowerCase();
+            const empCode = (updated.employeeId || '').toLowerCase();
+            const empId = (updated.id || (updated as any).uid || '').toLowerCase();
+
+            if (empId.includes('kss2407004') || empCode.includes('kss2407004') || empName.includes('asbin')) {
               return {
-                ...emp,
+                ...updated,
                 earnLeaveBalance: 0,
+                sickLeaveBalance: 1,
                 approvedWfhDates: ['2026-08-28', '2026-08-29']
               };
             }
-            if (emp.id === 'emp-KSS2407006' || emp.employeeId === 'KSS2407006' || (emp.fullName && emp.fullName.toLowerCase().includes('mahesh'))) {
+            if (empId.includes('kss2407006') || empCode.includes('kss2407006') || empName.includes('mahesh') || empId === '8t19zoi3notdcgeye4bwsviwseq1') {
               return {
-                ...emp,
+                ...updated,
                 earnLeaveBalance: 0,
-                approvedWfhDates: ['2026-08-26', '2026-08-27']
+                sickLeaveBalance: 1,
+                approvedWfhDates: ['2026-08-27', '2026-08-29']
               };
             }
-            if (emp.id === 'emp-KSS2407005' || emp.employeeId === 'KSS2407005' || (emp.fullName && emp.fullName.toLowerCase().includes('thabeethal'))) {
+            if (empId.includes('kss2407005') || empCode.includes('kss2407005') || empName.includes('thabeethal')) {
               return {
-                ...emp,
-                earnLeaveBalance: 0
+                ...updated,
+                earnLeaveBalance: 0,
+                sickLeaveBalance: 1
               };
             }
-            if (emp.id === 'emp-KSS2407003' || emp.employeeId === 'KSS2407003' || (emp.fullName && emp.fullName.toLowerCase().includes('koushik'))) {
+            if (empId.includes('kss2407003') || empCode.includes('kss2407003') || empName.includes('koushik')) {
               return {
-                ...emp,
-                earnLeaveBalance: 0
+                ...updated,
+                earnLeaveBalance: 0,
+                sickLeaveBalance: 1
               };
             }
-            if (emp.id === 'emp-KSS2407013' || emp.employeeId === 'KSS2407013' || (emp.fullName && emp.fullName.toLowerCase().includes('akash'))) {
+            if (empId.includes('kss2407013') || empCode.includes('kss2407013') || empName.includes('akash')) {
               return {
-                ...emp,
+                ...updated,
+                earnLeaveBalance: 1,
                 sickLeaveBalance: 0,
                 approvedWfhDates: []
               };
             }
-            if (emp.id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || emp.employeeId === 'KSS2407011' || emp.employeeId === 'KSS2407014' || (emp.fullName && emp.fullName.toLowerCase().includes('jason'))) {
+            if (empId === '8rxh6z3zzutmm26iqta1dhcpa8l1' || empCode === 'kss2407014' || empName.includes('jigy') || empName.includes('jing')) {
               return {
-                ...emp,
-                sickLeaveBalance: 0
+                ...updated,
+                earnLeaveBalance: 1,
+                sickLeaveBalance: 1
               };
             }
-            return emp;
+            if (empId === 'kfab95lpbjoeylpkqawx4gxopgt2' || empCode === 'kss2407011' || empName.includes('jason')) {
+              return {
+                ...updated,
+                earnLeaveBalance: 1,
+                sickLeaveBalance: 0,
+                joiningDate: '2026-08-17'
+              };
+            }
+
+            return updated;
           });
       } catch (e) {}
     }
@@ -1486,7 +1504,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const employeeId = matchedEmp?.id || data.employeeId || canonicalUid;
 
               const dateStr = getWorkDate(data.date || formatTimestampToISO(data.createdAt) || formatTimestampToISO(data.checkInAt) || (recId.includes('_') ? recId.split('_')[1] : new Date()));
-              const isJasonEmp = canonicalUid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || employeeCode === 'KSS2407011' || employeeCode === 'KSS2407014' || (employeeName && employeeName.toLowerCase().includes('jason'));
+              const isJasonEmp = (canonicalUid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || employeeCode === 'KSS2407011' || (employeeName && employeeName.toLowerCase().includes('jason'))) && employeeCode !== 'KSS2407014';
               const empJoinDate = matchedEmp?.joiningDate || (isJasonEmp ? '2026-08-17' : undefined);
 
               if (dateStr < COMPANY_START_DATE || (empJoinDate && dateStr < empJoinDate)) {
@@ -1684,6 +1702,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 ((raw as any).fromDate && (raw as any).fromDate <= '2026-09-05' && ((raw as any).toDate || (raw as any).fromDate) >= '2026-08-27')
               );
               if (isAkashReq && isAccidentalRange) {
+                if (roleRef.current === 'SUPER_ADMIN' || roleRef.current === 'HR_ADMIN') {
+                  deleteDoc(doc(db, 'leaveRequests', docSnap.id)).catch(() => { });
+                }
+                return;
+              }
+
+              // ROOT-LEVEL PURGE: Dummy / test leave requests (e.g. test, ghfgds, dummy-*)
+              const isDummyReq = (raw.reason && (
+                raw.reason.toLowerCase().trim() === 'test' ||
+                raw.reason.toLowerCase().includes('dummy') ||
+                raw.reason.toLowerCase().includes('ghfgds') ||
+                raw.reason.toLowerCase().includes('test leave')
+              )) || raw.id.startsWith('dummy-') || raw.id.startsWith('test-') || raw.id === 'LR-UVLV1K5' || raw.id === 'LR_KSS2407014_2026-08-19_WFH';
+
+              if (isDummyReq) {
                 if (roleRef.current === 'SUPER_ADMIN' || roleRef.current === 'HR_ADMIN') {
                   deleteDoc(doc(db, 'leaveRequests', docSnap.id)).catch(() => { });
                 }
@@ -2007,132 +2040,185 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // ── Auto-heal & Root-level WFH correction (Akash SB & unapproved WFH) ─────────
   // Automatically purges accidental WFH allocations (such as Akash SB 27th/28th Aug - 5th Sep)
-  // and corrects backend data so ALL views (Calendar, Admin, PM, HR, Portal) reflect truth.
+  // and corrects backend data safely in a single batch pass with a persistent latch to prevent infinite re-renders.
+  const hasAutoHealedRef = useRef(false);
+
   useEffect(() => {
     if (!isAuthenticated) return;
+    if (!employees.length || !attendance.length) return;
+    if (hasAutoHealedRef.current) return;
+    hasAutoHealedRef.current = true;
 
     const accidentalRange = ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'];
 
-    // 1. Clean Akash SB's approvedWfhDates in employees state & Firestore & set sickLeaveBalance = 0
-    employees.forEach(emp => {
-      const isAkash = emp.id === 'emp-KSS2407013' || emp.employeeId === 'KSS2407013' || (emp.fullName && emp.fullName.toLowerCase().includes('akash'));
-      if (isAkash) {
-        const cleanedDates = (emp.approvedWfhDates || []).filter(d => !accidentalRange.includes(d));
-        if (emp.sickLeaveBalance !== 0 || cleanedDates.length !== (emp.approvedWfhDates || []).length) {
-          setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, approvedWfhDates: cleanedDates, sickLeaveBalance: 0 } : e));
-          setActiveEmployee(prev => (prev && prev.id === emp.id) ? { ...prev, approvedWfhDates: cleanedDates, sickLeaveBalance: 0 } : prev);
-          setDoc(doc(db, 'employees', emp.id), { approvedWfhDates: cleanedDates, sickLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
-        }
-      }
+    // 1. Clean employee records (Akash, Asbin, Mahesh, Thabeethal, Koushik, Jingyasha, Jason, and SL balances)
+    let employeesChanged = false;
+    const nextEmployees = employees.map(emp => {
+      let e = { ...emp };
+      let changed = false;
 
-      // 1b. Ensure Asbin T S has approved WFH for 28th and 29th Aug and earnLeaveBalance = 0
-      const isAsbin = emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'));
-      if (isAsbin) {
-        const currentDates = emp.approvedWfhDates || [];
+      const isJingyasha = e.id === '8RxH6z3ZzUTmM26iqta1DhCPa8l1' || e.employeeId === 'KSS2407014' || (e.fullName && (e.fullName.toLowerCase().includes('jigy') || e.fullName.toLowerCase().includes('jing')));
+      const isJason = (e.id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || e.employeeId === 'KSS2407011' || (e.fullName && e.fullName.toLowerCase().includes('jason'))) && !isJingyasha;
+      const isAkash = e.id === 'emp-KSS2407013' || e.employeeId === 'KSS2407013' || (e.fullName && e.fullName.toLowerCase().includes('akash'));
+      const isAsbin = e.id === 'emp-KSS2407004' || e.employeeId === 'KSS2407004' || (e.fullName && e.fullName.toLowerCase().includes('asbin'));
+      const isMahesh = e.id === 'emp-KSS2407006' || e.employeeId === 'KSS2407006' || (e.fullName && e.fullName.toLowerCase().includes('mahesh'));
+      const isThabeethal = e.id === 'emp-KSS2407005' || e.employeeId === 'KSS2407005' || (e.fullName && e.fullName.toLowerCase().includes('thabeethal'));
+      const isKoushik = e.id === 'emp-KSS2407003' || e.employeeId === 'KSS2407003' || (e.fullName && e.fullName.toLowerCase().includes('koushik'));
+
+      if (isAkash) {
+        const cleanedDates = (e.approvedWfhDates || []).filter(d => !accidentalRange.includes(d));
+        if (e.sickLeaveBalance !== 0 || e.earnLeaveBalance !== 1 || cleanedDates.length !== (e.approvedWfhDates || []).length) {
+          e.approvedWfhDates = cleanedDates;
+          e.sickLeaveBalance = 0;
+          e.earnLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: cleanedDates, sickLeaveBalance: 0, earnLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isAsbin) {
+        const currentDates = e.approvedWfhDates || [];
         const needsDates = !currentDates.includes('2026-08-28') || !currentDates.includes('2026-08-29');
-        const needsEl = emp.earnLeaveBalance !== 0;
+        const needsEl = e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1;
         if (needsDates || needsEl) {
           const updatedDates = Array.from(new Set([...currentDates, '2026-08-28', '2026-08-29']));
-          setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, approvedWfhDates: updatedDates, earnLeaveBalance: 0 } : e));
-          setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, approvedWfhDates: updatedDates, earnLeaveBalance: 0 } : prev);
-          setDoc(doc(db, 'employees', emp.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
+          e.approvedWfhDates = updatedDates;
+          e.earnLeaveBalance = 0;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
-      }
-
-      // 1c. Ensure Kuruva Mahesh has approved WFH for 26th and 27th Aug and earnLeaveBalance = 0
-      const isMahesh = emp.id === 'emp-KSS2407006' || emp.employeeId === 'KSS2407006' || (emp.fullName && emp.fullName.toLowerCase().includes('mahesh'));
-      if (isMahesh) {
-        const currentDates = emp.approvedWfhDates || [];
-        const needsDates = !currentDates.includes('2026-08-26') || !currentDates.includes('2026-08-27');
-        const needsEl = emp.earnLeaveBalance !== 0;
+      } else if (isMahesh) {
+        const currentDates = e.approvedWfhDates || [];
+        const needsDates = !currentDates.includes('2026-08-27') || !currentDates.includes('2026-08-29') || currentDates.includes('2026-08-26');
+        const needsEl = e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1;
         if (needsDates || needsEl) {
-          const updatedDates = Array.from(new Set([...currentDates, '2026-08-26', '2026-08-27']));
-          setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, approvedWfhDates: updatedDates, earnLeaveBalance: 0 } : e));
-          setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, approvedWfhDates: updatedDates, earnLeaveBalance: 0 } : prev);
-          setDoc(doc(db, 'employees', emp.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
+          const updatedDates = Array.from(new Set([...currentDates.filter(d => d !== '2026-08-26'), '2026-08-27', '2026-08-29']));
+          e.approvedWfhDates = updatedDates;
+          e.earnLeaveBalance = 0;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isThabeethal) {
+        if (e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1) {
+          e.earnLeaveBalance = 0;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isKoushik) {
+        if (e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1) {
+          e.earnLeaveBalance = 0;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isJingyasha) {
+        if (e.sickLeaveBalance !== 1 || e.earnLeaveBalance !== 1) {
+          e.sickLeaveBalance = 1;
+          e.earnLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 1, earnLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isJason) {
+        if (e.sickLeaveBalance !== 0 || e.earnLeaveBalance !== 1 || !e.joiningDate || e.joiningDate !== '2026-08-17') {
+          e.sickLeaveBalance = 0;
+          e.earnLeaveBalance = 1;
+          e.joiningDate = '2026-08-17';
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 0, earnLeaveBalance: 1, joiningDate: '2026-08-17', updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else {
+        if (e.sickLeaveBalance !== 1) {
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       }
 
-      // 1d. Ensure Thabeethal Asnath I has earnLeaveBalance = 0
-      const isThabeethal = emp.id === 'emp-KSS2407005' || emp.employeeId === 'KSS2407005' || (emp.fullName && emp.fullName.toLowerCase().includes('thabeethal'));
-      if (isThabeethal && emp.earnLeaveBalance !== 0) {
-        setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, earnLeaveBalance: 0 } : e));
-        setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, earnLeaveBalance: 0 } : prev);
-        setDoc(doc(db, 'employees', emp.id), { earnLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
-      }
-
-      // 1e. Ensure D. Koushik has earnLeaveBalance = 0
-      const isKoushik = emp.id === 'emp-KSS2407003' || emp.employeeId === 'KSS2407003' || (emp.fullName && emp.fullName.toLowerCase().includes('koushik'));
-      if (isKoushik && emp.earnLeaveBalance !== 0) {
-        setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, earnLeaveBalance: 0 } : e));
-        setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, earnLeaveBalance: 0 } : prev);
-        setDoc(doc(db, 'employees', emp.id), { earnLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
-      }
-
-      // 1f. Ensure Jason Kenneth N has sickLeaveBalance = 0 and joiningDate = '2026-08-17' in employees state & Firestore
-      const isJason = emp.id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || emp.employeeId === 'KSS2407011' || emp.employeeId === 'KSS2407014' || (emp.fullName && emp.fullName.toLowerCase().includes('jason'));
-      if (isJason && (emp.sickLeaveBalance !== 0 || !emp.joiningDate || emp.joiningDate !== '2026-08-17')) {
-        setEmployees(prev => prev.map(e => (e.id === emp.id || e.employeeId === emp.employeeId) ? { ...e, sickLeaveBalance: 0, joiningDate: '2026-08-17' } : e));
-        setActiveEmployee(prev => (prev && (prev.id === emp.id || prev.employeeId === emp.employeeId)) ? { ...prev, sickLeaveBalance: 0, joiningDate: '2026-08-17' } : prev);
-        setDoc(doc(db, 'employees', emp.id), { sickLeaveBalance: 0, joiningDate: '2026-08-17', updatedAt: serverTimestamp() }, { merge: true }).catch(() => { });
-      }
+      if (changed) employeesChanged = true;
+      return e;
     });
 
-    // 1g. Purge any attendance records for Jason Kenneth N before his joining date (2026-08-17)
-    const jasonPreJoiningRecords = attendance.filter(a => {
-      const isJ = a.employeeId === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' ||
-                  a.employeeCode === 'KSS2407011' ||
-                  a.employeeCode === 'KSS2407014' ||
-                  (a.employeeName && a.employeeName.toLowerCase().includes('jason'));
-      return isJ && a.date < '2026-08-17';
-    });
-    if (jasonPreJoiningRecords.length > 0) {
-      setAttendance(prev => prev.filter(a => !jasonPreJoiningRecords.some(r => r.id === a.id)));
-      jasonPreJoiningRecords.forEach(r => {
-        if (r.id) {
-          deleteDoc(doc(db, 'attendance', r.id)).catch(() => {});
-        }
+    if (employeesChanged) {
+      setEmployees(nextEmployees);
+      setActiveEmployee(prev => {
+        if (!prev) return prev;
+        const updated = nextEmployees.find(e => e.id === prev.id || e.employeeId === prev.employeeId);
+        return updated || prev;
       });
     }
 
-    // Proactively clean up specific legacy/known Firestore attendance IDs for Jason before August 17
+    // 2. Attendance corrections (Jason pre-joining and August sync)
+    let attendanceChanged = false;
+    let nextAttendance = [...attendance];
+
+    const jasonPreJoiningRecords = nextAttendance.filter(a => {
+      const isJ = (a.employeeId === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' ||
+                   a.employeeCode === 'KSS2407011' ||
+                   (a.employeeName && a.employeeName.toLowerCase().includes('jason'))) &&
+                   !(a.employeeName && (a.employeeName.toLowerCase().includes('jigy') || a.employeeName.toLowerCase().includes('jing')));
+      return isJ && a.date < '2026-08-17';
+    });
+    if (jasonPreJoiningRecords.length > 0) {
+      nextAttendance = nextAttendance.filter(a => !jasonPreJoiningRecords.some(r => r.id === a.id));
+      attendanceChanged = true;
+      jasonPreJoiningRecords.forEach(r => {
+        if (r.id) deleteDoc(doc(db, 'attendance', r.id)).catch(() => {});
+      });
+    }
+
     const preDates = ['2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026-08-14', '2026-08-15'];
-    const jasonIds = ['KfAB95lpbJOeylpKQaWX4GXOPGt2', 'KSS2407011', 'KSS2407014'];
+    const jasonIds = ['KfAB95lpbJOeylpKQaWX4GXOPGt2', 'KSS2407011'];
     preDates.forEach(d => {
       jasonIds.forEach(id => {
         deleteDoc(doc(db, 'attendance', `${id}_${d}`)).catch(() => {});
       });
     });
 
-    // 2. Canonical August leave requests sync and dummy leave purge
+    // 3. Leave requests sync and dummy purge
+    let leaveChanged = false;
+    let nextLeaveRequests = [...leaveRequests];
+
     INITIAL_LEAVE_REQUESTS.forEach(req => {
-      const exists = leaveRequests.some(r => r.id === req.id);
+      const exists = nextLeaveRequests.some(r => r.id === req.id);
       if (!exists && req.id) {
-        setLeaveRequests(prev => [req, ...prev.filter(r => r.id !== req.id)]);
+        nextLeaveRequests.push(req);
+        leaveChanged = true;
         setDoc(doc(db, 'leaveRequests', req.id), cleanFirestorePayload(req), { merge: true }).catch(() => {});
       }
     });
 
-    leaveRequests.forEach(req => {
+    const toRemoveLeaveIds = new Set<string>();
+    nextLeaveRequests.forEach(req => {
       const isAkash = req.employeeId === 'KSS2407013' || req.employeeId === 'emp-KSS2407013' || (req.employeeName && req.employeeName.toLowerCase().includes('akash'));
       const isAccidental = isAkash && isWfhType(req.type) && (
         (req.startDate && req.startDate <= '2026-09-05' && (req.endDate || req.startDate) >= '2026-08-27') ||
         ((req as any).fromDate && (req as any).fromDate <= '2026-09-05' && ((req as any).toDate || (req as any).fromDate) >= '2026-08-27')
       );
-      const isDummy = (req.reason && (req.reason.toLowerCase().includes('dummy') || req.reason.toLowerCase().includes('test leave'))) ||
-        req.id.startsWith('dummy-') || req.id.startsWith('test-');
+      const isDummy = (req.reason && (req.reason.toLowerCase().includes('dummy') || req.reason.toLowerCase().includes('test leave') || req.reason.toLowerCase().trim() === 'test' || req.reason.toLowerCase().includes('ghfgds'))) ||
+        req.id.startsWith('dummy-') || req.id.startsWith('test-') || req.id === 'LR-UVLV1K5' || req.id === 'LR_KSS2407014_2026-08-19_WFH';
       if ((isAccidental || isDummy) && req.id) {
-        setLeaveRequests(prev => prev.filter(r => r.id !== req.id));
+        toRemoveLeaveIds.add(req.id);
         deleteDoc(doc(db, 'leaveRequests', req.id)).catch(() => { });
       }
     });
 
-    // 2b. Sync target August attendance records
+    if (toRemoveLeaveIds.size > 0) {
+      nextLeaveRequests = nextLeaveRequests.filter(r => !toRemoveLeaveIds.has(r.id));
+      leaveChanged = true;
+    }
+
+    if (leaveChanged) {
+      setLeaveRequests(nextLeaveRequests);
+    }
+
+    // 4. Target August attendance dates
     const targetAugustDates: { empId: string; empCode: string; name: string; dept: string; date: string; status: AttendanceStatus | 'Loss of Pay'; isWfh?: boolean; method?: AttendanceMethod }[] = [
       { empId: 'emp-KSS2407013', empCode: 'KSS2407013', name: 'Akash SB', dept: 'Engineering', date: '2026-08-25', status: 'On Leave' },
-      { empId: 'emp-KSS2407006', empCode: 'KSS2407006', name: 'Kuruva Mahesh', dept: 'Product & Design', date: '2026-08-26', status: 'Work From Home', isWfh: true, method: 'Self Portal' },
+      { empId: 'emp-KSS2407006', empCode: 'KSS2407006', name: 'Kuruva Mahesh', dept: 'Product & Design', date: '2026-08-26', status: 'Present' },
       { empId: 'emp-KSS2407006', empCode: 'KSS2407006', name: 'Kuruva Mahesh', dept: 'Product & Design', date: '2026-08-27', status: 'Work From Home', isWfh: true, method: 'Self Portal' },
       { empId: 'emp-KSS2407006', empCode: 'KSS2407006', name: 'Kuruva Mahesh', dept: 'Product & Design', date: '2026-08-28', status: 'On Leave' },
+      { empId: 'emp-KSS2407006', empCode: 'KSS2407006', name: 'Kuruva Mahesh', dept: 'Product & Design', date: '2026-08-29', status: 'Work From Home', isWfh: true, method: 'Self Portal' },
       { empId: 'emp-KSS2407005', empCode: 'KSS2407005', name: 'Thabeethal Asnath I', dept: 'Engineering', date: '2026-08-22', status: 'On Leave' },
       { empId: 'emp-KSS2407004', empCode: 'KSS2407004', name: 'Asbin T S', dept: 'Engineering', date: '2026-08-26', status: 'On Leave' },
       { empId: 'emp-KSS2407004', empCode: 'KSS2407004', name: 'Asbin T S', dept: 'Engineering', date: '2026-08-27', status: 'Loss of Pay' as any },
@@ -2143,10 +2229,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ];
 
     targetAugustDates.forEach(t => {
-      const existing = attendance.find(a =>
+      const existingIdx = nextAttendance.findIndex(a =>
         (a.employeeId === t.empId || a.employeeCode === t.empCode || (a.employeeName && a.employeeName.trim().toLowerCase() === t.name.toLowerCase())) &&
         a.date === t.date
       );
+      const existing = existingIdx >= 0 ? nextAttendance[existingIdx] : undefined;
       const isMismatch = !existing || existing.status !== t.status || (t.isWfh && !existing.isWfh);
       if (isMismatch) {
         const docId = existing ? existing.id : `${t.empId}_${t.date}`;
@@ -2167,28 +2254,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: existing?.createdAt || `${t.date}T04:30:00.000Z`,
           updatedAt: new Date().toISOString()
         };
-        setAttendance(prev => {
-          const idx = prev.findIndex(a => a.id === docId);
-          if (idx >= 0) {
-            const next = [...prev];
-            next[idx] = { ...next[idx], ...updatedRec };
-            return next;
-          }
-          return [...prev, updatedRec as AttendanceRecord];
-        });
+        if (existingIdx >= 0) {
+          nextAttendance[existingIdx] = { ...nextAttendance[existingIdx], ...updatedRec };
+        } else {
+          nextAttendance.push(updatedRec as AttendanceRecord);
+        }
+        attendanceChanged = true;
         setDoc(doc(db, 'attendance', docId), cleanFirestorePayload(updatedRec), { merge: true }).catch(() => {});
       }
     });
 
-    // 3. Auto-heal unapproved WFH attendance records in Firestore
-    if (!attendance.length || !employees.length) return;
+    // 5. Auto-heal unapproved WFH attendance records
+    const companyWfhDatesList: string[] = (settings as any)?.companyWideWfhDates || companyWideWfhDates || [];
+    nextAttendance = nextAttendance.map(rec => {
+      if (!rec.id || !rec.date) return rec;
 
-    const companyWfhDates: string[] = (settings as any)?.companyWideWfhDates || companyWideWfhDates || [];
-
-    const badRecords = attendance.filter(rec => {
-      if (!rec.id || !rec.date) return false;
-
-      const emp = employees.find(e =>
+      const emp = nextEmployees.find(e =>
         (!!rec.employeeId && (rec.employeeId === e.id || rec.employeeId === e.employeeId)) ||
         (!!rec.employeeCode && rec.employeeCode === e.employeeId) ||
         ((rec as any).employeeUid && ((rec as any).employeeUid === e.uid || (rec as any).employeeUid === e.id)) ||
@@ -2197,13 +2278,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           rec.employeeName.replace(/\s+/g, '').toLowerCase() === e.fullName.replace(/\s+/g, '').toLowerCase()
         ))
       );
-      if (!emp) return false;
+      if (!emp) return rec;
 
       const isAsbin = emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'));
-      if (isAsbin) return false;
+      if (isAsbin) return rec;
 
-      // 1. Check if employee has an approved NON-WFH leave on this date
-      const hasApprovedNonWfhLeave = leaveRequests.some(r =>
+      const hasApprovedNonWfhLeave = nextLeaveRequests.some(r =>
         !isWfhType(r.type) && !isWfhType(r.leaveCategory) &&
         (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
         ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
@@ -2217,99 +2297,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
 
       if (hasApprovedNonWfhLeave) {
-        // If employee has approved leave, any record with WFH or status !== 'On Leave' (when no real check-in) is bad!
         if (rec.isWfh || rec.status === 'Work From Home' || (!rec.checkInAt && rec.status !== 'On Leave')) {
-          return true;
+          const patched: AttendanceRecord = {
+            ...rec,
+            isWfh: false,
+            status: 'On Leave',
+            checkInAt: null,
+            checkOutAt: null,
+            workingMinutes: 0
+          };
+          attendanceChanged = true;
+          setDoc(doc(db, 'attendance', rec.id), cleanFirestorePayload(patched), { merge: true }).catch(() => {});
+          return patched;
         }
-        return false;
+        return rec;
       }
 
-      if (!rec.isWfh && rec.status !== 'Work From Home') return false;
+      if (!rec.isWfh && rec.status !== 'Work From Home') return rec;
 
       const isAkash = emp.id === 'emp-KSS2407013' || emp.employeeId === 'KSS2407013' || (emp.fullName && emp.fullName.toLowerCase().includes('akash'));
-      if (isAkash && accidentalRange.includes(rec.date)) return true;
-
-      // Skip if date is covered by company-wide WFH
-      if (companyWfhDates.includes(rec.date)) return false;
-      // Skip if covered by employee's personal approved WFH dates
-      if ((emp.approvedWfhDates || []).includes(rec.date)) return false;
-
-      // Check for an approved WFH leave request
-      const hasApprovedWfhLeave = leaveRequests.some(r =>
-        (isWfhType(r.type) || isWfhType(r.leaveCategory)) &&
-        (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
-        ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
-         (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
-         (!!r.employeeName && !!emp.fullName && (
-           r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
-           r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
-         ))) &&
-        rec.date >= (r.startDate || (r as any).fromDate) &&
-        rec.date <= (r.endDate || (r as any).toDate || r.startDate)
-      );
-
-      return !hasApprovedWfhLeave;
-    });
-
-    if (!badRecords.length) return;
-
-    badRecords.forEach(rec => {
-      const emp = employees.find(e =>
-        (!!rec.employeeId && (rec.employeeId === e.id || rec.employeeId === e.employeeId)) ||
-        (!!rec.employeeCode && rec.employeeCode === e.employeeId) ||
-        ((rec as any).employeeUid && ((rec as any).employeeUid === e.uid || (rec as any).employeeUid === e.id)) ||
-        (!!rec.employeeName && !!e.fullName && (
-          rec.employeeName.trim().toLowerCase() === e.fullName.trim().toLowerCase() ||
-          rec.employeeName.replace(/\s+/g, '').toLowerCase() === e.fullName.replace(/\s+/g, '').toLowerCase()
-        ))
-      );
-
-      const hasApprovedNonWfhLeave = leaveRequests.some(r =>
-        !isWfhType(r.type) && !isWfhType(r.leaveCategory) &&
-        (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
-        ((!!r.employeeId && (r.employeeId === emp?.id || r.employeeId === emp?.employeeId)) ||
-         (!!r.employeeUid && (r.employeeUid === emp?.uid || r.employeeUid === emp?.id)) ||
-         (!!r.employeeName && !!emp?.fullName && (
-           r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
-           r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
-         ))) &&
-        rec.date >= (r.startDate || (r as any).fromDate) &&
-        rec.date <= (r.endDate || (r as any).toDate || r.startDate)
-      );
-
-      let realStatus: string = hasApprovedNonWfhLeave ? 'On Leave' : 'Absent';
-      if (!hasApprovedNonWfhLeave && rec.checkInAt) {
-        try {
-          const iso = formatTimestampToISO(rec.checkInAt);
-          if (iso) {
-            const d = new Date(iso);
-            const totalMinutesUTC = d.getUTCHours() * 60 + d.getUTCMinutes();
-            const istMinutes = (totalMinutesUTC + 330) % (24 * 60); // +5:30
-            const h = Math.floor(istMinutes / 60);
-            const m = istMinutes % 60;
-            realStatus = (h > 10 || (h === 10 && m > 15)) ? 'Late' : 'Present';
-          }
-        } catch { realStatus = 'Present'; }
+      const isBadWfh = isAkash && accidentalRange.includes(rec.date);
+      if (isBadWfh || (!companyWfhDatesList.includes(rec.date) && !(emp.approvedWfhDates || []).includes(rec.date))) {
+        const hasApprovedWfhLeave = nextLeaveRequests.some(r =>
+          (isWfhType(r.type) || isWfhType(r.leaveCategory)) &&
+          (r.status === 'Approved' || ((r.pmStatus === 'Approved' || r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') && (r.hrStatus === 'Approved' || r.hrStatus === 'N/A' || r.hrStatus === 'Bypassed') && (r.ceoStatus === 'Approved' || r.ceoStatus === 'N/A' || r.ceoStatus === 'Bypassed') && (r.ctoStatus === 'Approved' || r.ctoStatus === 'N/A' || r.ctoStatus === 'Bypassed'))) &&
+          ((!!r.employeeId && (r.employeeId === emp.id || r.employeeId === emp.employeeId)) ||
+           (!!r.employeeUid && (r.employeeUid === emp.uid || r.employeeUid === emp.id)) ||
+           (!!r.employeeName && !!emp.fullName && (
+             r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
+             r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
+           ))) &&
+          rec.date >= (r.startDate || (r as any).fromDate) &&
+          rec.date <= (r.endDate || (r as any).toDate || r.startDate)
+        );
+        if (!hasApprovedWfhLeave) {
+          const patched: AttendanceRecord = {
+            ...rec,
+            isWfh: false,
+            status: rec.checkInAt ? (rec.status === 'Work From Home' ? 'Present' : rec.status) : 'Absent',
+            workingMinutes: rec.checkInAt ? rec.workingMinutes : 0
+          };
+          attendanceChanged = true;
+          setDoc(doc(db, 'attendance', rec.id), cleanFirestorePayload(patched), { merge: true }).catch(() => {});
+          return patched;
+        }
       }
 
-      const payload = cleanFirestorePayload({
-        isWfh: false,
-        status: realStatus,
-        checkInAt: hasApprovedNonWfhLeave ? null : rec.checkInAt,
-        checkOutAt: hasApprovedNonWfhLeave ? null : rec.checkOutAt,
-        workingMinutes: hasApprovedNonWfhLeave ? 0 : rec.workingMinutes,
-        updatedAt: serverTimestamp(),
-        notes: (((rec.notes || '') + (hasApprovedNonWfhLeave ? ' [Auto-healed: Approved Leave synchronized]' : ' [Auto-healed: WFH flag removed]')).trim())
-      });
-
-      setAttendance(prev => prev.map(a => a.id === rec.id ? { ...a, ...payload } : a));
-
-      setDoc(doc(db, 'attendance', rec.id), payload, { merge: true })
-        .then(() => console.info(`[Auto-Heal] ${rec.employeeName} ${rec.date} → ${realStatus}`))
-        .catch(err => console.warn(`[Auto-Heal] Failed ${rec.id}:`, err));
+      return rec;
     });
+
+    if (attendanceChanged) {
+      setAttendance(nextAttendance);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, attendance, leaveRequests, employees, settings, companyWideWfhDates]);
+  }, [isAuthenticated, employees.length > 0, attendance.length > 0]);
 
   // ── One-time resume backfill, exposed to admin sessions only ─────────────────
   // Deliberately NOT auto-run: it rewrites every employee document, so an operator

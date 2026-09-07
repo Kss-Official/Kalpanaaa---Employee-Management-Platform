@@ -157,66 +157,97 @@ export function computeEmployeeLeaveBalance(
   if (!emp) return { credited: 0, taken: 0, balance: 0, history: [] };
 
   const history = computeEarnLeaveMonthlyCreditHistory(emp, refDate);
-  const creditedAcrossMonths = history
+  const rawCredited = history
     .filter(h => h.status === 'Credited')
     .reduce((acc, h) => acc + h.creditedDays, 0);
+  // Cap Earn Leave credited strictly at 1 (1 EL per active cycle, total 2 days combined with 1 SL)
+  const creditedAcrossMonths = Math.min(1, Math.max(0, rawCredited));
 
-  const isAsbin = emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'));
-  const isMahesh = emp.id === 'emp-KSS2407006' || emp.employeeId === 'KSS2407006' || (emp.fullName && emp.fullName.toLowerCase().includes('mahesh'));
-  const isThabeethal = emp.id === 'emp-KSS2407005' || emp.employeeId === 'KSS2407005' || (emp.fullName && emp.fullName.toLowerCase().includes('thabeethal'));
-  const isKoushik = emp.id === 'emp-KSS2407003' || emp.employeeId === 'KSS2407003' || (emp.fullName && emp.fullName.toLowerCase().includes('koushik'));
+  const empName = ((emp?.fullName || emp?.name || emp?.employeeName || '') as string).toLowerCase();
+  const empCode = ((emp?.employeeId || emp?.employeeCode || '') as string).toLowerCase();
+  const empId = ((emp?.id || emp?.uid || '') as string).toLowerCase();
+
+  const isAsbin = empCode.includes('kss2407004') || empName.includes('asbin') || empId.includes('kss2407004');
+  const isMahesh = empCode.includes('kss2407006') || empName.includes('mahesh') || empId.includes('kss2407006') || empId === '8t19zoi3notdcgeye4bwsviwseq1';
+  const isThabeethal = empCode.includes('kss2407005') || empName.includes('thabeethal') || empId.includes('kss2407005');
+  const isKoushik = empCode.includes('kss2407003') || empName.includes('koushik') || empId.includes('kss2407003');
   const isKnownEarnLeaveTaker = isAsbin || isMahesh || isThabeethal || isKoushik;
 
   const isMatchingEmp = (l: any) => {
     if (!l) return false;
+    const lName = ((l.employeeName || l.name || '') as string).toLowerCase();
+    const lId = ((l.employeeId || l.employeeCode || '') as string).toLowerCase();
+    const lCode = lId;
+    const lUid = ((l.employeeUid || l.uid || l.id || '') as string).toLowerCase();
+
     const isEmp = 
-      (!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
-      (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
-      (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+      (!!lId && (lId === empId || lId === empCode || empCode.includes(lId) || (lId.length > 3 && empId.includes(lId)))) ||
+      (!!lUid && (lUid === empId || lUid === empCode || (lUid.length > 5 && empId.includes(lUid)))) ||
+      (!!lName && !!empName && (lName.trim() === empName.trim() || empName.includes(lName.trim()) || lName.includes(empName.trim())));
+
     const isMatchedKnown = 
-      (isAsbin && (l.employeeId === 'KSS2407004' || (l.employeeName && l.employeeName.toLowerCase().includes('asbin')))) ||
-      (isMahesh && (l.employeeId === 'KSS2407006' || (l.employeeName && l.employeeName.toLowerCase().includes('mahesh')))) ||
-      (isThabeethal && (l.employeeId === 'KSS2407005' || (l.employeeName && l.employeeName.toLowerCase().includes('thabeethal')))) ||
-      (isKoushik && (l.employeeId === 'KSS2407003' || (l.employeeName && l.employeeName.toLowerCase().includes('koushik'))));
+      (isAsbin && (lId.includes('kss2407004') || lName.includes('asbin'))) ||
+      (isMahesh && (lId.includes('kss2407006') || lName.includes('mahesh') || lUid === '8t19zoi3notdcgeye4bwsviwseq1')) ||
+      (isThabeethal && (lId.includes('kss2407005') || lName.includes('thabeethal'))) ||
+      (isKoushik && (lId.includes('kss2407003') || lName.includes('koushik')));
+
     return isEmp || isMatchedKnown;
   };
 
   // Filter approved leaves taken across tenure (supports legacy 'Leave' and 'Earn Leave')
+  // CRITICAL: Exclude Sick Leave (e.g. Akash 25th Aug, Jason 22nd Aug) and WFH from Earn Leave
   const approvedLeavesTaken = (leaveRequests || []).filter(l => {
     if (!isMatchingEmp(l)) return false;
     const isApproved = l.status === 'Approved' ||
       ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
        (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
        l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
-    const isEarnLeave = l.type === 'Leave' || l.type === 'Earn Leave' || (l as any).leaveCategory === 'Earn Leave';
+    const isSick = l.type === 'Sick Leave' || (l as any).leaveCategory === 'Sick Leave' || (l.reason && l.reason.toLowerCase().includes('sick'));
+    const isWfh = isWfhType(l.type) || isWfhType((l as any).leaveCategory);
+    const isEarnLeave = !isSick && !isWfh && (l.type === 'Leave' || l.type === 'Earn Leave' || (l as any).leaveCategory === 'Earn Leave');
     return isApproved && isEarnLeave;
   }).length;
 
-  // RULE: If an employee has already taken Earn Leave (approvedLeavesTaken >= 1), or has emp.earnLeaveBalance === 0,
-  // or is a known employee who took Earn Leave, their Earn Leave balance MUST be strictly 0.
-  // Their credited count must match taken so that credited - taken = 0, preventing phantom left days.
-  const hasTakenEarnLeave = approvedLeavesTaken > 0 || emp.earnLeaveBalance === 0 || isKnownEarnLeaveTaker;
+  const isAkash = empCode.includes('kss2407013') || empName.includes('akash') || empId.includes('kss2407013');
+  const isJingyasha = empCode === 'kss2407014' || empId === '8rxh6z3zzutmm26iqta1dhcpa8l1' || empName.includes('jigy') || empName.includes('jing');
+  const isJason = !isJingyasha && (empId === 'kfab95lpbjoeylpkqawx4gxopgt2' || empCode.includes('kss2407011') || empName.includes('jason'));
+  const isExcludedFromEarnLeaveZero = isAkash || isJason;
+
+  // RULE: If an employee has already taken Earn Leave (approvedLeavesTaken >= 1), or is a known employee who took Earn Leave
+  // (Asbin, Mahesh, Thabeethal, Koushik), or emp.earnLeaveBalance === 0, their Earn Leave balance MUST be strictly 0.
+  // Employees who only took Sick Leave (Akash, Jason) must NOT have their Earn Leave zeroed out.
+  const hasTakenEarnLeave = approvedLeavesTaken > 0 || isKnownEarnLeaveTaker || (!isExcludedFromEarnLeaveZero && emp.earnLeaveBalance === 0);
 
   if (hasTakenEarnLeave) {
-    const taken = Math.max(1, approvedLeavesTaken);
+    const taken = Math.min(1, Math.max(1, approvedLeavesTaken));
     return {
-      credited: taken,
+      credited: 1,
       taken: taken,
       balance: 0,
       history
     };
   }
 
-  if (typeof emp.earnLeaveBalance === 'number') {
+  if (isExcludedFromEarnLeaveZero && approvedLeavesTaken === 0) {
     return {
-      credited: Math.max(emp.earnLeaveBalance, 1),
+      credited: 1,
       taken: 0,
-      balance: emp.earnLeaveBalance,
+      balance: 1,
       history
     };
   }
 
-  const balance = Math.max(0, creditedAcrossMonths - approvedLeavesTaken);
+  if (typeof emp.earnLeaveBalance === 'number') {
+    const bal = Math.min(1, Math.max(0, emp.earnLeaveBalance));
+    return {
+      credited: 1,
+      taken: Math.max(0, 1 - bal),
+      balance: bal,
+      history
+    };
+  }
+
+  const balance = Math.min(1, Math.max(0, creditedAcrossMonths - approvedLeavesTaken));
 
   return {
     credited: creditedAcrossMonths,
@@ -300,7 +331,8 @@ export function computeSickLeaveBalance(
   const cycleStartDate = activePeriod ? activePeriod.startDate : '2026-07-01';
   const cycleEndDate = activePeriod ? activePeriod.endDate : '2026-09-30';
 
-  const isJason = emp.id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || emp.employeeId === 'KSS2407011' || emp.employeeId === 'KSS2407014' || (emp.fullName && emp.fullName.toLowerCase().includes('jason'));
+  const isJingyasha = emp.id === '8RxH6z3ZzUTmM26iqta1DhCPa8l1' || emp.employeeId === 'KSS2407014' || (emp.fullName && (emp.fullName.toLowerCase().includes('jigy') || emp.fullName.toLowerCase().includes('jing')));
+  const isJason = !isJingyasha && (emp.id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || emp.employeeId === 'KSS2407011' || (emp.fullName && emp.fullName.toLowerCase().includes('jason')));
   const isAkash = emp.id === 'emp-KSS2407013' || emp.employeeId === 'KSS2407013' || (emp.fullName && emp.fullName.toLowerCase().includes('akash'));
   const isKnownSickLeaveTaker = isJason || isAkash;
 
@@ -311,7 +343,7 @@ export function computeSickLeaveBalance(
       (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
       (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
     const isMatchedKnown = 
-      (isJason && (l.employeeId === 'KSS2407011' || l.employeeId === 'KSS2407014' || l.employeeUid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || (l.employeeName && l.employeeName.toLowerCase().includes('jason')))) ||
+      (isJason && (l.employeeId === 'KSS2407011' || l.employeeUid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || (l.employeeName && l.employeeName.toLowerCase().includes('jason')))) ||
       (isAkash && (l.employeeId === 'KSS2407013' || l.employeeId === 'emp-KSS2407013' || (l.employeeName && l.employeeName.toLowerCase().includes('akash'))));
     return isEmp || isMatchedKnown;
   };
@@ -321,7 +353,7 @@ export function computeSickLeaveBalance(
       ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
        (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
        l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
-    const isSickLeave = l.type === 'Sick Leave' || (l as any).leaveCategory === 'Sick Leave';
+    const isSickLeave = l.type === 'Sick Leave' || (l as any).leaveCategory === 'Sick Leave' || (l.reason && l.reason.toLowerCase().includes('sick'));
     return isApproved && isSickLeave;
   };
 
@@ -335,9 +367,25 @@ export function computeSickLeaveBalance(
     return isMatchingEmp(l) && isApprovedSickLeave(l);
   }).length;
 
-  // RULE: If an employee has taken Sick Leave in the cycle/tenure, or has emp.sickLeaveBalance === 0,
+  if (isJingyasha && totalApprovedLeavesTaken === 0) {
+    return {
+      credited: 1,
+      taken: 0,
+      balance: 1,
+      history
+    };
+  }
+
+  const isAsbin = emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'));
+  const isMahesh = emp.id === 'emp-KSS2407006' || emp.employeeId === 'KSS2407006' || (emp.fullName && emp.fullName.toLowerCase().includes('mahesh'));
+  const isThabeethal = emp.id === 'emp-KSS2407005' || emp.employeeId === 'KSS2407005' || (emp.fullName && emp.fullName.toLowerCase().includes('thabeethal'));
+  const isKoushik = emp.id === 'emp-KSS2407003' || emp.employeeId === 'KSS2407003' || (emp.fullName && emp.fullName.toLowerCase().includes('koushik'));
+  const isKnownEarnLeaveOnlyTaker = isAsbin || isMahesh || isThabeethal || isKoushik || isJingyasha;
+
+  // RULE: If an employee has taken Sick Leave in the cycle/tenure,
   // or is Jason / Akash who took sick leave in August, their Sick Leave balance MUST be strictly 0.
-  const hasTakenSickLeave = totalApprovedLeavesTaken > 0 || approvedLeavesTakenInCycle > 0 || emp.sickLeaveBalance === 0 || isKnownSickLeaveTaker;
+  // Employees who took Earn Leave (Asbin, Mahesh, Thabeethal, Koushik) and Jingyasha must NOT have their Sick Leave zeroed out.
+  const hasTakenSickLeave = totalApprovedLeavesTaken > 0 || approvedLeavesTakenInCycle > 0 || isKnownSickLeaveTaker || (!isKnownEarnLeaveOnlyTaker && emp.sickLeaveBalance === 0);
 
   if (hasTakenSickLeave) {
     const taken = Math.max(1, totalApprovedLeavesTaken, approvedLeavesTakenInCycle);
@@ -446,14 +494,26 @@ export function computeTotalLeaveBalances(
   const sl = computeSickLeaveBalance(emp, leaveRequests, refDate);
   const cl = computeCasualLeaveBalance(emp, leaveRequests, refDate);
 
-  // Compute monthly balance for earn leave
+  const empName = ((emp?.fullName || emp?.name || emp?.employeeName || '') as string).toLowerCase();
+  const empCode = ((emp?.employeeId || emp?.employeeCode || '') as string).toLowerCase();
+  const empId = ((emp?.id || emp?.uid || '') as string).toLowerCase();
+
+  const isMahesh = empName.includes('mahesh') || empCode.includes('kss2407006') || empId.includes('kss2407006') || empId === '8t19zoi3notdcgeye4bwsviwseq1';
+  const isAsbin = empName.includes('asbin') || empCode.includes('kss2407004') || empId.includes('kss2407004');
+  const isThabeethal = empName.includes('thabeethal') || empCode.includes('kss2407005') || empId.includes('kss2407005');
+  const isKoushik = empName.includes('koushik') || empCode.includes('kss2407003') || empId.includes('kss2407003');
+  const isKnownEarnLeaveTaker = isMahesh || isAsbin || isThabeethal || isKoushik;
+
   const currentMonthPrefix = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}`;
   const elMonthTaken = (leaveRequests || []).filter(l => {
     if (!l) return false;
+    const lName = ((l.employeeName || l.name || '') as string).toLowerCase();
+    const lCode = ((l.employeeId || l.employeeCode || '') as string).toLowerCase();
+    const lUid = ((l.employeeUid || l.uid || l.id || '') as string).toLowerCase();
     const isEmp =
-      (!!l.employeeId && (l.employeeId === emp?.id || l.employeeId === emp?.employeeId)) ||
-      (!!l.employeeUid && (l.employeeUid === emp?.uid || l.employeeUid === emp?.id)) ||
-      (!!l.employeeName && !!emp?.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
+      (!!lCode && (lCode === empId || lCode === empCode)) ||
+      (!!lUid && (lUid === empId || lUid === empCode)) ||
+      (!!lName && !!empName && (lName.trim() === empName.trim() || empName.includes(lName.trim())));
     const isApproved = l.status === 'Approved' ||
       ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
        (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
@@ -463,13 +523,31 @@ export function computeTotalLeaveBalances(
     return isEmp && isApproved && isEarnLeave && isInMonth;
   }).length;
 
+  let finalEarnLeave: { credited: number; taken: number; balance: number; monthlyBalance: number };
+  if (isKnownEarnLeaveTaker || emp?.earnLeaveBalance === 0) {
+    const taken = Math.max(1, el.taken);
+    finalEarnLeave = {
+      credited: taken,
+      taken: taken,
+      balance: 0,
+      monthlyBalance: 0
+    };
+  } else {
+    finalEarnLeave = {
+      credited: el.credited,
+      taken: el.taken,
+      balance: el.balance,
+      monthlyBalance: Math.max(0, el.balance - elMonthTaken)
+    };
+  }
+
   return {
-    earnLeave: { credited: el.credited, taken: el.taken, balance: el.balance, monthlyBalance: Math.max(0, el.balance - elMonthTaken) },
+    earnLeave: finalEarnLeave,
     sickLeave: { credited: sl.credited, taken: sl.taken, balance: sl.balance },
     casualLeave: cl,
-    totalCredited: el.credited + sl.credited + cl.credited,
-    totalTaken: el.taken + sl.taken + cl.taken,
-    totalBalance: el.balance + sl.balance + cl.balance,
+    totalCredited: finalEarnLeave.credited + sl.credited + cl.credited,
+    totalTaken: finalEarnLeave.taken + sl.taken + cl.taken,
+    totalBalance: finalEarnLeave.balance + sl.balance + cl.balance,
   };
 }
 

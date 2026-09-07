@@ -119,10 +119,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   const todayStr = getWorkDate(new Date());
 
   const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setNowMs(Date.now()), 10000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Filter operational workforce (excluding CEO, CTO, COO Rahul Pathak, Founders)
   const operationalEmployees = useMemo(() => {
@@ -135,29 +131,53 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     return attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
   }, [attendance, todayStr]);
 
-  // Build daily roster for PM view with live status
+  // High-performance O(1) indexed lookup maps for today's records and approved leaves
+  const todayRecordsMap = useMemo(() => {
+    const map = new Map<string, AttendanceRecord>();
+    for (const r of todayRecords) {
+      if (r.employeeId) map.set(r.employeeId, r);
+      if (r.employeeCode) map.set(r.employeeCode, r);
+      if (r.employeeName) {
+        map.set(r.employeeName.trim().toLowerCase(), r);
+        map.set(r.employeeName.replace(/\s+/g, '').toLowerCase(), r);
+      }
+    }
+    return map;
+  }, [todayRecords]);
+
+  const todayApprovedLeavesMap = useMemo(() => {
+    const map = new Map<string, LeaveRequest>();
+    for (const l of leaveRequests) {
+      const isApproved = l.status === 'Approved' ||
+        ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
+         (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
+         l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
+      if (!isApproved) continue;
+      const start = l.startDate || (l as any).fromDate;
+      const end = l.endDate || (l as any).toDate || start;
+      if (start && end && todayStr >= start && todayStr <= end) {
+        if (l.employeeId) map.set(l.employeeId, l);
+        if (l.employeeUid) map.set(l.employeeUid, l);
+        if (l.employeeName) {
+          map.set(l.employeeName.trim().toLowerCase(), l);
+          map.set(l.employeeName.replace(/\s+/g, '').toLowerCase(), l);
+        }
+      }
+    }
+    return map;
+  }, [leaveRequests, todayStr]);
+
+  // Build daily roster for PM view with live status using fast O(1) lookups
   const dailyRoster = useMemo(() => {
     return operationalEmployees.map(emp => {
-      const rec = todayRecords.find(r => 
-        r.employeeId === emp.id || 
-        r.employeeCode === emp.employeeId || 
-        (r.employeeName && emp.fullName && (
-          r.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
-          r.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
-        ))
-      );
+      const rec = todayRecordsMap.get(emp.id) || 
+                  (emp.employeeId ? todayRecordsMap.get(emp.employeeId) : undefined) ||
+                  (emp.fullName ? (todayRecordsMap.get(emp.fullName.trim().toLowerCase()) || todayRecordsMap.get(emp.fullName.replace(/\s+/g, '').toLowerCase())) : undefined);
 
-      const leaveReq = leaveRequests.find(l => 
-        ((!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
-         (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
-         (!!l.employeeName && !!emp.fullName && (
-           l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase() ||
-           l.employeeName.replace(/\s+/g, '').toLowerCase() === emp.fullName.replace(/\s+/g, '').toLowerCase()
-         ))) &&
-        (l.status === 'Approved' || ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') && (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') && (l.ceoStatus === 'Approved' || l.ceoStatus === 'N/A' || l.ceoStatus === 'Bypassed') && (l.ctoStatus === 'Approved' || l.ctoStatus === 'N/A' || l.ctoStatus === 'Bypassed'))) &&
-        todayStr >= (l.startDate || (l as any).fromDate) && 
-        todayStr <= (l.endDate || (l as any).toDate || l.startDate)
-      );
+      const leaveReq = todayApprovedLeavesMap.get(emp.id) ||
+                       (emp.employeeId ? todayApprovedLeavesMap.get(emp.employeeId) : undefined) ||
+                       (emp.uid ? todayApprovedLeavesMap.get(emp.uid) : undefined) ||
+                       (emp.fullName ? (todayApprovedLeavesMap.get(emp.fullName.trim().toLowerCase()) || todayApprovedLeavesMap.get(emp.fullName.replace(/\s+/g, '').toLowerCase())) : undefined);
 
       const hasApprovedLeave = !!leaveReq && !isWfhType(leaveReq.type) && !isWfhType(leaveReq.leaveCategory);
       
@@ -211,7 +231,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         leaveReq
       };
     });
-  }, [operationalEmployees, todayRecords, leaveRequests, todayStr, companyWideWfhDates, settings]);
+  }, [operationalEmployees, todayRecordsMap, todayApprovedLeavesMap, leaveRequests, todayStr, companyWideWfhDates, settings]);
 
   // Turnout KPI Counts computed in a single consolidated memoized pass
   const {
@@ -512,36 +532,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     }
   };
 
-  // Projects
-  const [projects, setProjects] = useState<Project[]>(() => {
-    const saved = localStorage.getItem('kss_pm_projects');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_PROJECTS;
-      } catch (e) {}
-    }
-    return DEFAULT_PROJECTS;
-  });
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    const unsub = subscribeWithRecovery(collection(db, 'projects'), (snapshot) => {
-      if (!snapshot.empty) {
-        const fetched: Project[] = [];
-        snapshot.forEach(d => fetched.push(d.data() as Project));
-        setProjects(fetched);
-        localStorage.setItem('kss_pm_projects', JSON.stringify(fetched));
-      } else {
-        DEFAULT_PROJECTS.forEach(p => {
-          setDoc(doc(db, 'projects', p.id), p).catch(console.error);
-        });
-      }
-    }, (err) => console.warn('[PMDashboard] Firestore projects listener error:', err));
-
-    return () => unsub();
-  }, [isAuthenticated]);
-
   // Modal State for PM Custom Sprint Conflict / Rejection Reason
   const [rejectModalReq, setRejectModalReq] = useState<LeaveRequest | null>(null);
   const [customRejectReason, setCustomRejectReason] = useState('Sprint 14 Deadline Conflict — Key deliverable scheduled during request dates');
@@ -562,45 +552,127 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     );
   };
 
-  // Capacity week
+  // Capacity week (decoupled from timer to prevent heavy heatmap recalculations)
   const [weekOffset, setWeekOffset] = useState(0);
-  const weekAnchor = React.useMemo(
-    () => new Date(nowMs + weekOffset * 7 * 86400000),
-    [todayStr, weekOffset]
-  );
+  const weekAnchor = React.useMemo(() => {
+    const d = new Date(`${todayStr}T12:00:00Z`);
+    d.setDate(d.getDate() + weekOffset * 7);
+    return d;
+  }, [todayStr, weekOffset]);
+
   const holidayDates = React.useMemo<string[]>(
     () => (((settings as any)?.holidayDates) || []) as string[],
     [settings]
   );
+
   const weekDays = React.useMemo(
-    () => buildWorkWeek(weekAnchor, { nowMs, holidayDates }),
-    [weekAnchor, holidayDates, todayStr]
+    () => buildWorkWeek(weekAnchor, { holidayDates }),
+    [weekAnchor, holidayDates]
   );
+
   const weekLabel = weekDays.length
     ? `${formatShortDate(weekDays[0].dateStr)} → ${formatShortDate(weekDays[weekDays.length - 1].dateStr)}`
     : '';
   const isCurrentWeek = weekOffset === 0;
 
-  const pendingTeamRequests = leaveRequests.filter(r => {
-    if (r.status !== 'Pending') return false;
-    if (r.pmStatus !== 'Pending' && r.pmStatus !== undefined) return false;
-    if (r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') return false;
+  // Memoized pending leave requests for the PM to recommend/flag
+  const pendingTeamRequests = useMemo(() => {
+    return leaveRequests.filter(r => {
+      if (r.status !== 'Pending') return false;
+      if (r.pmStatus !== 'Pending' && r.pmStatus !== undefined) return false;
+      if (r.pmStatus === 'N/A' || r.pmStatus === 'Bypassed') return false;
 
-    if (
-      r.employeeUid === activeEmployee?.uid ||
-      r.employeeId === activeEmployee?.id ||
-      r.employeeId === activeEmployee?.employeeId ||
-      (r.employeeName && activeEmployee?.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())
-    ) {
-      return false;
-    }
+      if (
+        r.employeeUid === activeEmployee?.uid ||
+        r.employeeId === activeEmployee?.id ||
+        r.employeeId === activeEmployee?.employeeId ||
+        (r.employeeName && activeEmployee?.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())
+      ) {
+        return false;
+      }
 
-    const isHrOrPmEmployee = (r.department || '').toLowerCase().includes('hr') ||
-      r.employeeRole === 'HR_ADMIN' ||
-      r.employeeRole === 'SUPER_ADMIN';
+      const isHrOrPmEmployee = (r.department || '').toLowerCase().includes('hr') ||
+        r.employeeRole === 'HR_ADMIN' ||
+        r.employeeRole === 'SUPER_ADMIN';
 
-    return !isHrOrPmEmployee;
-  });
+      return !isHrOrPmEmployee;
+    });
+  }, [leaveRequests, activeEmployee]);
+
+  // High-performance precomputed Team Weekly Capacity Rows (memoized O(1) rendering)
+  const weeklyCapacityRows = useMemo(() => {
+    const weekDatesSet = new Set(weekDays.map(d => d.dateStr));
+    const weekAttendance = attendance.filter(a => a.date && weekDatesSet.has(a.date));
+
+    return operationalEmployees.map(emp => {
+      const weekRow = buildWeekWorkRow(weekDays, emp, weekAttendance, {
+        leaveRequests,
+        holidayDates
+      });
+
+      const cells = weekDays.map((d, dIdx) => {
+        const daySummary = weekRow.days[dIdx] || weekRow.days.find(s => s.dateStr === d.dateStr);
+        const rec = resolveAttendanceRecord(weekAttendance, emp, d.dateStr);
+        
+        const isApprovedLeave = hasApprovedLeaveOn(
+          leaveRequests, emp, d.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]
+        );
+        const isWfhApproved = !isApprovedLeave && (hasApprovedLeaveOn(leaveRequests, emp, d.dateStr, ['WFH', 'wfh']) || (emp.approvedWfhDates || []).includes(d.dateStr));
+
+        let status = daySummary?.status || rec?.status || 'Absent';
+        if (d.isFuture) status = 'Upcoming';
+        else if (d.isNonWorking) status = 'Holiday';
+        else if (isApprovedLeave) status = 'On Leave';
+        else if (isWfhApproved) status = 'Work From Home';
+        else if (status === 'Work From Home') {
+          status = (daySummary?.checkInMs || rec?.checkInAt) ? (isLateCheckIn(rec?.checkInAt) ? 'Late' : 'Present') : 'Absent';
+        }
+
+        const isCheckedIn = !!(daySummary?.checkInMs || rec?.checkInAt);
+        const workedMins = daySummary?.workedMinutes || (rec?.workingMinutes ? Number(rec.workingMinutes) : 0);
+        const isWfhDay = isWfhApproved;
+
+        let cellColor = 'bg-slate-950 text-slate-600 border-slate-800';
+
+        if (daySummary?.isOnBreak) {
+          cellColor = 'bg-amber-500/15 text-amber-300 border-amber-500/40 font-bold animate-pulse';
+        } else if (status === 'On Leave' || isApprovedLeave) {
+          cellColor = 'bg-purple-500/15 text-purple-300 border-purple-500/40 font-bold';
+        } else if (isWfhDay) {
+          cellColor = 'bg-sky-500/15 text-sky-300 border-sky-500/40 font-bold';
+        } else if (status === 'Late') {
+          cellColor = 'bg-orange-500/15 text-orange-400 border-orange-500/30 font-bold';
+        } else if (isCheckedIn || status === 'Present') {
+          cellColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-bold';
+        } else if (status === 'Holiday') {
+          cellColor = 'bg-slate-900 text-slate-500 border-slate-800/60';
+        } else if (d.isFuture) {
+          cellColor = 'bg-slate-950/40 text-slate-700 border-slate-900';
+        }
+
+        const displayText = d.isFuture
+          ? '—'
+          : isWfhDay
+            ? isCheckedIn && workedMins > 0 ? `🏠 ${Math.floor(workedMins / 60)}h ${workedMins % 60}m` : '🏠 WFH'
+            : isCheckedIn && workedMins > 0
+              ? `${Math.floor(workedMins / 60)}h ${workedMins % 60}m`
+              : isCheckedIn
+                ? 'Active'
+                : status;
+
+        return {
+          dateStr: d.dateStr,
+          cellColor,
+          displayText
+        };
+      });
+
+      return {
+        emp,
+        cells
+      };
+    });
+  }, [operationalEmployees, weekDays, attendance, leaveRequests, holidayDates]);
 
   // Filtered Roster for Modal Table
   const filteredRosterModal = useMemo(() => {
@@ -927,102 +999,42 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-xs">
-              {operationalEmployees.map(emp => {
-                const weekRow = buildWeekWorkRow(weekDays, emp, attendance, {
-                  leaveRequests,
-                  holidayDates,
-                  nowMs
-                });
+              {weeklyCapacityRows.map(({ emp, cells }) => (
+                <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors">
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-2.5">
+                      <img
+                        src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=0f172a&color=fff`}
+                        alt={emp.fullName}
+                        className="w-8 h-8 rounded-xl object-cover border border-slate-700/60"
+                      />
+                      <div>
+                        <div className="font-bold text-white text-xs">{emp.fullName}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">{emp.employeeId}</div>
+                      </div>
+                    </div>
+                  </td>
 
-                return (
-                  <tr key={emp.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <img
-                          src={emp.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.fullName)}&background=0f172a&color=fff`}
-                          alt={emp.fullName}
-                          className="w-8 h-8 rounded-xl object-cover border border-slate-700/60"
-                        />
-                        <div>
-                          <div className="font-bold text-white text-xs">{emp.fullName}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">{emp.employeeId}</div>
-                        </div>
+                  {cells.map(cell => (
+                    <td key={cell.dateStr} className="py-2.5 px-2 text-center">
+                      <div className={`p-1.5 rounded-xl border text-[10px] font-mono ${cell.cellColor}`}>
+                        {cell.displayText}
                       </div>
                     </td>
+                  ))}
 
-                    {weekDays.map((d, dIdx) => {
-                      const daySummary = weekRow.days[dIdx] || weekRow.days.find(s => s.dateStr === d.dateStr);
-                      const rec = resolveAttendanceRecord(attendance, emp, d.dateStr);
-                      
-                      const isApprovedLeave = hasApprovedLeaveOn(
-                        leaveRequests, emp, d.dateStr, EXCUSED_LEAVE_TYPES as unknown as string[]
-                      );
-                      const isWfhApproved = !isApprovedLeave && (hasApprovedLeaveOn(leaveRequests, emp, d.dateStr, ['WFH', 'wfh']) || (emp.approvedWfhDates || []).includes(d.dateStr));
-
-                      let status = daySummary?.status || rec?.status || 'Absent';
-                      if (d.isFuture) status = 'Upcoming';
-                      else if (d.isNonWorking) status = 'Holiday';
-                      else if (isApprovedLeave) status = 'On Leave';
-                      else if (isWfhApproved) status = 'Work From Home';
-                      else if (status === 'Work From Home') {
-                        status = (daySummary?.checkInMs || rec?.checkInAt) ? (isLateCheckIn(rec?.checkInAt) ? 'Late' : 'Present') : 'Absent';
-                      }
-
-                      const isCheckedIn = !!(daySummary?.checkInMs || rec?.checkInAt);
-                      const workedMins = daySummary?.workedMinutes || (rec?.workingMinutes ? Number(rec.workingMinutes) : 0);
-
-                      const isWfhDay = isWfhApproved;
-
-                      let cellColor = 'bg-slate-950 text-slate-600 border-slate-800';
-
-                      if (daySummary?.isOnBreak) {
-                        cellColor = 'bg-amber-500/15 text-amber-300 border-amber-500/40 font-bold animate-pulse';
-                      } else if (status === 'On Leave' || isApprovedLeave) {
-                        cellColor = 'bg-purple-500/15 text-purple-300 border-purple-500/40 font-bold';
-                      } else if (isWfhDay) {
-                        cellColor = 'bg-sky-500/15 text-sky-300 border-sky-500/40 font-bold';
-                      } else if (status === 'Late') {
-                        cellColor = 'bg-orange-500/15 text-orange-400 border-orange-500/30 font-bold';
-                      } else if (isCheckedIn || status === 'Present') {
-                        cellColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-bold';
-                      } else if (status === 'Holiday') {
-                        cellColor = 'bg-slate-900 text-slate-500 border-slate-800/60';
-                      } else if (d.isFuture) {
-                        cellColor = 'bg-slate-950/40 text-slate-700 border-slate-900';
-                      }
-
-                      return (
-                        <td key={d.dateStr} className="py-2.5 px-2 text-center">
-                          <div className={`p-1.5 rounded-xl border text-[10px] font-mono ${cellColor}`}>
-                            {d.isFuture ? (
-                              '—'
-                            ) : isWfhDay ? (
-                              isCheckedIn && workedMins > 0 ? `🏠 ${Math.floor(workedMins / 60)}h ${workedMins % 60}m` : '🏠 WFH'
-                            ) : isCheckedIn && workedMins > 0 ? (
-                              `${Math.floor(workedMins / 60)}h ${workedMins % 60}m`
-                            ) : isCheckedIn ? (
-                              'Active'
-                            ) : (
-                              status
-                            )}
-                          </div>
-                        </td>
-                      );
-                    })}
-
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => setMonthlyAttendanceEmp(emp)}
-                        className="px-3 py-1.5 bg-blue-600/15 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold rounded-xl flex items-center gap-1 ml-auto cursor-pointer"
-                        title="View 30-Day Calendar & Edit Attendance"
-                      >
-                        <Calendar className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Monthly Calendar &amp; Override</span>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                  <td className="py-3 px-4 text-right">
+                    <button
+                      onClick={() => setMonthlyAttendanceEmp(emp)}
+                      className="px-3 py-1.5 bg-blue-600/15 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold rounded-xl flex items-center gap-1 ml-auto cursor-pointer"
+                      title="View 30-Day Calendar & Edit Attendance"
+                    >
+                      <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Monthly Calendar &amp; Override</span>
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

@@ -129,6 +129,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     createdAt: '2024-02-15T10:00:00Z',
     updatedAt: new Date().toISOString(),
     earnLeaveBalance: 0,
+    sickLeaveBalance: 1,
     profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'
   },
   {
@@ -163,6 +164,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     updatedAt: new Date().toISOString(),
     approvedWfhDates: ['2026-08-28', '2026-08-29'],
     earnLeaveBalance: 0,
+    sickLeaveBalance: 1,
     profilePhotoUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300'
   },
   {
@@ -196,6 +198,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     createdAt: '2024-03-01T10:00:00Z',
     updatedAt: new Date().toISOString(),
     earnLeaveBalance: 0,
+    sickLeaveBalance: 1,
     profilePhotoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300'
   },
   {
@@ -225,8 +228,9 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     qrToken: 'QR-KSS2407006',
     createdAt: '2024-03-15T10:00:00Z',
     updatedAt: new Date().toISOString(),
-    approvedWfhDates: ['2026-08-26', '2026-08-27'],
+    approvedWfhDates: ['2026-08-27', '2026-08-29'],
     earnLeaveBalance: 0,
+    sickLeaveBalance: 1,
     profilePhotoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300'
   },
   {
@@ -435,6 +439,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     updatedAt: new Date().toISOString(),
     profilePhotoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300',
     approvedWfhDates: [],
+    earnLeaveBalance: 1,
     sickLeaveBalance: 0
   },
   {
@@ -466,6 +471,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     qrToken: 'KSS2407011', // updated from KSS2407014
     createdAt: '2026-08-17T04:38:47.685Z',
     updatedAt: new Date().toISOString(),
+    earnLeaveBalance: 1,
     sickLeaveBalance: 0,
     profilePhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'
   }
@@ -608,7 +614,7 @@ export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
     reviewNotes: 'Loss of Pay (LOP) - Exceeded monthly leave quota; marked as Loss of Pay'
   },
   {
-    id: 'leave-mahesh-wfh-2026-08-26',
+    id: 'leave-mahesh-wfh-2026-08-27',
     employeeId: 'KSS2407006',
     employeeUid: 'emp-KSS2407006',
     employeeName: 'Kuruva Mahesh',
@@ -617,25 +623,55 @@ export const INITIAL_LEAVE_REQUESTS: LeaveRequest[] = [
     pmUid: 'uid-KSS2407003',
     type: 'WFH',
     leaveCategory: 'WFH',
-    startDate: '2026-08-26',
+    startDate: '2026-08-27',
     endDate: '2026-08-27',
-    reason: 'Work From Home - Design system prototype and asset pipeline',
+    reason: 'Work From Home - Raksha Bandhan',
     status: 'Approved',
-    requestDate: '2026-08-25T09:30:00.000Z',
+    requestDate: '2026-08-22T07:38:15.903Z',
     reviewedBy: 'Gaurav Kumar Tripathi',
     pmStatus: 'Approved',
     pmReviewedBy: 'D. Koushik',
-    pmReviewedAt: '2026-08-25T10:00:00.000Z',
+    pmReviewedAt: '2026-08-22T09:20:52.334Z',
     hrStatus: 'Approved',
     hrReviewedBy: 'HR Department',
-    hrReviewedAt: '2026-08-25T10:15:00.000Z',
+    hrReviewedAt: '2026-08-24T06:22:08.566Z',
     ceoStatus: 'Approved',
     ceoReviewedBy: 'Akshit Ujjain',
-    ceoReviewedAt: '2026-08-25T10:30:00.000Z',
+    ceoReviewedAt: '2026-08-26T05:43:50.062Z',
     ctoStatus: 'Approved',
     ctoReviewedBy: 'Gaurav Kumar Tripathi',
-    ctoReviewedAt: '2026-08-25T10:45:00.000Z',
-    reviewNotes: 'Approved - 2 Days Paid WFH (26 & 27 Aug)'
+    ctoReviewedAt: '2026-08-27T05:30:32.095Z',
+    reviewNotes: 'Approved - Paid WFH (27 Aug)'
+  },
+  {
+    id: 'leave-mahesh-wfh-2026-08-29',
+    employeeId: 'KSS2407006',
+    employeeUid: 'emp-KSS2407006',
+    employeeName: 'Kuruva Mahesh',
+    department: 'Product & Design',
+    employeeRole: 'EMPLOYEE',
+    pmUid: 'uid-KSS2407003',
+    type: 'WFH',
+    leaveCategory: 'WFH',
+    startDate: '2026-08-29',
+    endDate: '2026-08-29',
+    reason: 'Work From Home - Raksha Bandhan',
+    status: 'Approved',
+    requestDate: '2026-08-22T07:38:31.441Z',
+    reviewedBy: 'Gaurav Kumar Tripathi',
+    pmStatus: 'Approved',
+    pmReviewedBy: 'D. Koushik',
+    pmReviewedAt: '2026-08-22T09:20:51.601Z',
+    hrStatus: 'Approved',
+    hrReviewedBy: 'HR Department',
+    hrReviewedAt: '2026-08-24T06:22:07.061Z',
+    ceoStatus: 'Approved',
+    ceoReviewedBy: 'Akshit Ujjain',
+    ceoReviewedAt: '2026-08-26T05:43:51.960Z',
+    ctoStatus: 'Approved',
+    ctoReviewedBy: 'Gaurav Kumar Tripathi',
+    ctoReviewedAt: '2026-08-27T05:30:35.838Z',
+    reviewNotes: 'Approved - Paid WFH (29 Aug)'
   },
   {
     id: 'leave-asbin-el-2026-08-26',
