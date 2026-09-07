@@ -100,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
       setTimeStr(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     };
     updateClock();
-    const timer = setInterval(updateClock, 1000);
+    const timer = setInterval(updateClock, 10000);
     return () => clearInterval(timer);
   }, []);
 

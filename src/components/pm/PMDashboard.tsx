@@ -131,7 +131,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
   const totalWorkforceCount = operationalEmployees.length;
 
-  const todayRecords = attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
+  const todayRecords = useMemo(() => {
+    return attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
+  }, [attendance, todayStr]);
 
   // Build daily roster for PM view with live status
   const dailyRoster = useMemo(() => {
@@ -211,18 +213,50 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     });
   }, [operationalEmployees, todayRecords, leaveRequests, todayStr, companyWideWfhDates, settings]);
 
-  // Turnout KPI Counts
-  const presentCount = dailyRoster.filter(r => (r.status === 'Present' || r.status === 'On Break') && !r.isWfh).length;
-  const onTimePresentCount = dailyRoster.filter(r => r.status === 'Present' && !r.isLate && !r.isWfh).length;
-  const onBreakCount = dailyRoster.filter(r => r.status === 'On Break').length;
-  const lateCount = dailyRoster.filter(r => r.isLate && !r.isWfh).length;
-  const wfhCount = dailyRoster.filter(r => r.status === 'Work From Home' || r.isWfh).length;
-  const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
-  const lopCount = dailyRoster.filter(r => r.status === 'LOP' || r.status === 'Absent').length;
-  const absentCount = lopCount;
+  // Turnout KPI Counts computed in a single consolidated memoized pass
+  const {
+    presentCount,
+    onTimePresentCount,
+    onBreakCount,
+    lateCount,
+    wfhCount,
+    onLeaveCount,
+    lopCount,
+    absentCount,
+    totalActiveWorkingToday
+  } = useMemo(() => {
+    let present = 0;
+    let onTime = 0;
+    let onBreak = 0;
+    let late = 0;
+    let wfh = 0;
+    let onLeave = 0;
+    let lop = 0;
+    let activeWorking = 0;
 
-  // Real unique active working employees today (strictly 1 per person)
-  const totalActiveWorkingToday = dailyRoster.filter(r => r.status === 'Present' || r.status === 'On Break' || r.status === 'Work From Home').length;
+    for (const r of dailyRoster) {
+      if (r.status === 'On Break') onBreak++;
+      if ((r.status === 'Present' || r.status === 'On Break') && !r.isWfh) present++;
+      if (r.status === 'Present' && !r.isLate && !r.isWfh) onTime++;
+      if (r.isLate && !r.isWfh) late++;
+      if (r.status === 'Work From Home' || r.isWfh) wfh++;
+      if (r.status === 'On Leave') onLeave++;
+      if (r.status === 'LOP' || r.status === 'Absent') lop++;
+      if (r.status === 'Present' || r.status === 'On Break' || r.status === 'Work From Home') activeWorking++;
+    }
+
+    return {
+      presentCount: present,
+      onTimePresentCount: onTime,
+      onBreakCount: onBreak,
+      lateCount: late,
+      wfhCount: wfh,
+      onLeaveCount: onLeave,
+      lopCount: lop,
+      absentCount: lop,
+      totalActiveWorkingToday: activeWorking
+    };
+  }, [dailyRoster]);
 
   // Donut Pie Data - Mutually exclusive slices whose sum matches totalWorkforceCount exactly
   const statusDistributionData = useMemo(() => {
@@ -747,7 +781,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
           </div>
 
           <div className="relative w-full h-44 flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <PieChart>
                 <Pie
                   data={statusDistributionData}
@@ -755,7 +789,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                   cy="50%"
                   innerRadius={50}
                   outerRadius={75}
-                  paddingAngle={3}
+                  paddingAngle={statusDistributionData.length > 1 ? 3 : 0}
+                  isAnimationActive={false}
                   dataKey="value"
                 >
                   {statusDistributionData.map((entry, index) => (
@@ -1332,27 +1367,26 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
                   ) : (
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
                       <div className="relative w-48 h-48 shrink-0 flex items-center justify-center">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={categories}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={55}
-                              outerRadius={80}
-                              paddingAngle={3}
-                              dataKey="value"
-                            >
-                              {categories.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
-                              ))}
-                            </Pie>
-                            <Tooltip
-                              formatter={(val: any) => [`${Math.floor(Number(val) / 60)}h ${Number(val) % 60}m`, 'Duration']}
-                              contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
+                        <PieChart width={192} height={192}>
+                          <Pie
+                            data={categories}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={55}
+                            outerRadius={80}
+                            paddingAngle={categories.length > 1 ? 3 : 0}
+                            isAnimationActive={false}
+                            dataKey="value"
+                          >
+                            {categories.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(val: any) => [`${Math.floor(Number(val) / 60)}h ${Number(val) % 60}m`, 'Duration']}
+                            contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
+                          />
+                        </PieChart>
                         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
                           <span className="text-base font-black text-white font-mono leading-none">
                             {Math.floor(grandTotal / 60)}h {grandTotal % 60}m

@@ -167,7 +167,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
   const displayName = activeEmployee?.fullName?.split(' ')[0] || 'there';
 
   const todayStr = getWorkDate(new Date());
-  const todayRecords = attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
+  const todayRecords = useMemo(() => {
+    return attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
+  }, [attendance, todayStr]);
 
   // Exclude Executive Leadership & Founders (CEO, CTO, COO Rahul Pathak, Founders) from operational metrics & graphs
   const activeEmployees = useMemo(() => employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e)), [employees]);
@@ -256,14 +258,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
     });
   }, [activeEmployees, todayRecords, leaveRequests, companyWideWfhDates, settings, todayStr]);
 
-  // Counts based on the daily roster
-  const presentTodayCount = dailyRoster.filter(r => (r.status === 'Present' || r.status === 'On Break') && !r.isWfh).length;
-  const onBreakCount = dailyRoster.filter(r => r.status === 'On Break').length;
-  const lateTodayCount = dailyRoster.filter(r => r.isLate && !r.isWfh).length;
-  const wfhTodayCount = dailyRoster.filter(r => r.status === 'Work From Home' || r.isWfh).length;
-  const onLeaveCount = dailyRoster.filter(r => r.status === 'On Leave').length;
-  const lopCount = dailyRoster.filter(r => r.status === 'LOP' || r.status === 'Absent').length;
-  const absentTodayCount = lopCount;
+  // Counts based on the daily roster computed in a single memoized pass
+  const {
+    presentTodayCount,
+    onBreakCount,
+    lateTodayCount,
+    wfhTodayCount,
+    onLeaveCount,
+    lopCount,
+    absentTodayCount
+  } = useMemo(() => {
+    let present = 0;
+    let onBreak = 0;
+    let late = 0;
+    let wfh = 0;
+    let onLeave = 0;
+    let lop = 0;
+    for (const r of dailyRoster) {
+      if (r.status === 'On Break') onBreak++;
+      if ((r.status === 'Present' || r.status === 'On Break') && !r.isWfh) present++;
+      if (r.isLate && !r.isWfh) late++;
+      if (r.status === 'Work From Home' || r.isWfh) wfh++;
+      if (r.status === 'On Leave') onLeave++;
+      if (r.status === 'LOP' || r.status === 'Absent') lop++;
+    }
+    return {
+      presentTodayCount: present,
+      onBreakCount: onBreak,
+      lateTodayCount: late,
+      wfhTodayCount: wfh,
+      onLeaveCount: onLeave,
+      lopCount: lop,
+      absentTodayCount: lop
+    };
+  }, [dailyRoster]);
 
   // Filtered Roster for Modal Table
   const filteredRoster = useMemo(() => {
@@ -383,26 +411,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
     ].filter(d => d.value > 0);
   }, [presentTodayCount, onBreakCount, lateTodayCount, wfhTodayCount, onLeaveCount, lopCount]);
 
-  // Compute 7-day attendance trend chart data
-  const trendData = Array.from({ length: 7 }).map((_, idx) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - idx));
-    const dStr = getWorkDate(d);
-    const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' });
-    const dayRecs = attendance.filter(a => a.date === dStr);
+  // Compute 7-day attendance trend chart data (memoized to eliminate lag)
+  const trendData = useMemo(() => {
+    return Array.from({ length: 7 }).map((_, idx) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - idx));
+      const dStr = getWorkDate(d);
+      const dayLabel = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dayRecs = attendance.filter(a => a.date === dStr);
 
-    return {
-      date: dayLabel,
-      Present: dayRecs.filter(a => a.status === 'Present' || a.status === 'Late' || a.status === 'Work From Home').length,
-      Late: dayRecs.filter(a => a.status === 'Late').length,
-      Absent: Math.max(0, totalEmployeesCount - dayRecs.length),
-    };
-  });
+      return {
+        date: dayLabel,
+        Present: dayRecs.filter(a => a.status === 'Present' || a.status === 'Late' || a.status === 'Work From Home').length,
+        Late: dayRecs.filter(a => a.status === 'Late').length,
+        Absent: Math.max(0, totalEmployeesCount - dayRecs.length),
+      };
+    });
+  }, [attendance, totalEmployeesCount]);
 
-  const recentCheckIns = todayRecords
-    .filter(a => a.checkInAt)
-    .sort((a, b) => new Date(b.checkInAt!).getTime() - new Date(a.checkInAt!).getTime())
-    .slice(0, 6);
+  const recentCheckIns = useMemo(() => {
+    return todayRecords
+      .filter(a => a.checkInAt)
+      .sort((a, b) => new Date(b.checkInAt!).getTime() - new Date(a.checkInAt!).getTime())
+      .slice(0, 6);
+  }, [todayRecords]);
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
@@ -609,7 +641,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
 
           {/* SVG/Recharts Donut Pie */}
           <div className="h-56 w-full relative flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <PieChart>
                 <Pie
                   data={statusPieData}
@@ -617,7 +649,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                   cy="50%"
                   innerRadius={55}
                   outerRadius={80}
-                  paddingAngle={3}
+                  paddingAngle={statusPieData.length > 1 ? 3 : 0}
+                  isAnimationActive={false}
                   dataKey="value"
                 >
                   {statusPieData.map((entry, index) => (
@@ -683,7 +716,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           </div>
 
           <div className="h-60 w-full">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
@@ -1171,29 +1204,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
                           </div>
                         ) : (
                           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                            {/* Donut Pie Chart */}
+                            {/* Donut Pie Chart - explicit width & height to guarantee instant render in animated modal */}
                             <div className="relative w-44 h-44 shrink-0 flex items-center justify-center">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                  <Pie
-                                    data={breakdown.categories}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={50}
-                                    outerRadius={75}
-                                    paddingAngle={3}
-                                    dataKey="value"
-                                  >
-                                    {breakdown.categories.map((entry, index) => (
-                                      <Cell key={`slice-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
-                                    ))}
-                                  </Pie>
-                                  <Tooltip
-                                    formatter={(val: any) => [`${Math.floor(Number(val) / 60)}h ${Number(val) % 60}m`, 'Duration']}
-                                    contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
-                                  />
-                                </PieChart>
-                              </ResponsiveContainer>
+                              <PieChart width={176} height={176}>
+                                <Pie
+                                  data={breakdown.categories}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={50}
+                                  outerRadius={75}
+                                  paddingAngle={breakdown.categories.length > 1 ? 3 : 0}
+                                  isAnimationActive={false}
+                                  dataKey="value"
+                                >
+                                  {breakdown.categories.map((entry, index) => (
+                                    <Cell key={`slice-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
+                                  ))}
+                                </Pie>
+                                <Tooltip
+                                  formatter={(val: any) => [`${Math.floor(Number(val) / 60)}h ${Number(val) % 60}m`, 'Duration']}
+                                  contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
+                                />
+                              </PieChart>
                               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
                                 <span className="text-base font-black text-emerald-400 font-mono">
                                   {breakdown.grandTotalMins > 0 ? `${Math.round((breakdown.workingMins / breakdown.grandTotalMins) * 100)}%` : '0%'}

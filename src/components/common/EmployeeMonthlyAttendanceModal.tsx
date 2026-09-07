@@ -35,7 +35,7 @@ import {
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType, COMPANY_START_DATE, computeTotalLeaveBalances } from '../../lib/attendanceEngine';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { useHaptic } from '../../hooks/useHaptic';
 
 /* ─── Leave Balance KPI Box + Detail Modal ─── */
@@ -1135,29 +1135,28 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
                 </div>
               ) : (
                 <div className="flex flex-col md:flex-row items-center justify-between gap-6 pt-2">
-                  {/* Donut Chart */}
+                  {/* Donut Chart - explicit dimensions to guarantee immediate render */}
                   <div className="relative w-48 h-48 shrink-0 flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={aggregatedBreakdown.categories}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={55}
-                          outerRadius={80}
-                          paddingAngle={3}
-                          dataKey="value"
-                        >
-                          {aggregatedBreakdown.categories.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(val: any) => [`${Math.floor(Number(val) / 60)}h ${Number(val) % 60}m`, 'Duration']}
-                          contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <PieChart width={192} height={192}>
+                      <Pie
+                        data={aggregatedBreakdown.categories}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={80}
+                        paddingAngle={aggregatedBreakdown.categories.length > 1 ? 3 : 0}
+                        isAnimationActive={false}
+                        dataKey="value"
+                      >
+                        {aggregatedBreakdown.categories.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} stroke="#020617" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(val: any) => [`${Math.floor(Number(val) / 60)}h ${Number(val) % 60}m`, 'Duration']}
+                        contentStyle={{ backgroundColor: '#020617', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
+                      />
+                    </PieChart>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
                       <span className="text-base font-black text-white font-mono leading-none">
                         {Math.floor(aggregatedBreakdown.grandTotalMins / 60)}h {aggregatedBreakdown.grandTotalMins % 60}m
