@@ -4195,7 +4195,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await LeaveService.reviewCtoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
       }
     } catch (fsErr) {
-      console.warn('[AuthContext] Firestore stage update error:', fsErr);
+      console.warn('[AuthContext] Firestore stage update error, attempting direct fallback write:', fsErr);
+      try {
+        const fallbackUpdates: Partial<LeaveRequest> = {
+          updatedAt: nowIso
+        };
+        if (stage === 'PM') {
+          fallbackUpdates.pmStatus = decision;
+          fallbackUpdates.pmRecommendation = decision;
+          fallbackUpdates.pmReviewedBy = revUid;
+          fallbackUpdates.pmReviewedAt = nowIso;
+          fallbackUpdates.pmNotes = notes || '';
+          fallbackUpdates.hrStatus = isApproved ? 'Pending' : 'Waiting PM';
+          if (!isApproved) fallbackUpdates.status = 'Rejected';
+        } else if (stage === 'HR') {
+          fallbackUpdates.hrStatus = decision;
+          fallbackUpdates.hrReviewedBy = revUid;
+          fallbackUpdates.hrReviewedAt = nowIso;
+          fallbackUpdates.hrNotes = notes || '';
+          fallbackUpdates.ceoStatus = isApproved ? 'Pending' : 'Waiting HR';
+          if (!isApproved) fallbackUpdates.status = 'Rejected';
+        } else if (stage === 'CEO') {
+          fallbackUpdates.ceoStatus = decision;
+          fallbackUpdates.ceoReviewedBy = revUid;
+          fallbackUpdates.ceoReviewedAt = nowIso;
+          fallbackUpdates.ceoNotes = notes || '';
+          fallbackUpdates.ctoStatus = isApproved ? 'Pending' : 'Waiting CEO';
+          if (!isApproved) fallbackUpdates.status = 'Rejected';
+        } else if (stage === 'CTO') {
+          fallbackUpdates.ctoStatus = decision;
+          fallbackUpdates.ctoReviewedBy = revUid;
+          fallbackUpdates.ctoReviewedAt = nowIso;
+          fallbackUpdates.ctoNotes = notes || '';
+          fallbackUpdates.status = isApproved ? 'Approved' : 'Rejected';
+        }
+        await setDoc(doc(db, 'leaveRequests', id), cleanFirestorePayload(fallbackUpdates), { merge: true });
+      } catch (fallbackErr) {
+        console.error('[AuthContext] Direct fallback write failed:', fallbackErr);
+        handleFirestoreError(fallbackErr, OperationType.WRITE, `leaveRequests/${id}`);
+      }
     }
 
     // 4. Dispatch real-time in-app notification for stage decision

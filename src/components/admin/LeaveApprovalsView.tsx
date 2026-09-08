@@ -6,6 +6,7 @@ import { useHaptic } from '../../hooks/useHaptic';
 import { LeaveRequest } from '../../types';
 import { todayInIST } from '../../lib/absoluteTime';
 import { isExecutiveOrLeadership, isWfhType } from '../../lib/attendanceEngine';
+import { toast } from 'sonner';
 
 /**
  * Whole-word title test against an UPPERCASED designation.
@@ -155,6 +156,7 @@ export const LeaveApprovalsView: React.FC = () => {
     }
 
     updateLeaveRequestStatus(id, 'Approved', activeEmployee?.fullName || 'Executive', undefined, forcedStage);
+    toast.success(`✓ ${req?.type || 'Request'} for ${req?.employeeName || 'Employee'} approved at ${forcedStage} stage.`);
   };
 
   const handleReject = (id: string, stage?: 'PM' | 'HR' | 'CEO' | 'CTO') => {
@@ -173,6 +175,13 @@ export const LeaveApprovalsView: React.FC = () => {
     }
 
     updateLeaveRequestStatus(id, 'Rejected', activeEmployee?.fullName || 'Executive', undefined, forcedStage);
+    toast.error(`✕ ${req?.type || 'Request'} for ${req?.employeeName || 'Employee'} rejected at ${forcedStage} stage. Moved to Rejected tab.`, {
+      action: {
+        label: 'View in Rejected',
+        onClick: () => handleTabChange('rejected'),
+      },
+      duration: 6000,
+    });
   };
 
   const [filterType, setFilterType] = useState<'All' | 'Leave' | 'WFH'>('All');
@@ -257,7 +266,17 @@ export const LeaveApprovalsView: React.FC = () => {
   const rejectedRequests = pastRequests.filter(req => isRequestRejected(req));
   const historyRequests = pastRequests.filter(req => isRequestFullyApproved(req));
 
-  const [activeTab, setActiveTab] = useState<'pending' | 'past' | 'rejected'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'past' | 'rejected'>(() => {
+    const saved = localStorage.getItem('kss_v1_leave_approvals_tab');
+    if (saved === 'pending' || saved === 'past' || saved === 'rejected') return saved;
+    return 'pending';
+  });
+
+  const handleTabChange = (tab: 'pending' | 'past' | 'rejected') => {
+    triggerHaptic();
+    setActiveTab(tab);
+    localStorage.setItem('kss_v1_leave_approvals_tab', tab);
+  };
 
   return (
     <div className="space-y-6 pb-28 md:pb-8 animate-in fade-in zoom-in-95 duration-300">
@@ -335,7 +354,7 @@ export const LeaveApprovalsView: React.FC = () => {
           {/* Pending / History / Rejected Toggle */}
           <div className="flex items-center justify-center gap-1 bg-[var(--bg-elevated)] p-1 rounded-xl border border-[var(--border-subtle)] w-full sm:w-auto">
             <button
-              onClick={() => { triggerHaptic(); setActiveTab('pending'); }}
+              onClick={() => handleTabChange('pending')}
               className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
                 activeTab === 'pending' 
                   ? 'bg-[var(--accent-blue)] text-white shadow-[var(--shadow-glow-blue)]' 
@@ -345,7 +364,7 @@ export const LeaveApprovalsView: React.FC = () => {
               Pending {pendingRequests.length > 0 && `(${pendingRequests.length})`}
             </button>
             <button
-              onClick={() => { triggerHaptic(); setActiveTab('past'); }}
+              onClick={() => handleTabChange('past')}
               className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
                 activeTab === 'past' 
                   ? 'bg-[var(--accent-blue)] text-white shadow-[var(--shadow-glow-blue)]' 
@@ -355,7 +374,7 @@ export const LeaveApprovalsView: React.FC = () => {
               History {historyRequests.length > 0 && `(${historyRequests.length})`}
             </button>
             <button
-              onClick={() => { triggerHaptic(); setActiveTab('rejected'); }}
+              onClick={() => handleTabChange('rejected')}
               className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg font-bold text-xs transition-all text-center ${
                 activeTab === 'rejected' 
                   ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/30' 

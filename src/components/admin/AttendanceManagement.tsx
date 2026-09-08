@@ -31,7 +31,7 @@ import {
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
-import { isExecutiveOrLeadership, getWorkDate, formatShiftTiming, computeTotalLeaveBalances, computeEmploymentType, isLateCheckIn, isWfhType } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, isAttendanceExempt, getWorkDate, formatShiftTiming, computeTotalLeaveBalances, computeEmploymentType, isLateCheckIn, isWfhType } from '../../lib/attendanceEngine';
 import { toISTTimeString } from '../../lib/absoluteTime';
 import { EmployeeProfileModal } from './EmployeeProfileModal';
 import { EmployeeFormModal } from './EmployeeFormModal';
@@ -349,9 +349,9 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
       if (!emp.fullName || emp.fullName.trim() === '') return false;
       if (emp.status === 'Terminated' || emp.status === 'Inactive') return false;
 
-      // Exclude Executive Leadership / Founders (Gaurav Sir, Akshit Sir, etc.) from attendance ledger
+      // Exclude Executive Leadership, Founders & HR Administration from attendance ledger
       if (
-        isExecutiveOrLeadership(emp) ||
+        isAttendanceExempt(emp) ||
         (emp.fullName || '').toLowerCase().includes('gaurav') ||
         (emp.designation || '').toLowerCase().includes('managing director') ||
         (emp.designation || '').toLowerCase().includes('founder') ||

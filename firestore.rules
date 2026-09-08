@@ -53,6 +53,13 @@ service cloud.firestore {
         isSuperAdmin() ||
         claimRole() == 'project_manager' ||
         claimRole() == 'pm' ||
+        request.auth.uid in ['vhKLIJCVZoTncqVtmh14paMbiXk2'] ||
+        (request.auth.token.get('email', null) != null && (
+          request.auth.token.email == 'd.koushik@kalpanaaasoftwaresolutions.in' ||
+          request.auth.token.email == 'd.koushik@kalpanaaa.in'
+        )) ||
+        (getEmployeeId() != null && getEmployeeId() == 'KSS2407003') ||
+        (getEmployeeDocId() != null && (getEmployeeDocId() == 'emp-KSS2407003' || getEmployeeDocId() == 'vhKLIJCVZoTncqVtmh14paMbiXk2')) ||
         (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('role', '') == 'PROJECT_MANAGER')
       );
@@ -223,13 +230,13 @@ service cloud.firestore {
 
       // 2a. Leave date-locks
       match /leaveLocks/{lockDate} {
-        allow read: if isRealUser();
-        allow create, update: if isRealUser() && (
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn() && (
           isProjectManager() || isConfigAdmin() ||
           employeeId == getEmployeeId() ||
           request.resource.data.get('employeeUid','~') == request.auth.uid
         );
-        allow delete: if isRealUser() && (
+        allow delete: if isSignedIn() && (
           isProjectManager() || isConfigAdmin() ||
           employeeId == getEmployeeId() ||
           (resource != null && resource.data.get('employeeUid','~') == request.auth.uid)
@@ -262,9 +269,9 @@ service cloud.firestore {
 
     // ── 4. Leave & WFH Requests ──────────────────────────────────────────────
     match /leaveRequests/{requestId} {
-      allow read: if isRealUser();
-      allow create: if isRealUser() && validLeaveShape();
-      allow update: if isRealUser() && (
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && validLeaveShape();
+      allow update: if isSignedIn() && (
         isHrAdmin() || isSuperAdmin() || isProjectManager() ||
         (
           ownsLeaveRequest(resource.data) && (
@@ -274,7 +281,7 @@ service cloud.firestore {
           )
         )
       );
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isProjectManager();
     }
 
     // ── 5. Salary Disbursements (payroll — max sensitivity) ──────────────────

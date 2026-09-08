@@ -49,7 +49,7 @@ import { db } from '../../lib/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useHaptic } from '../../hooks/useHaptic';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
-import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete, safeGetTimestampMillis, isExecutiveOrLeadership, isLateCheckIn, isWfhType, isApprovedWfhForEmployee } from '../../lib/attendanceEngine';
+import { getEmployeeWorkDate, getAttendanceDocId, getCanonicalEmployeeUid, getWorkDate, isShiftComplete, safeGetTimestampMillis, isExecutiveOrLeadership, isAttendanceExempt, isLateCheckIn, isWfhType, isApprovedWfhForEmployee } from '../../lib/attendanceEngine';
 import { Employee, AttendanceRecord } from '../../types';
 
 interface DashboardViewProps {
@@ -171,8 +171,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
     return attendance.filter(a => a && a.date === todayStr && a.employeeName && a.employeeName.trim() !== '' && a.employeeName !== '.');
   }, [attendance, todayStr]);
 
-  // Exclude Executive Leadership & Founders (CEO, CTO, COO Rahul Pathak, Founders) from operational metrics & graphs
-  const activeEmployees = useMemo(() => employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e)), [employees]);
+  // Exclude Executive Leadership, Founders & HR Operations from operational metrics & graphs
+  const activeEmployees = useMemo(() => employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isAttendanceExempt(e)), [employees]);
   const totalEmployeesCount = activeEmployees.length;
 
   // Build full daily roster for all active employees with accurate live status

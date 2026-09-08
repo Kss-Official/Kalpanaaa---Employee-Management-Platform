@@ -288,7 +288,7 @@ export class LeaveService {
     await setDoc(doc(db, 'leaveRequests', requestId), cleanFirestorePayload(updates), { merge: true });
 
     if (!isApproved && employeeId && startDate && endDate) {
-      await this.releaseDateLocks(employeeId, startDate, endDate);
+      await this.releaseDateLocks(employeeId, startDate, endDate).catch(e => console.warn('[LeaveService] Lock release warning:', e));
     }
   }
 
@@ -321,7 +321,7 @@ export class LeaveService {
     await setDoc(doc(db, 'leaveRequests', requestId), cleanFirestorePayload(updates), { merge: true });
 
     if (!isApproved && employeeId && startDate && endDate) {
-      await this.releaseDateLocks(employeeId, startDate, endDate);
+      await this.releaseDateLocks(employeeId, startDate, endDate).catch(e => console.warn('[LeaveService] Lock release warning:', e));
     }
   }
 
@@ -354,7 +354,7 @@ export class LeaveService {
     await setDoc(doc(db, 'leaveRequests', requestId), cleanFirestorePayload(updates), { merge: true });
 
     if (!isApproved && employeeId && startDate && endDate) {
-      await this.releaseDateLocks(employeeId, startDate, endDate);
+      await this.releaseDateLocks(employeeId, startDate, endDate).catch(e => console.warn('[LeaveService] Lock release warning:', e));
     }
   }
 
@@ -388,7 +388,7 @@ export class LeaveService {
     await setDoc(doc(db, 'leaveRequests', requestId), cleanFirestorePayload(updates), { merge: true });
 
     if (!isApproved && employeeId && startDate && endDate) {
-      await this.releaseDateLocks(employeeId, startDate, endDate);
+      await this.releaseDateLocks(employeeId, startDate, endDate).catch(e => console.warn('[LeaveService] Lock release warning:', e));
     }
   }
 }

@@ -1342,7 +1342,7 @@ export function isLateCheckIn(checkInAt: any): boolean {
 
 export interface CheckInEligibility {
   allowed: boolean;
-  reason: 'ON_LEAVE' | 'WEEKLY_OFF' | 'OFFICIAL_HOLIDAY' | 'WINDOW_CLOSED' | 'BEFORE_OPEN' | 'NONE';
+  reason: 'ON_LEAVE' | 'WEEKLY_OFF' | 'OFFICIAL_HOLIDAY' | 'WINDOW_CLOSED' | 'BEFORE_OPEN' | 'EXEMPT' | 'NONE';
   message: string;
   leaveType?: string;
   holidayName?: string;
@@ -1366,6 +1366,15 @@ export function validateCheckInEligibility(
 ): CheckInEligibility {
   if (!employee || !dateStr) {
     return { allowed: false, reason: 'NONE', message: 'Employee or date information is missing.' };
+  }
+
+  // Exempt Executive Leadership & HR Operations from shift check-in
+  if (isAttendanceExempt(employee)) {
+    return {
+      allowed: false,
+      reason: 'EXEMPT',
+      message: 'Operations & Admin — Check-In Exempt: Administrative and Executive personnel are exempt from daily shift check-ins.'
+    };
   }
 
   // 0. Pre-Flight Root Rule Check: Inception Date (27 July 2026)
@@ -1840,6 +1849,9 @@ export function buildDailyRoster(
     if (!emp) continue;
     // Inactive / terminated / suspended staff are no longer expected to attend.
     if (emp.status === 'Inactive' || emp.status === 'Terminated' || emp.status === 'Suspended') continue;
+
+    // Executive Leadership & HR Administration are exempt from shift attendance rosters
+    if (isAttendanceExempt(emp)) continue;
 
     // Pre-joining staff: if date is before their official joiningDate, they have not yet started (not absent)
     const joinDate = emp.joiningDate || emp.joining_date;
@@ -2316,7 +2328,7 @@ export function buildEmployeeMonthRoster(
   monthKey: string,
   opts: DailyRosterOptions = {}
 ): RosterRecord[] {
-  if (!employee) return [];
+  if (!employee || isAttendanceExempt(employee)) return [];
   const dates = listDatesInMonth(monthKey);
   if (dates.length === 0) return [];
 
@@ -2703,6 +2715,21 @@ export function buildWeekWorkRow(
     resolveDayWorkSummary(resolveAttendanceRecord(attendance, employee, d.dateStr), d.dateStr, nowMs)
   );
 
+  if (isAttendanceExempt(employee)) {
+    return {
+      days,
+      totalWorkedSecs: 0,
+      totalBreakSecs: 0,
+      totalWorkedMinutes: 0,
+      totalWorkedHours: 0,
+      daysPresent: 0,
+      daysAbsent: 0,
+      expectedMinutes: 0,
+      utilizationPercent: 0,
+      isLive: false,
+    };
+  }
+
   let totalWorkedSecs = 0;
   let totalBreakSecs = 0;
   let daysPresent = 0;
@@ -3032,4 +3059,51 @@ export function isExecutiveOrLeadership(emp: any): boolean {
   if (!desig) return false;
   return EXEC_ACRONYMS.test(desig) || EXEC_TITLES.test(desig);
 }
+
+const HR_DESIGNATIONS = /\b(hr\s+(manager|executive|operations|director|lead|specialist|generalist|coordinator)|human\s+resources)\b/i;
+
+/**
+ * True when an employee is HR Administration / HR Operations.
+ * HR operates the HRMS portal (approvals, policies, employee directories, payroll),
+ * but is exempt from shift attendance rosters, check-in, and turnout graphs.
+ */
+export function isHrEmployee(emp: any): boolean {
+  if (!emp) return false;
+
+  // 1. Assigned auth role
+  const role = String(emp.role || '').toUpperCase();
+  if (role === 'HR_ADMIN' || role === 'HR') return true;
+
+  // 2. Exact HR emails
+  const email = String(emp.email || '').toLowerCase().trim();
+  if (email === 'hr@kalpanaaa.in' || email === 'abhinayav1919@kalpanaaa.in' || email.startsWith('hr@')) return true;
+
+  // 3. Department
+  const dept = String(emp.department || '').toLowerCase().trim();
+  if (dept === 'hr department' || dept === 'human resources' || dept === 'hr') return true;
+
+  // 4. Specific HR doc IDs
+  const id = String(emp.id || emp.employeeId || emp.uid || '').toLowerCase();
+  if (id === 'emp-hr' || id === 'emp-kss2407011') return true;
+
+  // 5. Full name
+  const name = String(emp.fullName || emp.name || '').toLowerCase().trim();
+  if (name === 'hr department' || name === 'hr operations manager') return true;
+
+  // 6. Designation
+  const desig = String(emp.designation || '').toLowerCase().trim();
+  if (desig && HR_DESIGNATIONS.test(desig)) return true;
+
+  return false;
+}
+
+/**
+ * True when an employee is exempt from operational attendance rosters,
+ * shift check-ins, turnout analytics, and attendance graphs.
+ * Covers Executive Officers (CEO/CTO/SuperAdmin) and HR Administration.
+ */
+export function isAttendanceExempt(emp: any): boolean {
+  return isExecutiveOrLeadership(emp) || isHrEmployee(emp);
+}
+
 

@@ -37,6 +37,7 @@ import {
 import { Project, LeaveRequest, Employee, AttendanceRecord } from '../../types';
 import { db, subscribeWithRecovery } from '../../lib/firebase';
 import { collection, setDoc, doc } from 'firebase/firestore';
+import { toast } from 'sonner';
 import {
   getEmployeeWorkDate,
   resolveAttendanceRecord,
@@ -51,6 +52,7 @@ import {
   SHIFT_TOTAL_MINUTES,
   WORK_WEEK_DAYS,
   isExecutiveOrLeadership,
+  isAttendanceExempt,
   getWorkDate,
   formatShiftTiming,
   isLateCheckIn,
@@ -120,9 +122,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // Filter operational workforce (excluding CEO, CTO, COO Rahul Pathak, Founders)
+  // Filter operational workforce (excluding Executives & HR Operations)
   const operationalEmployees = useMemo(() => {
-    return employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e));
+    return employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isAttendanceExempt(e));
   }, [employees]);
 
   const totalWorkforceCount = operationalEmployees.length;
@@ -550,6 +552,12 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
       targetReq?.startDate,
       targetReq?.endDate
     );
+
+    if (type === 'Approved') {
+      toast.success(`Recommended approval for ${targetReq?.employeeName || 'employee'}'s ${targetReq?.type || 'leave'} request.`);
+    } else {
+      toast.error(`Flagged conflict for ${targetReq?.employeeName || 'employee'}'s ${targetReq?.type || 'request'}. Marked as Rejected in Team Leave Approvals.`);
+    }
   };
 
   // Capacity week (decoupled from timer to prevent heavy heatmap recalculations)

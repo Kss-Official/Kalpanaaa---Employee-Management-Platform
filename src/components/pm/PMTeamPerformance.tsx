@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { isExecutiveOrLeadership, formatShiftTiming } from '../../lib/attendanceEngine';
+import { isExecutiveOrLeadership, isAttendanceExempt, formatShiftTiming } from '../../lib/attendanceEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, 
@@ -90,7 +90,7 @@ export const PMTeamPerformance: React.FC = () => {
   // the payroll ledger instead of quietly reporting a larger team.
   const validEmployees = useMemo(() => {
     return employees.filter(
-      e => e && e.fullName && e.fullName.trim().length > 0 && !isExecutiveOrLeadership(e)
+      e => e && e.fullName && e.fullName.trim().length > 0 && !isAttendanceExempt(e)
     );
   }, [employees]);
 

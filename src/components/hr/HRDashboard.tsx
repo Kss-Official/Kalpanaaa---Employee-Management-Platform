@@ -28,6 +28,8 @@ import {
   isShiftComplete, 
   resolveAttendanceRecord, 
   isExecutiveOrLeadership,
+  isAttendanceExempt,
+  isHrEmployee,
   buildPayrollAttendanceBasis,
   getCurrentPayrollCycleMonth,
   isWfhType,
@@ -76,9 +78,9 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
     targetEmployee?.employeeId === 'CEO001' ||
     targetEmployee?.employeeId === 'CTO001';
 
-  // Filter out Leadership/Executives (CEO, CTO, Founder, COO Rahul Pathak) from HR attendance metrics
+  // Filter out Leadership/Executives & HR Operations from HR attendance metrics
   const operationalEmployees = useMemo(() => {
-    return employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isExecutiveOrLeadership(e));
+    return employees.filter(e => e.status !== 'Terminated' && e.status !== 'Inactive' && !isAttendanceExempt(e));
   }, [employees]);
 
   // Map operational employees to their resolved today's attendance record (if any)
@@ -324,10 +326,10 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigateTab }) => {
 
         {/* Action Buttons matching screenshot media_1786517118960 */}
         <div className="flex flex-wrap items-center gap-3">
-          {isCeoOrCto ? (
+          {isCeoOrCto || isHrEmployee(targetEmployee) ? (
             <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-black shadow-sm">
               <ShieldCheck className="w-4 h-4 text-purple-400" />
-              <span>Executive Officer — Check-In Exempt</span>
+              <span>Operations & Admin — Check-In Exempt</span>
             </div>
           ) : !isHrCheckedIn ? (
             <button
