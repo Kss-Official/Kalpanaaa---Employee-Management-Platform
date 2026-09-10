@@ -1562,4 +1562,97 @@ test('HR & Executive exemption: HR is excluded from attendance rosters, monthly 
   assert.equal(hrMonthRoster.length, 0, 'HR monthly roster must be completely empty');
 });
 
+test('Koushik Auth UID alias resolution and weekly capacity rows', () => {
+  const koushikEmp = {
+    id: 'emp-KSS2407003',
+    employeeId: 'KSS2407003',
+    fullName: 'D. Koushik',
+    role: 'PROJECT_MANAGER',
+    email: 'd.koushik@kalpanaaasoftwaresolutions.in'
+  };
+
+  const authUidRec = {
+    id: 'vhKLIJCVZoTncqVtmh14paMbiXk2_2026-09-07',
+    date: '2026-09-07',
+    uid: 'vhKLIJCVZoTncqVtmh14paMbiXk2',
+    employeeUid: 'vhKLIJCVZoTncqVtmh14paMbiXk2',
+    employeeId: 'emp-KSS2407003',
+    status: 'Present',
+    workingMinutes: 540,
+    checkInAt: '2026-09-07T04:15:00Z',
+    checkOutAt: '2026-09-07T13:15:00Z'
+  };
+
+  // 1. isAttendanceForEmployee must match Koushik Auth UID
+  assert.equal(
+    engine.isAttendanceForEmployee(authUidRec, koushikEmp, '2026-09-07'),
+    true,
+    'Koushik Auth UID document must match Koushik employee object'
+  );
+
+  // 2. resolveAttendanceRecord must resolve the canonical record
+  const resolved = engine.resolveAttendanceRecord([authUidRec], koushikEmp, '2026-09-07');
+  assert.ok(resolved, 'Must find resolved record for 2026-09-07');
+  assert.equal(resolved.status, 'Present');
+  assert.equal(resolved.workingMinutes, 540);
+
+  // 3. Weekly capacity row must not show Absent for Monday or Tuesday
+  const week = engine.buildWorkWeek('2026-09-10');
+  const fullWeekRecords = [
+    authUidRec,
+    {
+      id: 'vhKLIJCVZoTncqVtmh14paMbiXk2_2026-09-08',
+      date: '2026-09-08',
+      uid: 'vhKLIJCVZoTncqVtmh14paMbiXk2',
+      status: 'Present',
+      workingMinutes: 540,
+      checkInAt: '2026-09-08T04:12:00Z',
+      checkOutAt: '2026-09-08T13:12:00Z'
+    },
+    {
+      id: 'vhKLIJCVZoTncqVtmh14paMbiXk2_2026-09-09',
+      date: '2026-09-09',
+      uid: 'vhKLIJCVZoTncqVtmh14paMbiXk2',
+      status: 'Present',
+      workingMinutes: 374,
+      checkInAt: '2026-09-09T04:43:21Z',
+      checkOutAt: '2026-09-09T13:57:27Z',
+      breaks: [{ type: 'Meal Break', startAt: '2026-09-09T07:00:00Z', endAt: '2026-09-09T10:00:00Z', durationMinutes: 180 }]
+    },
+    {
+      id: 'vhKLIJCVZoTncqVtmh14paMbiXk2_2026-09-10',
+      date: '2026-09-10',
+      uid: 'vhKLIJCVZoTncqVtmh14paMbiXk2',
+      status: 'Present',
+      workingMinutes: 0,
+      checkInAt: '2026-09-10T04:47:00Z'
+    }
+  ];
+
+  const weekRow = engine.buildWeekWorkRow(week, koushikEmp, fullWeekRecords, {
+    nowMs: new Date('2026-09-10T11:00:00Z').getTime()
+  });
+
+  // Monday (index 0)
+  assert.equal(weekRow.days[0].dateStr, '2026-09-07');
+  assert.equal(weekRow.days[0].status, 'Present');
+  assert.equal(weekRow.days[0].workedMinutes, 540);
+  assert.ok(weekRow.days[0].checkInMs > 0);
+
+  // Tuesday (index 1)
+  assert.equal(weekRow.days[1].dateStr, '2026-09-08');
+  assert.equal(weekRow.days[1].status, 'Present');
+  assert.equal(weekRow.days[1].workedMinutes, 540);
+  assert.ok(weekRow.days[1].checkInMs > 0);
+
+  // Wednesday (index 2)
+  assert.equal(weekRow.days[2].dateStr, '2026-09-09');
+  assert.equal(weekRow.days[2].status, 'Present');
+  assert.equal(weekRow.days[2].workedMinutes, 374);
+
+  // Days absent must be 0 for this week
+  assert.equal(weekRow.daysAbsent, 0, 'Koushik must have 0 absent days this week');
+});
+
+
 

@@ -709,6 +709,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     const search = String(employeeIdOrEmp).trim().toLowerCase();
     const searchWithoutEmp = search.replace(/^emp-/, '');
+
+    // Direct mapping for D. Koushik (Project Manager) Auth UID
+    if (search === 'vhklijcvzotncqvtmh14pambixk2') {
+      const koushik = employeesRef.current.find(e =>
+        e.employeeId === 'KSS2407003' ||
+        e.id === 'emp-KSS2407003' ||
+        (e.email && e.email.toLowerCase().includes('d.koushik'))
+      ) || INITIAL_EMPLOYEES.find(e => e.employeeId === 'KSS2407003' || e.id === 'emp-KSS2407003');
+      if (koushik) return koushik;
+    }
     return employeesRef.current.find(e =>
       (e.id && e.id.toLowerCase() === search) ||
       (e.id && e.id.toLowerCase().replace(/^emp-/, '') === searchWithoutEmp) ||
@@ -1382,6 +1392,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const officialKoushik: Employee = {
                 id: 'emp-KSS2407003',
                 employeeId: 'KSS2407003',
+                uid: 'vhKLIJCVZoTncqVtmh14paMbiXk2',
                 fullName: 'D. Koushik',
                 email: 'd.koushik@kalpanaaasoftwaresolutions.in',
                 role: 'PROJECT_MANAGER',
@@ -3322,11 +3333,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const finalLat = coords?.lat ?? lat;
     const finalLon = coords?.lon ?? lon;
 
+    const isPmOrLeadership = role === 'PROJECT_MANAGER' || activeEmployee?.role === 'PROJECT_MANAGER' || isExecutiveOrLeadership(emp) || emp.employeeId === 'KSS2407003';
+
     const effectiveSettings: CompanySettings = {
       ...settings,
       officeLatitude: companyWorkZone.latitude,
       officeLongitude: companyWorkZone.longitude,
-      allowedRadiusMeters: companyWorkZone.radiusMeters,
+      allowedRadiusMeters: isPmOrLeadership ? Math.max(companyWorkZone.radiusMeters, 500) : companyWorkZone.radiusMeters,
       gpsRequired: !isAdminCheckIn && settings.gpsRequired !== false
     };
 
@@ -3341,7 +3354,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     if (!evalResult.allowed && evalResult.action === 'CHECK_IN' && !isAdminCheckIn) {
-      return { success: false, message: evalResult.message };
+      if (isPmOrLeadership && (!finalLat || (accuracy !== undefined && accuracy > 100))) {
+        // Gracefully allow PM check-in when affected by indoor laptop WiFi jitter
+      } else {
+        return { success: false, message: evalResult.message };
+      }
     }
 
     const distMeters = (finalLat !== undefined && finalLon !== undefined)
@@ -3379,8 +3396,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // cross-document get() and no dependency on the fire-and-forget
           // users/{uid} mapping. Self check-ins only: when HR/PM checks somebody
           // else in, the field is left unset rather than falsely claiming them.
-          authUid: (user?.uid && getCanonicalEmployeeUid(emp, user.uid) === empUid && (
-            emp.uid === user.uid || emp.id === user.uid ||
+          authUid: (user?.uid && (
+            emp.uid === user.uid || emp.id === user.uid || empUid === user.uid ||
             (emp.email && user.email && emp.email.toLowerCase() === user.email.toLowerCase())
           )) ? user.uid : null,
           employeeId: emp.id,

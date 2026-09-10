@@ -64,6 +64,7 @@ import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
+import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
 
 interface PMDashboardProps {
   onNavigateTab: (tab: string) => void;
@@ -115,7 +116,7 @@ const DEFAULT_PROJECTS: Project[] = [
 ];
 
 export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
-  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings, companyWideWfhDates, applyAttendanceCorrection } = useAuth();
+  const { employees, leaveRequests, attendance, activeEmployee, updateLeaveRequestStage, startBreak, endBreak, isAuthenticated, settings, companyWideWfhDates, applyAttendanceCorrection, checkIn, checkOut, updateEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
 
   const todayStr = getWorkDate(new Date());
@@ -511,24 +512,86 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   // PM's own live attendance record
   const pmTodayRecord = resolveAttendanceRecord(attendance, activeEmployee, todayStr);
   const isPmCheckedIn = !!pmTodayRecord?.checkInAt && !isShiftComplete(pmTodayRecord);
+  const pmShiftCompleted = !!pmTodayRecord && isShiftComplete(pmTodayRecord);
   const activePmBreak = pmTodayRecord?.breaks?.find(b => !b.endAt && !(b as any).endTime);
   const [isBreakActionLoading, setIsBreakActionLoading] = useState(false);
+  const [isPmFaceModalOpen, setIsPmFaceModalOpen] = useState(false);
+  const [isPmCheckInLoading, setIsPmCheckInLoading] = useState(false);
+  const [isPmCheckOutLoading, setIsPmCheckOutLoading] = useState(false);
+
+  const handlePmSelfCheckIn = async () => {
+    if (!activeEmployee) return;
+    setIsPmCheckInLoading(true);
+    try {
+      let fix: { lat: number; lon: number; accuracy: number } | null = null;
+      if (navigator.geolocation) {
+        fix = await new Promise(resolve => {
+          navigator.geolocation.getCurrentPosition(
+            pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) || 10 }),
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }
+          );
+        });
+      }
+      const res = await checkIn(activeEmployee.id, fix?.lat, fix?.lon, fix?.accuracy, 'Facial Recognition');
+      if (res.success) {
+        toast.success(res.message || 'PM Duty Check-In recorded successfully! Shift active.');
+      } else {
+        toast.error(res.message || 'Check-In failed.');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Check-In failed.');
+    } finally {
+      setIsPmCheckInLoading(false);
+    }
+  };
+
+  const handlePmSelfCheckOut = async () => {
+    if (!activeEmployee) return;
+    if (!confirm('Are you sure you want to end your shift and check out for today?')) return;
+    setIsPmCheckOutLoading(true);
+    try {
+      let fix: { lat: number; lon: number; accuracy: number } | null = null;
+      if (navigator.geolocation) {
+        fix = await new Promise(resolve => {
+          navigator.geolocation.getCurrentPosition(
+            pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) || 10 }),
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }
+          );
+        });
+      }
+      const res = await checkOut(activeEmployee.id, fix?.lat, fix?.lon, fix?.accuracy);
+      if (res.success) {
+        toast.success(res.message || 'Shift completed! PM Check-Out recorded.');
+      } else {
+        toast.error(res.message || 'Check-Out failed.');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Check-Out failed.');
+    } finally {
+      setIsPmCheckOutLoading(false);
+    }
+  };
 
   const handlePmBreakToggle = async () => {
     if (!activeEmployee) return;
     if (!isPmCheckedIn) {
-      alert("You are not checked in yet today. Please check in first before taking a break.");
+      toast.error("You are not checked in yet today. Please check in first before taking a break.");
       return;
     }
     setIsBreakActionLoading(true);
     try {
       if (activePmBreak) {
         await endBreak(activeEmployee.id);
+        toast.success("Break ended. Resumed on duty!");
       } else {
         await startBreak(activeEmployee.id, 'Meal Break');
+        toast.success("Break started. Enjoy your break!");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Break action error:', e);
+      toast.error(e?.message || 'Failed to update break status.');
     } finally {
       setIsBreakActionLoading(false);
     }
@@ -732,7 +795,49 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {/* PM Self Check-In Button if not checked in */}
+          {!isPmCheckedIn && !pmShiftCompleted && (
+            <button
+              onClick={() => setIsPmFaceModalOpen(true)}
+              disabled={isPmCheckInLoading}
+              className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
+              title="Mark Attendance & Start Shift as Project Manager"
+            >
+              {isPmCheckInLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4 text-emerald-200" />}
+              <span>Check In (On Duty)</span>
+            </button>
+          )}
+
+          {/* PM Break Toggle */}
+          {isPmCheckedIn && (
+            <button
+              onClick={handlePmBreakToggle}
+              disabled={isBreakActionLoading}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md ${
+                activePmBreak 
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30' 
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+              }`}
+            >
+              {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Coffee className="w-3.5 h-3.5" />}
+              <span>{activePmBreak ? 'End My Break' : 'Take Break'}</span>
+            </button>
+          )}
+
+          {/* PM Self Check-Out */}
+          {isPmCheckedIn && (
+            <button
+              onClick={handlePmSelfCheckOut}
+              disabled={isPmCheckOutLoading}
+              className="px-3.5 py-2.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md"
+              title="Complete shift and record your check-out"
+            >
+              {isPmCheckOutLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5 text-rose-400" />}
+              <span>Check Out</span>
+            </button>
+          )}
+
           {/* Bulk Check-Out All Active Button */}
           <button
             onClick={() => {
@@ -746,22 +851,168 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
             <LogOut className="w-4 h-4" />
             <span>Check Out All ({activeCheckedInEmployees.length})</span>
           </button>
+        </div>
+      </div>
 
-          {/* PM Break Toggle */}
-          <button
-            onClick={handlePmBreakToggle}
-            disabled={isBreakActionLoading}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md ${
-              activePmBreak 
-                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30' 
-                : isPmCheckedIn 
-                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700' 
-                  : 'bg-slate-800/50 text-slate-500 border border-slate-800 cursor-not-allowed opacity-60'
-            }`}
-          >
-            {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Coffee className="w-3.5 h-3.5" />}
-            <span>{activePmBreak ? 'End My Break' : 'Take Break'}</span>
-          </button>
+      {/* ── PM PERSONAL DUTY & ATTENDANCE COMMAND CENTER ── */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-950 rounded-2xl p-4 sm:p-5 border border-slate-800/80 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        {/* Subtle decorative glow */}
+        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-16 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
+          {/* Left: PM Identity & Shift Timing */}
+          <div className="flex items-center gap-3.5">
+            <div className="relative">
+              <img
+                src={activeEmployee?.profilePhotoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(activeEmployee?.fullName || 'PM')}&background=0f172a&color=fff`}
+                alt={activeEmployee?.fullName || 'Project Manager'}
+                className="w-12 h-12 rounded-2xl object-cover border-2 border-slate-700/70 shadow-md"
+              />
+              <span className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${
+                activePmBreak
+                  ? 'bg-amber-400 animate-pulse'
+                  : isPmCheckedIn
+                    ? 'bg-emerald-400'
+                    : pmShiftCompleted
+                      ? 'bg-blue-400'
+                      : 'bg-slate-500'
+              }`} />
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-base font-black text-white">{activeEmployee?.fullName || 'D. Koushik'}</span>
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                  {activeEmployee?.designation || 'Project Manager'}
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-800/60 px-1.5 py-0.5 rounded border border-slate-700/50">
+                  {activeEmployee?.employeeId || 'KSS2407003'}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Standard Shift: <strong className="text-slate-300 font-semibold">{SHIFT_LABEL}</strong></span>
+                </span>
+                <span className="hidden sm:inline text-slate-600">•</span>
+                <span className="hidden sm:inline text-slate-400">
+                  Work Mode: <strong className="text-slate-300 font-semibold">{pmTodayRecord?.isWfh ? '🏠 Remote (WFH)' : '🏢 Office HQ'}</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Middle: Shift Live Metrics Badge */}
+          <div className="flex items-center gap-2 sm:gap-4 bg-slate-950/60 p-2.5 sm:px-4 sm:py-2 rounded-xl border border-slate-800/80 flex-wrap">
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Duty Status</div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {activePmBreak ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-400">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    On Break
+                  </span>
+                ) : isPmCheckedIn ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    On Duty (Active)
+                  </span>
+                ) : pmShiftCompleted ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-400">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Shift Completed
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-400">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500/80" />
+                    Not Checked In
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="h-7 w-[1px] bg-slate-800 hidden sm:block" />
+
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Check-In</div>
+              <div className="text-xs font-mono font-bold text-white mt-0.5">
+                {pmTodayRecord?.checkInAt ? toISTTimeString(pmTodayRecord.checkInAt) : '—'}
+              </div>
+            </div>
+
+            <div className="h-7 w-[1px] bg-slate-800 hidden sm:block" />
+
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Time Worked</div>
+              <div className="text-xs font-mono font-bold text-emerald-400 mt-0.5">
+                {isPmCheckedIn || pmShiftCompleted
+                  ? `${Math.floor((pmTodayRecord?.workingMinutes || 0) / 60)}h ${(pmTodayRecord?.workingMinutes || 0) % 60}m`
+                  : '0h 0m'}
+              </div>
+            </div>
+
+            {pmTodayRecord?.checkOutAt && (
+              <>
+                <div className="h-7 w-[1px] bg-slate-800 hidden sm:block" />
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Check-Out</div>
+                  <div className="text-xs font-mono font-bold text-slate-300 mt-0.5">
+                    {toISTTimeString(pmTodayRecord.checkOutAt)}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Right: Quick Action Buttons */}
+          <div className="flex items-center gap-2">
+            {!isPmCheckedIn && !pmShiftCompleted && (
+              <button
+                onClick={() => setIsPmFaceModalOpen(true)}
+                disabled={isPmCheckInLoading}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
+                title="Mark Attendance & Start Shift with Face Recognition"
+              >
+                {isPmCheckInLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 text-emerald-200" />}
+                <span>Check In (Start Shift)</span>
+              </button>
+            )}
+
+            {isPmCheckedIn && (
+              <>
+                <button
+                  onClick={handlePmBreakToggle}
+                  disabled={isBreakActionLoading}
+                  className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md ${
+                    activePmBreak
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                  }`}
+                >
+                  {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Coffee className="w-3.5 h-3.5" />}
+                  <span>{activePmBreak ? 'End Break' : 'Take Break'}</span>
+                </button>
+
+                <button
+                  onClick={handlePmSelfCheckOut}
+                  disabled={isPmCheckOutLoading}
+                  className="px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md"
+                  title="End duty and record check-out"
+                >
+                  {isPmCheckOutLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5 text-rose-400" />}
+                  <span>Check Out</span>
+                </button>
+              </>
+            )}
+
+            {pmShiftCompleted && (
+              <div className="px-3 py-1.5 bg-blue-500/10 text-blue-300 border border-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                <CheckCheck className="w-4 h-4 text-blue-400" />
+                <span>Today's Shift Done</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1025,7 +1276,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
                   {cells.map(cell => (
                     <td key={cell.dateStr} className="py-2.5 px-2 text-center">
-                      <div className={`p-1.5 rounded-xl border text-[10px] font-mono ${cell.cellColor}`}>
+                      <div className={`p-1.5 rounded-xl border text-[10px] font-mono whitespace-nowrap min-w-[70px] shadow-sm ${cell.cellColor}`}>
                         {cell.displayText}
                       </div>
                     </td>
@@ -1785,6 +2036,31 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Biometric Face Verification Modal for PM Check-In */}
+      {activeEmployee && (
+        <FaceCaptureModal
+          isOpen={isPmFaceModalOpen}
+          onClose={() => setIsPmFaceModalOpen(false)}
+          onSuccess={() => {
+            setIsPmFaceModalOpen(false);
+            handlePmSelfCheckIn();
+          }}
+          onEnrollSuccess={(descriptorArray) => {
+            if (updateEmployee && activeEmployee) {
+              updateEmployee(activeEmployee.id, {
+                isFaceEnrolled: true,
+                faceEnrolledAt: new Date().toISOString(),
+                faceDescriptor: descriptorArray
+              });
+            }
+          }}
+          employeeName={activeEmployee.fullName}
+          employeeId={activeEmployee.id}
+          profilePhotoUrl={activeEmployee.profilePhotoUrl}
+          cloudDescriptor={activeEmployee.faceDescriptor}
+        />
       )}
 
     </div>

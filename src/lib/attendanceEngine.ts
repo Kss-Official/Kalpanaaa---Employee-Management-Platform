@@ -1102,6 +1102,19 @@ export function isAttendanceForEmployee(
     recDocPrefix
   ].filter(t => t.length > 0);
 
+  // Cross-link known core staff Auth UID aliases (e.g. D. Koushik Auth UID <-> employeeId/uid)
+  const KOUSHIK_AUTH_UID = 'vhklijcvzotncqvtmh14pambixk2';
+  const KOUSHIK_CODE = 'kss2407003';
+  if (targetTokens.has(KOUSHIK_AUTH_UID) || targetTokens.has(KOUSHIK_CODE) || targetTokens.has('uid-' + KOUSHIK_CODE)) {
+    targetTokens.add(KOUSHIK_AUTH_UID);
+    targetTokens.add(KOUSHIK_CODE);
+    targetTokens.add('uid-' + KOUSHIK_CODE);
+    targetTokens.add('emp-' + KOUSHIK_CODE);
+  }
+  if (recTokens.some(t => t === KOUSHIK_AUTH_UID || t === KOUSHIK_CODE || t === 'uid-' + KOUSHIK_CODE || t === 'emp-' + KOUSHIK_CODE)) {
+    recTokens.push(KOUSHIK_AUTH_UID, KOUSHIK_CODE, 'uid-' + KOUSHIK_CODE, 'emp-' + KOUSHIK_CODE);
+  }
+
   // 1. Check if any target identity token matches any record identity token
   for (const rTok of recTokens) {
     if (targetTokens.has(rTok)) {

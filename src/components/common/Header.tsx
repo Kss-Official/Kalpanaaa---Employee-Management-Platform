@@ -7,7 +7,8 @@ import {
   ChevronDown,
   Menu,
   X,
-  Download
+  Download,
+  UserCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserRole } from '../../types';
@@ -195,6 +196,18 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           <span>Live Sync Active</span>
         </div>
+
+        {/* Quick Check-In Button for Current User */}
+        {activeEmployee && !myTodayRecord?.checkInAt && (
+          <button
+            onClick={() => setIsHeaderFaceModalOpen(true)}
+            className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-[11px] font-bold text-white shadow-md cursor-pointer transition-all hover:scale-105"
+            title="Biometric Face / GPS Check-In"
+          >
+            <UserCheck className="w-3.5 h-3.5 text-emerald-200" />
+            <span>Check In</span>
+          </button>
+        )}
 
         {/* Notification Bell — visible for all authenticated roles */}
         <NotificationBell />
