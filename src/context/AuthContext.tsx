@@ -1278,7 +1278,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
-              // LIVE AUTOCORRECT PROJECT MANAGER D. KOUSHIK (IT Department, Project Management specialization, remove Technical Leadership)
+              // LIVE AUTOCORRECT PROJECT MANAGER D. KOUSHIK (IT Department, Project Management specialization, joiningDate: 2026-07-27)
               const isProjectManager =
                 data.role === 'PROJECT_MANAGER' ||
                 data.employeeId === 'KSS2407003' ||
@@ -1286,6 +1286,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 (data.fullName && data.fullName.toLowerCase().includes('koushik'));
               if (isProjectManager) {
                 let pmChanged = false;
+                if (!data.joiningDate || data.joiningDate > '2026-07-27') {
+                  data.joiningDate = '2026-07-27';
+                  pmChanged = true;
+                }
                 if (data.department !== 'IT') {
                   data.department = 'IT';
                   pmChanged = true;
@@ -1306,6 +1310,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
                 if (pmChanged && canMigrate) {
                   setDoc(doc(db, 'employees', data.id), {
+                    joiningDate: '2026-07-27',
                     department: 'IT',
                     designation: 'Project Manager',
                     skills: ['Project Management'],
@@ -1507,8 +1512,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const isJasonEmp = (canonicalUid === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || employeeCode === 'KSS2407011' || (employeeName && employeeName.toLowerCase().includes('jason'))) && employeeCode !== 'KSS2407014';
               const empJoinDate = matchedEmp?.joiningDate || (isJasonEmp ? '2026-08-17' : undefined);
 
-              if (dateStr < COMPANY_START_DATE || (empJoinDate && dateStr < empJoinDate)) {
-                // Root-level auto-cleanup of pre-inception / pre-joining attendance records
+              const hasActualWork = !!data.checkInAt || !!data.checkOutAt || (typeof data.workingMinutes === 'number' && data.workingMinutes > 0) || data.status === 'Present' || data.status === 'Late';
+
+              if (dateStr < COMPANY_START_DATE) {
+                // Root-level auto-cleanup of pre-inception attendance records
+                deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
+                return;
+              }
+
+              if (!hasActualWork && empJoinDate && dateStr < empJoinDate) {
+                // Auto-cleanup synthetic/blank days before an employee's joining date
                 deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
                 return;
               }

@@ -1516,3 +1516,50 @@ test('per-employee joining date: days before employee joiningDate are unmarked a
   }
 });
 
+test('HR & Executive exemption: HR is excluded from attendance rosters, monthly rolls, and shift check-ins', () => {
+  const hrAdmin = {
+    id: 'emp-hr',
+    employeeId: '',
+    fullName: 'HR Department',
+    email: 'hr@kalpanaaa.in',
+    role: 'HR_ADMIN',
+    designation: 'HR Operations Manager',
+    department: 'HR Department',
+    status: 'Active'
+  };
+
+  const devStaff = {
+    id: 'emp-kss2407004',
+    employeeId: 'KSS2407004',
+    fullName: 'D. Koushik',
+    email: 'koushik@kalpanaaa.in',
+    role: 'EMPLOYEE',
+    designation: 'Software Engineer',
+    department: 'IT',
+    status: 'Active',
+    joiningDate: '2026-08-24'
+  };
+
+  assert.equal(engine.isHrEmployee(hrAdmin), true, 'HR Admin should be recognized by isHrEmployee');
+  assert.equal(engine.isHrEmployee(devStaff), false, 'Software engineer must not be isHrEmployee');
+
+  assert.equal(engine.isAttendanceExempt(hrAdmin), true, 'HR Admin must be attendance exempt');
+  assert.equal(engine.isAttendanceExempt(devStaff), false, 'Software engineer must not be attendance exempt');
+
+  // Check-in eligibility
+  const hrEligibility = engine.validateCheckInEligibility(hrAdmin, '2026-09-08');
+  assert.equal(hrEligibility.allowed, false);
+  assert.equal(hrEligibility.reason, 'EXEMPT');
+
+  // Daily roster
+  const staffList = [hrAdmin, devStaff];
+  const dailyRoster = engine.buildDailyRoster(staffList, [], '2026-09-08');
+  assert.equal(dailyRoster.some(r => r.employeeId === 'emp-hr'), false, 'HR must never appear in daily attendance roster');
+  assert.equal(dailyRoster.some(r => r.employeeId === 'emp-kss2407004'), true, 'Dev employee must appear in daily attendance roster');
+
+  // Monthly roster
+  const hrMonthRoster = engine.buildEmployeeMonthRoster(hrAdmin, [], '2026-09');
+  assert.equal(hrMonthRoster.length, 0, 'HR monthly roster must be completely empty');
+});
+
+

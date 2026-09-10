@@ -2752,6 +2752,11 @@ export function buildWeekWorkRow(
     const isNonWorking = meta.isNonWorking ||
       (Array.isArray(opts.holidayDates) && opts.holidayDates.includes(meta.dateStr));
     if (meta.isFuture || isNonWorking) return;
+
+    // Pre-joining check: unworked days before joiningDate are not absences
+    const joinDate = employee?.joiningDate || employee?.joining_date;
+    if (joinDate && meta.dateStr < joinDate && !s.checkInMs) return;
+
     // Filtered: an unfiltered call also matches an approved WFH request, which
     // would drop a remote working day out of `expectedMinutes` and hide the
     // absence of someone who was approved to work from home but never did.
