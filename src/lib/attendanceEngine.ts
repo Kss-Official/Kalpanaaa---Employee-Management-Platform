@@ -3067,7 +3067,9 @@ export function isExecutiveOrLeadership(emp: any): boolean {
   if (!emp) return false;
 
   // 1. Structured field — authoritative when present.
-  if (emp.executiveRole === 'CEO' || emp.executiveRole === 'CTO') return true;
+  // Covers all C-suite and MD roles stored in the executiveRole field.
+  const execRole = String(emp.executiveRole || '').toUpperCase();
+  if (/^(CEO|CTO|COO|CFO|CIO|MD)$/.test(execRole)) return true;
 
   // 2. Assigned auth role.
   if (String(emp.role || '').toUpperCase() === 'SUPER_ADMIN') return true;
