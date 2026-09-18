@@ -1111,6 +1111,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let didSeedWorkZone = false;
     let didMigrateWorkZone = false;
 
+    // ── COST FIX: per-session migration latch sets ────────────────────────────
+    // Each set tracks which employee doc IDs have already been corrected this
+    // session so live-autocorrect setDoc() calls only fire ONCE per doc, not
+    // on every snapshot from every connected client.
+    const migratedEmployeeIds = new Set<string>();
+    // Tracks attendance + employee doc IDs that were already delete-dispatched
+    // this session so the deleteDoc() inside snapshot handlers cannot re-fire
+    // on every subsequent snapshot (previously retried on every onSnapshot).
+    const deletedAttendanceIds = new Set<string>();
+    const deletedEmployeeIds = new Set<string>();
+
     const initFirestore = () => {
       try {
         testConnection().then(connected => setIsFirestoreConnected(connected)).catch(() => {
@@ -1148,7 +1159,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 data.fullName.toLowerCase().includes('abhinaya') ||
                 (data.email && data.email.toLowerCase().includes('abhinaya'))
               ) {
-                if (canMigrate) deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                // COST FIX M2: latch prevents re-firing deleteDoc on every snapshot
+                if (canMigrate && !deletedEmployeeIds.has(data.id)) {
+                  deletedEmployeeIds.add(data.id);
+                  deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                }
                 return;
               }
 
@@ -1157,7 +1172,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 (data.id === 'emp-003' || data.employeeId === '003') &&
                 data.email?.toLowerCase() === 'd.koushik@kalpanaaa.in'
               ) {
-                if (canMigrate) deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                // COST FIX M2: latch prevents re-firing deleteDoc on every snapshot
+                if (canMigrate && !deletedEmployeeIds.has(data.id)) {
+                  deletedEmployeeIds.add(data.id);
+                  deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                }
                 return;
               }
 
@@ -1194,7 +1213,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 if (cleanId !== data.employeeId) {
                   data.employeeId = cleanId;
-                  if (canMigrate) {
+                  // COST FIX C3: latch — write at most once per doc per session
+                  if (canMigrate && !migratedEmployeeIds.has(`empId-${data.id}`)) {
+                    migratedEmployeeIds.add(`empId-${data.id}`);
                     setDoc(doc(db, 'employees', data.id), { employeeId: cleanId }, { merge: true }).catch(() => { });
                   }
                 }
@@ -1204,12 +1225,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const validStatuses: EmployeeStatus[] = ['Active', 'On Leave', 'Inactive', 'Suspended', 'Terminated'];
               if (String(data.status).toLowerCase() === 'terminated') {
                 data.status = 'Inactive';
-                if (canMigrate) {
+                // COST FIX C3: latch
+                if (canMigrate && !migratedEmployeeIds.has(`status-${data.id}`)) {
+                  migratedEmployeeIds.add(`status-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), { status: 'Inactive' }, { merge: true }).catch(() => { });
                 }
               } else if (!data.status || !validStatuses.includes(data.status as EmployeeStatus) || String(data.status).toLowerCase() === 'check' || String(data.status).toLowerCase() === 'checked in') {
                 data.status = 'Active';
-                if (canMigrate) {
+                // COST FIX C3: latch
+                if (canMigrate && !migratedEmployeeIds.has(`status-${data.id}`)) {
+                  migratedEmployeeIds.add(`status-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), { status: 'Active' }, { merge: true }).catch(() => { });
                 }
               }
@@ -1225,7 +1250,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   const cleaned = data.approvedWfhDates.filter(d => !accidentalRange.includes(d));
                   if (cleaned.length !== data.approvedWfhDates.length) {
                     data.approvedWfhDates = cleaned;
-                    if (canMigrate) {
+                    // COST FIX C3: latch
+                    if (canMigrate && !migratedEmployeeIds.has(`wfh-${data.id}`)) {
+                      migratedEmployeeIds.add(`wfh-${data.id}`);
                       setDoc(doc(db, 'employees', data.id), { approvedWfhDates: cleaned }, { merge: true }).catch(() => { });
                     }
                   }
@@ -1250,7 +1277,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   data.specialization = 'Generative AI';
                   jChanged = true;
                 }
-                if (jChanged && canMigrate) {
+                // COST FIX C3: latch
+                if (jChanged && canMigrate && !migratedEmployeeIds.has(`jig-${data.id}`)) {
+                  migratedEmployeeIds.add(`jig-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), {
                     designation: 'AI/ML Developer',
                     skills: ['Generative AI'],
@@ -1280,7 +1309,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   data.specialization = 'Technical Leadership';
                   tlChanged = true;
                 }
-                if (tlChanged && canMigrate) {
+                // COST FIX C3: latch
+                if (tlChanged && canMigrate && !migratedEmployeeIds.has(`tl-${data.id}`)) {
+                  migratedEmployeeIds.add(`tl-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), {
                     skills: ['Technical Leadership'],
                     specialization: 'Technical Leadership'
@@ -1318,7 +1349,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   data.specialization = 'Project Management';
                   pmChanged = true;
                 }
-                if (pmChanged && canMigrate) {
+                // COST FIX C3: latch
+                if (pmChanged && canMigrate && !migratedEmployeeIds.has(`pm-${data.id}`)) {
+                  migratedEmployeeIds.add(`pm-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), {
                     joiningDate: '2026-07-27',
                     department: 'IT',
@@ -1342,7 +1375,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ) {
                 data.reportingManager = 'D. Koushik';
                 data.reportingManagerUid = 'uid-KSS2407003';
-                if (canMigrate) {
+                // COST FIX C3: latch
+                if (canMigrate && !migratedEmployeeIds.has(`rm-${data.id}`)) {
+                  migratedEmployeeIds.add(`rm-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), {
                     reportingManager: 'D. Koushik',
                     reportingManagerUid: 'uid-KSS2407003'
@@ -1484,8 +1519,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           handleFirestoreError(error, OperationType.LIST, 'employees');
         });
 
-        // Subscribe to attendance records (Single Source of Truth: Firestore only)
-        const attQuery = collection(db, 'attendance');
+        // ── COST FIX C1: Scope attendance listener to last 60 days ──────────
+        // The full collection scan (all-time) read 1,500+ docs per client per
+        // session. Historical records are static — no reason to stream them
+        // live. Reports load older records on-demand via getDocs + date filter.
+        const attCutoff = new Date();
+        attCutoff.setDate(attCutoff.getDate() - 60);
+        const attCutoffDate = attCutoff.toISOString().split('T')[0]; // YYYY-MM-DD
+        const attQuery = query(
+          collection(db, 'attendance'),
+          where('date', '>=', attCutoffDate)
+        );
 
         unsubAtt = onSnapshot(attQuery, (snapshot) => {
           const fetched: AttendanceRecord[] = [];
@@ -1526,14 +1570,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const hasActualWork = !!data.checkInAt || !!data.checkOutAt || (typeof data.workingMinutes === 'number' && data.workingMinutes > 0) || data.status === 'Present' || data.status === 'Late';
 
               if (dateStr < COMPANY_START_DATE) {
-                // Root-level auto-cleanup of pre-inception attendance records
-                deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
+                // COST FIX M1: latch prevents re-firing deleteDoc on every snapshot
+                if (!deletedAttendanceIds.has(recId)) {
+                  deletedAttendanceIds.add(recId);
+                  deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
+                }
                 return;
               }
 
               if (!hasActualWork && empJoinDate && dateStr < empJoinDate) {
-                // Auto-cleanup synthetic/blank days before an employee's joining date
-                deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
+                // COST FIX M1: latch prevents re-firing deleteDoc on every snapshot
+                if (!deletedAttendanceIds.has(recId)) {
+                  deletedAttendanceIds.add(recId);
+                  deleteDoc(doc(db, 'attendance', recId)).catch(() => {});
+                }
                 return;
               }
               let checkInISO = formatTimestampToISO(data.checkInAt);
@@ -2522,18 +2572,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     // Firebase notifications for major events
+    // ── COST FIX C5/C6: Only write to the Firestore 'notifications' collection
+    // for high-value administrative events. Routine attendance events
+    // (check-in, check-out, breaks, login/logout) are already synthesized
+    // in-memory via `combinedNotifications` and displayed in the bell — writing
+    // them to Firestore just re-fires the onSnapshot listener on every client
+    // AND triggers the Cloud Function (which does a full fcmTokens read each time).
+    // Keeping only EMPLOYEE_CREATED/DELETED and PAYROLL_RUN cuts ~90% of
+    // notification writes without losing any UI visibility.
     const notificationMap: Record<string, { title: string }> = {
-      'EMPLOYEE_CREATED':        { title: '👤 New Employee Added' },
-      'EMPLOYEE_DELETED':        { title: '🗑️ Employee Removed' },
-      'USER_LOGIN':              { title: '🔐 Employee Login' },
-      'USER_LOGOUT':             { title: '🚪 Employee Logout' },
-      'ATTENDANCE_CHECKIN':      { title: '🟢 Check-In Recorded' },
-      'ATTENDANCE_CHECKOUT':     { title: '🔴 Check-Out Recorded' },
-      'ATTENDANCE_BREAK_START':  { title: '🟡 Break Started' },
-      'ATTENDANCE_BREAK_END':    { title: '🟡 Break Ended' },
-      'LEAVE_APPROVED':          { title: '✅ Leave Approved' },
-      'LEAVE_REJECTED':          { title: '❌ Leave Rejected' },
-      'PAYROLL_RUN':             { title: '💰 Payroll Run' },
+      'EMPLOYEE_CREATED': { title: '👤 New Employee Added' },
+      'EMPLOYEE_DELETED': { title: '🗑️ Employee Removed' },
+      'PAYROLL_RUN':      { title: '💰 Payroll Run' },
+      // ATTENDANCE_CHECKIN, ATTENDANCE_CHECKOUT, ATTENDANCE_BREAK_START/END,
+      // USER_LOGIN, USER_LOGOUT — intentionally omitted; served from in-memory feed.
     };
     const notifConfig = notificationMap[action];
     if (notifConfig) {

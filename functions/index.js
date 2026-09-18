@@ -14,6 +14,27 @@ const db = getFirestore();
 
 const BATCH_SIZE = 500;
 
+// ── COST FIX C4: Cache fcmTokens for 5 minutes ──────────────────────────────
+// Without caching, every notification document write (including the 2 daily
+// scheduler reminders and every admin broadcast) triggered a full
+// db.collection('fcmTokens').get() — a complete collection read each time.
+// Cloud Function instances are kept warm for ~15 min after last invocation,
+// so this cache is effective across bursts of rapid notifications.
+let _tokenCacheData = null;
+let _tokenCacheAt = 0;
+const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getCachedFcmTokens() {
+  if (_tokenCacheData && Date.now() - _tokenCacheAt < TOKEN_CACHE_TTL_MS) {
+    return _tokenCacheData;
+  }
+  const snap = await db.collection('fcmTokens').get();
+  _tokenCacheData = snap;
+  _tokenCacheAt = Date.now();
+  return snap;
+}
+
+
 exports.sendFcmPushOnNotification = onDocumentCreated(
   'notifications/{notificationId}',
   async (event) => {
@@ -32,8 +53,9 @@ exports.sendFcmPushOnNotification = onDocumentCreated(
         : ['SUPER_ADMIN'];
 
     try {
-      // Fetch all tokens and match against audience (supports 'ALL', specific roles, and individual employeeIds)
-      const allTokensSnap = await db.collection('fcmTokens').get();
+      // COST FIX C4: use cached token read (5-min TTL) instead of a fresh
+      // full collection scan on every notification write.
+      const allTokensSnap = await getCachedFcmTokens();
       const uniqueTokens = [];
       const seen = new Set();
 
