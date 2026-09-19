@@ -181,22 +181,27 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
     actionTimerRef.current = setTimeout(() => {
       onSuccess();
       onClose();
-    }, 1200);
+    }, 450);
   };
 
-  // Live Detection Loop using real @vladmandic/face-api
+  // Ultra-Fast Non-Overlapping Live Detection Loop
   useEffect(() => {
     if (!isOpen || !videoRef.current || (statusStep !== 'CENTER_FACE' && statusStep !== 'SCANNING')) return;
 
     let active = true;
-    let scanCount = 0;
+    let isScanning = false;
+    let timerId: any = null;
 
-    const interval = setInterval(async () => {
+    const runScanLoop = async () => {
       if (!active || !videoRef.current) return;
+      if (isScanning) {
+        timerId = setTimeout(runScanLoop, 50);
+        return;
+      }
 
+      isScanning = true;
       try {
         const scan = await detectSingleFaceDescriptor(videoRef.current);
-
         if (!active) return;
 
         // Render live 68-point facial landmarks mesh on canvas overlay
@@ -205,65 +210,57 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
         }
 
         if (scan.detected && scan.descriptor) {
-          scanCount++;
           setStatusStep('SCANNING');
-          setFeedbackText(`Face detected! Processing facial landmarks... (${scanCount}/2)`);
+          setFeedbackText('Face detected! Verifying biometrics...');
 
-          if (scanCount >= 2) {
-            // Mode A: Explicit Enrollment Mode — user deliberately clicked "Register Face"
-            if (currentModeIsEnroll) {
-              active = false;
-              clearInterval(interval);
-              handlePerformEnrollment(scan.descriptor);
-              return;
-            }
+          // Mode A: Explicit Enrollment Mode
+          if (currentModeIsEnroll) {
+            active = false;
+            handlePerformEnrollment(scan.descriptor);
+            return;
+          }
 
-            // Mode B: Not enrolled + NOT in enrollment mode → hard block, no silent auto-enroll
-            // SECURITY FIX: Previously, !isEnrolled triggered silent enrollment of any face. Removed.
-            if (!isEnrolled) {
-              active = false;
-              clearInterval(interval);
-              setStatusStep('NOT_ENROLLED');
-              setFeedbackText('No biometric face template registered for this account. Please register your face first.');
-              triggerHaptic('error');
-              return;
-            }
+          // Mode B: Not enrolled + NOT in enrollment mode
+          if (!isEnrolled) {
+            active = false;
+            setStatusStep('NOT_ENROLLED');
+            setFeedbackText('No biometric face template registered for this account. Please register your face first.');
+            triggerHaptic('error');
+            return;
+          }
 
-            // Mode C: Strict Verification — must match enrolled descriptor
-            const match = verifyFaceAgainstEnrolled(scan.descriptor, employeeId, profileDescriptor, cloudDescriptor);
+          // Mode C: Strict Verification — must match enrolled descriptor
+          const match = verifyFaceAgainstEnrolled(scan.descriptor, employeeId, profileDescriptor, cloudDescriptor);
 
-            // SECURITY FIX: Removed `|| !match.enrolled` bypass — unenrolled is NOT a pass condition.
-            if (match.isMatch) {
-              const conf = match.confidencePercent;
-              setConfidencePercent(conf);
-              setStatusStep('VERIFIED');
-              setFeedbackText(
-                match.matchedAgainstProfilePhoto
-                  ? `✓ Matched Against Profile Picture (${conf}% Confidence)`
-                  : `✓ Biometric Match Verified (${conf}% Confidence)`
-              );
-              triggerHaptic('success');
-              active = false;
-              clearInterval(interval);
+          if (match.isMatch) {
+            const conf = match.confidencePercent;
+            setConfidencePercent(conf);
+            setStatusStep('VERIFIED');
+            setFeedbackText(
+              match.matchedAgainstProfilePhoto
+                ? `✓ Matched Against Profile Picture (${conf}% Confidence)`
+                : `✓ Biometric Match Verified (${conf}% Confidence)`
+            );
+            triggerHaptic('success');
+            active = false;
 
-              if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
-              actionTimerRef.current = setTimeout(() => {
-                onSuccess();
-                onClose();
-              }, 1200);
-            } else {
-              // Hard mismatch — no bypass, employee must retry with their own face
-              setStatusStep('FAILED');
-              setConfidencePercent(match.confidencePercent);
-              setFeedbackText(`❌ Biometric Mismatch (${match.confidencePercent}% Confidence). Face does not match registered profile!`);
-              triggerHaptic('error');
-              active = false;
-              clearInterval(interval);
-            }
+            if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+            actionTimerRef.current = setTimeout(() => {
+              onSuccess();
+              onClose();
+            }, 450);
+            return;
+          } else {
+            // Hard mismatch
+            setStatusStep('FAILED');
+            setConfidencePercent(match.confidencePercent);
+            setFeedbackText(`❌ Biometric Mismatch (${match.confidencePercent}% Confidence). Face does not match registered profile!`);
+            triggerHaptic('error');
+            active = false;
+            return;
           }
         } else {
           if (statusStep === 'SCANNING') {
-            scanCount = 0;
             setStatusStep('CENTER_FACE');
             setFeedbackText('Position your face clearly inside the frame...');
             setConfidencePercent(null);
@@ -271,12 +268,19 @@ export const FaceCaptureModal: React.FC<FaceCaptureModalProps> = ({
         }
       } catch (err) {
         console.warn('[FaceCaptureModal] Scan frame error:', err);
+      } finally {
+        isScanning = false;
+        if (active) {
+          timerId = setTimeout(runScanLoop, 100);
+        }
       }
-    }, 350);
+    };
+
+    timerId = setTimeout(runScanLoop, 80);
 
     return () => {
       active = false;
-      clearInterval(interval);
+      if (timerId) clearTimeout(timerId);
     };
   }, [isOpen, statusStep, employeeId, currentModeIsEnroll, isEnrolled, profileDescriptor, cloudDescriptor]);
 

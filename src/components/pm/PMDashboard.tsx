@@ -32,7 +32,8 @@ import {
   LogOut,
   CheckCheck,
   SlidersHorizontal,
-  ShieldCheck
+  ShieldCheck,
+  StopCircle
 } from 'lucide-react';
 import { Project, LeaveRequest, Employee, AttendanceRecord } from '../../types';
 import { db, subscribeWithRecovery } from '../../lib/firebase';
@@ -574,21 +575,33 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
     }
   };
 
-  const handlePmBreakToggle = async () => {
+  const [showPmBreakPicker, setShowPmBreakPicker] = useState(false);
+
+  const handlePmStartBreak = async (breakType: string) => {
     if (!activeEmployee) return;
     if (!isPmCheckedIn) {
       toast.error("You are not checked in yet today. Please check in first before taking a break.");
       return;
     }
     setIsBreakActionLoading(true);
+    setShowPmBreakPicker(false);
     try {
-      if (activePmBreak) {
-        await endBreak(activeEmployee.id);
-        toast.success("Break ended. Resumed on duty!");
-      } else {
-        await startBreak(activeEmployee.id, 'Meal Break');
-        toast.success("Break started. Enjoy your break!");
-      }
+      await startBreak(activeEmployee.id, breakType);
+      toast.success(`${breakType} started. Remember to clear break when you return!`);
+    } catch (e: any) {
+      console.error('Break action error:', e);
+      toast.error(e?.message || 'Failed to update break status.');
+    } finally {
+      setIsBreakActionLoading(false);
+    }
+  };
+
+  const handlePmEndBreak = async () => {
+    if (!activeEmployee) return;
+    setIsBreakActionLoading(true);
+    try {
+      await endBreak(activeEmployee.id);
+      toast.success("Break cleared! Resumed on duty.");
     } catch (e: any) {
       console.error('Break action error:', e);
       toast.error(e?.message || 'Failed to update break status.');
@@ -796,48 +809,6 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* PM Self Check-In Button if not checked in */}
-          {!isPmCheckedIn && !pmShiftCompleted && (
-            <button
-              onClick={() => setIsPmFaceModalOpen(true)}
-              disabled={isPmCheckInLoading}
-              className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
-              title="Mark Attendance & Start Shift as Project Manager"
-            >
-              {isPmCheckInLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4 text-emerald-200" />}
-              <span>Check In (On Duty)</span>
-            </button>
-          )}
-
-          {/* PM Break Toggle */}
-          {isPmCheckedIn && (
-            <button
-              onClick={handlePmBreakToggle}
-              disabled={isBreakActionLoading}
-              className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md ${
-                activePmBreak 
-                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30' 
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-              }`}
-            >
-              {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Coffee className="w-3.5 h-3.5" />}
-              <span>{activePmBreak ? 'End My Break' : 'Take Break'}</span>
-            </button>
-          )}
-
-          {/* PM Self Check-Out */}
-          {isPmCheckedIn && (
-            <button
-              onClick={handlePmSelfCheckOut}
-              disabled={isPmCheckOutLoading}
-              className="px-3.5 py-2.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-bold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-md"
-              title="Complete shift and record your check-out"
-            >
-              {isPmCheckOutLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5 text-rose-400" />}
-              <span>Check Out</span>
-            </button>
-          )}
-
           {/* Bulk Check-Out All Active Button */}
           <button
             onClick={() => {
@@ -981,18 +952,76 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
 
             {isPmCheckedIn && (
               <>
-                <button
-                  onClick={handlePmBreakToggle}
-                  disabled={isBreakActionLoading}
-                  className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md ${
-                    activePmBreak
-                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                  }`}
-                >
-                  {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Coffee className="w-3.5 h-3.5" />}
-                  <span>{activePmBreak ? 'End Break' : 'Take Break'}</span>
-                </button>
+                {activePmBreak ? (
+                  <button
+                    onClick={handlePmEndBreak}
+                    disabled={isBreakActionLoading}
+                    className="px-3.5 py-2 rounded-xl font-black text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30 animate-pulse"
+                    title="Clear current active break and return to on-duty work"
+                  >
+                    {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" /> : <StopCircle className="w-3.5 h-3.5 text-slate-950" />}
+                    <span>Clear Break ({activePmBreak.type})</span>
+                  </button>
+                ) : (
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowPmBreakPicker(!showPmBreakPicker)}
+                      disabled={isBreakActionLoading}
+                      className="px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                    >
+                      {isBreakActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Coffee className="w-3.5 h-3.5 text-amber-400" />}
+                      <span>Take Break ▾</span>
+                    </button>
+
+                    {showPmBreakPicker && (
+                      <div className="absolute right-0 top-full mt-2 w-52 bg-slate-900 border border-slate-800 rounded-2xl p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 space-y-1">
+                        <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1">Select Break Type</div>
+                        <button
+                          onClick={() => handlePmStartBreak('Lunch Break')}
+                          className="w-full text-left px-2.5 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/15 rounded-xl flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <span>🍽️</span>
+                          <span>Lunch Break</span>
+                        </button>
+                        <button
+                          onClick={() => handlePmStartBreak('Team Meeting')}
+                          className="w-full text-left px-2.5 py-2 text-xs font-bold text-purple-300 hover:bg-purple-500/15 rounded-xl flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <span>📅</span>
+                          <span>Team Meeting</span>
+                        </button>
+                        <button
+                          onClick={() => handlePmStartBreak('Team Huddle')}
+                          className="w-full text-left px-2.5 py-2 text-xs font-bold text-sky-300 hover:bg-sky-500/15 rounded-xl flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <span>👥</span>
+                          <span>Team Huddle</span>
+                        </button>
+                        <button
+                          onClick={() => handlePmStartBreak('Tea Break')}
+                          className="w-full text-left px-2.5 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/15 rounded-xl flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <span>🍵</span>
+                          <span>Tea Break</span>
+                        </button>
+                        <button
+                          onClick={() => handlePmStartBreak('Attainment / Training')}
+                          className="w-full text-left px-2.5 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/15 rounded-xl flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <span>🎓</span>
+                          <span>Training</span>
+                        </button>
+                        <button
+                          onClick={() => handlePmStartBreak('Activity')}
+                          className="w-full text-left px-2.5 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/15 rounded-xl flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <span>⚡</span>
+                          <span>Activity</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <button
                   onClick={handlePmSelfCheckOut}

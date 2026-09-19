@@ -3203,21 +3203,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
-  /** One-shot position read, resolving to null rather than throwing, with graceful standard-accuracy fallback */
+  /** High-speed cached position read, resolving immediately to cached GPS coordinates if fresh (<60s) or acquiring within 2500ms */
   const getCurrentPositionOrNull = (): Promise<{ lat: number; lon: number } | null> =>
     new Promise(resolve => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
+      let resolved = false;
+      const done = (coords: { lat: number; lon: number } | null) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(coords);
+        }
+      };
+
+      const watchdog = setTimeout(() => done(null), 3000);
+
       navigator.geolocation.getCurrentPosition(
-        pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        pos => {
+          clearTimeout(watchdog);
+          done({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        },
         () => {
-          // Fallback to standard accuracy with longer timeout if high accuracy timed out or failed
           navigator.geolocation.getCurrentPosition(
-            pos2 => resolve({ lat: pos2.coords.latitude, lon: pos2.coords.longitude }),
-            () => resolve(null),
-            { enableHighAccuracy: false, maximumAge: 60000, timeout: 8000 }
+            pos2 => {
+              clearTimeout(watchdog);
+              done({ lat: pos2.coords.latitude, lon: pos2.coords.longitude });
+            },
+            () => {
+              clearTimeout(watchdog);
+              done(null);
+            },
+            { enableHighAccuracy: false, maximumAge: 60000, timeout: 1500 }
           );
         },
-        { enableHighAccuracy: true, maximumAge: 30000, timeout: 6000 }
+        { enableHighAccuracy: true, maximumAge: 60000, timeout: 2000 }
       );
     });
 

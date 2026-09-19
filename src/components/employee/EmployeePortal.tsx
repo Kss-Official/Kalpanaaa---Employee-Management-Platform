@@ -379,9 +379,12 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
   // screen is read off that single object. They cannot disagree by construction.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
+    // PERF FIX: Only tick the clock if there is an active, uncompleted shift today.
+    // Ticking every second when idle or completed caused the entire 2800-line portal to re-render continuously!
+    if (!todayRecord?.checkInAt || !!todayRecord?.checkOutAt) return;
     const interval = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [todayRecord?.checkInAt, todayRecord?.checkOutAt]);
 
   const liveShift = React.useMemo(
     () => computeLiveShiftBreakdown(todayRecord, nowMs),
@@ -592,21 +595,43 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
     }
   }, [activeEmployee]);
 
-  // Acquire Continuous Real-Time Geolocation (watchPosition)
+  // Acquire Continuous Real-Time Geolocation (watchPosition with smart throttling)
   useEffect(() => {
     if (!('geolocation' in navigator)) {
       setGpsError('Geolocation is not supported by your browser.');
       return;
     }
 
+    let lastLat = 0;
+    let lastLon = 0;
+    let lastTime = 0;
+
+    const shouldUpdate = (lat: number, lon: number) => {
+      const now = Date.now();
+      if (lastTime === 0) return true;
+      // If within 8 seconds and moved less than ~4 meters (0.00004 deg approx), skip state update
+      const distDeg = Math.abs(lat - lastLat) + Math.abs(lon - lastLon);
+      if (now - lastTime < 8000 && distDeg < 0.00004) {
+        return false;
+      }
+      return true;
+    };
+
     let fallbackWatchId: number | null = null;
     const watchId = navigator.geolocation.watchPosition(
       pos => {
-        setGpsLocation({ 
-          lat: pos.coords.latitude, 
-          lon: pos.coords.longitude,
-          accuracy: Math.round(pos.coords.accuracy) || 8
-        });
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        if (shouldUpdate(lat, lon)) {
+          lastLat = lat;
+          lastLon = lon;
+          lastTime = Date.now();
+          setGpsLocation({ 
+            lat, 
+            lon,
+            accuracy: Math.round(pos.coords.accuracy) || 8
+          });
+        }
         setGpsError(null);
       },
       err => {

@@ -5,6 +5,7 @@
 import * as faceapi from '@vladmandic/face-api';
 
 const MODEL_URLS = [
+  '/models/',
   'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/',
   'https://raw.githubusercontent.com/vladmandic/face-api/master/model/',
   'https://cdn.jsdelivr.net/gh/vladmandic/face-api@master/model/'
@@ -80,7 +81,7 @@ export const detectSingleFaceDescriptor = async (
   }
 
   try {
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 });
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.45 });
     const result = await faceapi
       .detectSingleFace(video, options)
       .withFaceLandmarks(true)
@@ -153,7 +154,7 @@ export const extractDescriptorFromImageUrl = async (
   try {
     if (!isModelsLoaded) await loadFaceModels();
     const img = await faceapi.fetchImage(imageUrl);
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 });
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.45 });
     const result = await faceapi
       .detectSingleFace(img, options)
       .withFaceLandmarks(true)

@@ -9,6 +9,7 @@ export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Half Day' | 'On 
 export type BreakType = 
   | 'Tea Break' 
   | 'Meal Break' 
+  | 'Lunch Break'
   | 'Team Huddle' 
   | 'Team Meeting' 
   | 'Attainment / Training' 
@@ -19,7 +20,8 @@ export const normalizeBreakType = (type?: string): BreakType | string => {
   const lower = type.toLowerCase();
   if (lower.includes('huddle')) return 'Team Huddle';
   if (lower.includes('meeting')) return 'Team Meeting';
-  if (lower.includes('meal') || lower.includes('lunch')) return 'Meal Break';
+  if (lower.includes('lunch')) return 'Lunch Break';
+  if (lower.includes('meal')) return 'Meal Break';
   if (lower.includes('tea break') || lower.includes('tea /') || lower.includes('coffee') || lower === 'tea') return 'Tea Break';
   if (lower.includes('attainment') || lower.includes('training')) return 'Attainment / Training';
   if (lower.includes('activity')) return 'Activity';

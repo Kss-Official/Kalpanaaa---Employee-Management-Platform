@@ -15,7 +15,6 @@ import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { isAuthorizedTechLead } from './lib/hierarchy';
 
 // ── Resilient Lazy imports with automatic Chunk Load Failure Recovery ──
-const LandingView          = lazyWithRetry(() => import('./components/landing/LandingView').then(m => ({ default: m.LandingView })), 'LandingView');
 const DashboardView        = lazyWithRetry(() => import('./components/admin/DashboardView').then(m => ({ default: m.DashboardView })), 'DashboardView');
 const EmployeeDirectory    = lazyWithRetry(() => import('./components/admin/EmployeeDirectory').then(m => ({ default: m.EmployeeDirectory })), 'EmployeeDirectory');
 const EmployeeProfileModal = lazyWithRetry(() => import('./components/admin/EmployeeProfileModal').then(m => ({ default: m.EmployeeProfileModal })), 'EmployeeProfileModal');
@@ -39,6 +38,7 @@ const HRNotificationsView  = lazyWithRetry(() => import('./components/hr/HRNotif
 const PMDashboard          = lazyWithRetry(() => import('./components/pm/PMDashboard').then(m => ({ default: m.PMDashboard })), 'PMDashboard');
 const PMProjectsView       = lazyWithRetry(() => import('./components/pm/PMProjectsView').then(m => ({ default: m.PMProjectsView })), 'PMProjectsView');
 const PMTeamPerformance    = lazyWithRetry(() => import('./components/pm/PMTeamPerformance').then(m => ({ default: m.PMTeamPerformance })), 'PMTeamPerformance');
+const PMProfileView        = lazyWithRetry(() => import('./components/pm/PMProfileView').then(m => ({ default: m.PMProfileView })), 'PMProfileView');
 const FeedbackHub          = lazyWithRetry(() => import('./components/feedback/FeedbackHub').then(m => ({ default: m.FeedbackHub })), 'FeedbackHub');
 const EmployeeTeamDirectory = lazyWithRetry(() => import('./components/employee/EmployeeTeamDirectory').then(m => ({ default: m.EmployeeTeamDirectory })), 'EmployeeTeamDirectory');
 const ExecutiveProfileView  = lazyWithRetry(() => import('./components/admin/ExecutiveProfileView').then(m => ({ default: m.ExecutiveProfileView })), 'ExecutiveProfileView');
@@ -102,8 +102,8 @@ const dismissHtmlSplash = () => {
 const MainLayout: React.FC = () => {
   const { role, isAuthenticated, activeEmployee, isSessionReady } = useAuth();
 
-  const [viewMode, setViewMode] = useState<'landing' | 'app' | 'auth'>(() => {
-    return localStorage.getItem('kss_v1_session') ? 'app' : 'landing';
+  const [viewMode, setViewMode] = useState<'app' | 'auth'>(() => {
+    return localStorage.getItem('kss_v1_session') ? 'app' : 'auth';
   });
 
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -189,27 +189,14 @@ const MainLayout: React.FC = () => {
     }
   }, [effectiveRole, activeEmployee?.id, currentTab, activeTab]);
 
-  const handleLandingGetStarted = () => setViewMode('auth');
-
   const renderView = () => {
     // Hold clean loading state while authentication session is actively resolving
     if (!isSessionReady) {
       return <ViewLoader />;
     }
 
-    if (viewMode === 'landing' && (!isAuthenticated || !activeEmployee)) {
-      return (
-        <Suspense fallback={<ViewLoader />}>
-          <LandingView
-            onGetStarted={handleLandingGetStarted}
-            onShowSplash={() => {}}
-          />
-        </Suspense>
-      );
-    }
-
-    if (viewMode === 'auth' || !isAuthenticated || !activeEmployee) {
-      return <AuthView onBackToLanding={() => setViewMode('landing')} />;
+    if (!isAuthenticated || !activeEmployee) {
+      return <AuthView />;
     }
 
     return (
@@ -217,8 +204,6 @@ const MainLayout: React.FC = () => {
         <Header
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           isMobileSidebarOpen={isMobileSidebarOpen}
-          onShowLanding={() => setViewMode('landing')}
-          onShowSplash={() => {}}
         />
 
         <div className="flex-1 flex w-full relative h-full overflow-hidden">
@@ -272,7 +257,7 @@ const MainLayout: React.FC = () => {
                 {currentTab === 'pm_dashboard' && <PMDashboard onNavigateTab={handleNavigateTab} />}
                 {currentTab === 'pm_projects' && <PMProjectsView />}
                 {currentTab === 'pm_team' && <PMTeamPerformance />}
-                {currentTab === 'pm_profile' && <HRProfileView />}
+                {currentTab === 'pm_profile' && <PMProfileView onOpenIdCard={(emp) => setIdCardEmployee(emp)} />}
                 {currentTab === 'my_profile' && <ExecutiveProfileView />}
 
                 {currentTab === 'my_id_card' && (
