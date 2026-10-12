@@ -37,6 +37,8 @@ import { EmployeeProfileModal } from './EmployeeProfileModal';
 import { EmployeeFormModal } from './EmployeeFormModal';
 import { EmployeeIdCardModal } from './EmployeeIdCardModal';
 import { isAuthorizedTechLead } from '../../lib/hierarchy';
+import { toast } from 'sonner';
+import { generateAndDownloadPayrollCycleExcel, getCyclePresetList } from '../../lib/payrollCycleExporter';
 
 // ─── Dropdown Constants ────────────────────────────────────────────────────────
 
@@ -266,37 +268,38 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
     return { holidays, wfhDays, halfDays, lopDays };
   };
 
-  // ─── Excel/CSV Export for Attendance Ledger ──────────────────────────────────
-  const handleExportLedgerExcel = () => {
+  // ─── Excel Export for Attendance Ledger (Full 26-to-26 Cycle) ────────────────
+  const handleExportLedgerExcel = async () => {
     triggerHaptic();
-    const headers = [
-      'Employee Name', 'Emp ID', 'Department', 'Designation', 'Employment Type', 'Specialization', 'Status'
-    ];
-    const rows = filteredEmployees.map(emp => {
-      const isInactive = emp.status === 'Inactive' || emp.status === 'Terminated' || emp.status === 'Suspended';
-      const statusLabel = isInactive ? 'Inactive' : 'Active';
-      const dept = getAttendanceDepartment(emp);
-      const desig = (emp.fullName && (emp.fullName.toLowerCase().includes('jigyansha') || emp.fullName.toLowerCase().includes('jingyasha'))) ? 'AI/ML Developer' : (emp.designation || '—');
-      const empType = computeEmploymentType(emp);
-      const specs = getAttendanceSpecializations(emp.skills || [], emp).join('; ');
-      return [
-        `"${emp.fullName}"`,
-        emp.employeeId || '—',
-        `"${dept}"`,
-        `"${desig}"`,
-        `"${empType}"`,
-        `"${specs || '—'}"`,
-        statusLabel
-      ].join(',');
-    });
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `Attendance_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const presets = getCyclePresetList();
+    const activePreset = presets.find(p => p.isCurrent) || presets[0];
+    const toastId = toast.loading('Generating executive 26-to-26 attendance workbook with salary disbursement...');
+
+    try {
+      const result = await generateAndDownloadPayrollCycleExcel({
+        employees,
+        attendance,
+        leaveRequests,
+        holidayDates: (settings as any)?.holidayDates || [],
+        settings,
+        startDate: activePreset.startDate,
+        endDate: activePreset.endDate,
+        cycleLabel: activePreset.label,
+        preparedBy: activeEmployee?.fullName || 'Attendance Master',
+        departmentFilter: deptFilter,
+        employmentTypeFilter: empTypeFilter,
+        searchFilter: searchTerm,
+        includeInactive: false
+      });
+
+      toast.success(
+        `✓ Excel exported: ${result.fileName} (${result.totalPersonnel} staff, ₹${result.totalDisbursement.toLocaleString('en-IN')})`,
+        { id: toastId, duration: 6000 }
+      );
+    } catch (err: any) {
+      console.error('Error exporting cycle excel:', err);
+      toast.error(`Export failed: ${err?.message || 'Unknown error'}`, { id: toastId });
+    }
   };
 
   const handleSyncAllEmployeeShifts = async () => {

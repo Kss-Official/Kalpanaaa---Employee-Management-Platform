@@ -21,6 +21,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "date-fns": "^4.4.0",
     "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "firebase": "^12.17.0",
     "framer-motion": "^11.11.9",

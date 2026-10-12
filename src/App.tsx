@@ -166,7 +166,7 @@ const MainLayout: React.FC = () => {
         return 'emp_dashboard';
       }
     } else if (roleToUse === 'PROJECT_MANAGER') {
-      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'feedback_hub', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees', 'emp_directory', 'company_rules'];
+      const allowedPMTabs = ['pm_dashboard', 'pm_projects', 'pm_team', 'feedback_hub', 'pm_profile', 'notifications', 'dashboard', 'leave_approvals', 'employees', 'emp_directory', 'company_rules', 'reports', 'attendance'];
       if (!allowedPMTabs.includes(tab) || (tab.startsWith('emp_') && tab !== 'emp_directory')) {
         return 'pm_dashboard';
       }

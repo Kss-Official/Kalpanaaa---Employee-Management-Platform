@@ -69,7 +69,8 @@ export default defineConfig(({ command }) => {
             'vendor-icons': ['lucide-react'],
             'vendor-motion': ['framer-motion', 'motion'],
             'vendor-faceapi': ['@vladmandic/face-api'],
-            'vendor-pdf': ['jspdf', 'jspdf-autotable']
+            'vendor-pdf': ['jspdf', 'jspdf-autotable'],
+            'vendor-excel': ['exceljs']
           }
         }
       }

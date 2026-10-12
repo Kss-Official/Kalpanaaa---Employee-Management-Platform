@@ -5,6 +5,12 @@ service cloud.firestore {
 
     // ── Auth helpers ─────────────────────────────────────────────────────────
     function isSignedIn() { return request.auth != null; }
+    function hasEmail() {
+      return isSignedIn() && 'email' in request.auth.token && request.auth.token.email != null;
+    }
+    function userEmail() {
+      return hasEmail() ? request.auth.token.email : '';
+    }
     function isRealUser() {
       return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
@@ -54,9 +60,9 @@ service cloud.firestore {
         claimRole() == 'project_manager' ||
         claimRole() == 'pm' ||
         request.auth.uid in ['vhKLIJCVZoTncqVtmh14paMbiXk2'] ||
-        (request.auth.token.get('email', null) != null && (
-          request.auth.token.email == 'd.koushik@kalpanaaasoftwaresolutions.in' ||
-          request.auth.token.email == 'd.koushik@kalpanaaa.in'
+        (hasEmail() && (
+          userEmail() == 'd.koushik@kalpanaaasoftwaresolutions.in' ||
+          userEmail() == 'd.koushik@kalpanaaa.in'
         )) ||
         (getEmployeeId() != null && getEmployeeId() == 'KSS2407003') ||
         (getEmployeeDocId() != null && (getEmployeeDocId() == 'emp-KSS2407003' || getEmployeeDocId() == 'vhKLIJCVZoTncqVtmh14paMbiXk2')) ||
@@ -67,11 +73,11 @@ service cloud.firestore {
     function isAuthorizedTechLead() {
       return isSignedIn() && (
         request.auth.uid in ['QpDtyS6Jp5OqNu3klvfWGoWHfmS2', 'KfAB95lpbJOeylpKQaWX4GXOPGt2'] ||
-        (request.auth.token.get('email', null) != null && (
-          request.auth.token.email == 'satya.ranjan.dash@kalpanaaa.in' ||
-          request.auth.token.email == 'satya.ranjan.das@kalpanaaa.in' ||
-          request.auth.token.email == 'jasonkennethn@kalpanaaa.in' ||
-          request.auth.token.email == 'jason.kennethn@kalpanaaa.in'
+        (hasEmail() && (
+          userEmail() == 'satya.ranjan.dash@kalpanaaa.in' ||
+          userEmail() == 'satya.ranjan.das@kalpanaaa.in' ||
+          userEmail() == 'jasonkennethn@kalpanaaa.in' ||
+          userEmail() == 'jason.kennethn@kalpanaaa.in'
         )) ||
         (getEmployeeId() != null && (getEmployeeId() == 'KSS2407012' || getEmployeeId() == 'KSS2407011')) ||
         (getEmployeeDocId() != null && (getEmployeeDocId() == 'emp-KSS2407012' || getEmployeeDocId() == 'KfAB95lpbJOeylpKQaWX4GXOPGt2')) || // KSS2407011 reassigned to Jason
@@ -101,8 +107,11 @@ service cloud.firestore {
         (getEmployeeId() != null && employeeId == getEmployeeId()) ||
         (resource != null && (
           resource.data.get('uid', '~') == request.auth.uid ||
-          resource.data.get('employeeId', '~') == getEmployeeId() ||
-          (request.auth.token.get('email', null) != null && resource.data.get('email', '~') == request.auth.token.email)
+          (getEmployeeId() != null && resource.data.get('employeeId', '~') == getEmployeeId()) ||
+          (hasEmail() && (
+            resource.data.get('email', '~') == userEmail() ||
+            resource.data.get('email', '~').lower() == userEmail().lower()
+          ))
         ))
       );
     }
@@ -121,7 +130,10 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/employees/$(d.employeeId)) &&
           (
             employeeRecord(d.employeeId).get('uid', '~') == request.auth.uid ||
-            (request.auth.token.get('email', null) != null && employeeRecord(d.employeeId).get('email', '~') == request.auth.token.email)
+            (hasEmail() && (
+              employeeRecord(d.employeeId).get('email', '~') == userEmail() ||
+              employeeRecord(d.employeeId).get('email', '~').lower() == userEmail().lower()
+            ))
           )
         )
       );
@@ -156,7 +168,10 @@ service cloud.firestore {
         employeeRecord(request.resource.data.employeeDocId).get('role', '~') == request.resource.data.get('role', '~~') &&
         (
           employeeRecord(request.resource.data.employeeDocId).get('uid', '~') == request.auth.uid ||
-          (request.auth.token.get('email', null) != null && employeeRecord(request.resource.data.employeeDocId).get('email', '~') == request.auth.token.email)
+          (hasEmail() && (
+            employeeRecord(request.resource.data.employeeDocId).get('email', '~') == userEmail() ||
+            employeeRecord(request.resource.data.employeeDocId).get('email', '~').lower() == userEmail().lower()
+          ))
         );
     }
 
@@ -217,14 +232,12 @@ service cloud.firestore {
       );
       allow update: if isConfigAdmin() || isProjectManager() || isAuthorizedTechLead() || (
         ownsEmployeeRecord(employeeId) &&
-        unchanged('role') && unchanged('executiveRole') && unchanged('employeeId') &&
-        unchanged('email') && unchanged('salary') && unchanged('ctc') &&
-        unchanged('probationEndDate') &&
-        unchanged('bankAccountNumber') && unchanged('bankIfscCode') && unchanged('panNumber') &&
-        unchanged('approvedWfhDates') && unchanged('designation') && unchanged('department') &&
-        unchanged('status') && unchanged('shift') && unchanged('pmUid') &&
-        unchanged('reportingManagerUid') && unchanged('qrToken') &&
-        unchanged('accessLevel') && unchanged('permissions')
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role', 'executiveRole', 'employeeId', 'email', 'salary', 'ctc',
+          'probationEndDate', 'bankAccountNumber', 'bankIfscCode', 'panNumber',
+          'approvedWfhDates', 'designation', 'department', 'status', 'shift',
+          'pmUid', 'reportingManagerUid', 'qrToken', 'accessLevel', 'permissions'
+        ])
       );
       allow delete: if isSuperAdmin() || isConfigAdmin() || isProjectManager();
 
@@ -389,21 +402,21 @@ service cloud.firestore {
           resource.data.get('targetEmployeeUid', '') == request.auth.uid ||
           (getEmployeeDocId() != null && resource.data.targetEmployeeId == getEmployeeDocId()) ||
           (getEmployeeId() != null && resource.data.targetEmployeeCode == getEmployeeId()) ||
-          (request.auth.token.get('email', null) != null && (
-            resource.data.get('targetEmployeeEmail', '') == request.auth.token.email ||
-            resource.data.get('targetEmployeeEmail', '').lower() == request.auth.token.email.lower()
+          (hasEmail() && (
+            resource.data.get('targetEmployeeEmail', '') == userEmail() ||
+            resource.data.get('targetEmployeeEmail', '').lower() == userEmail().lower()
           )) ||
           (exists(/databases/$(database)/documents/employees/$(resource.data.targetEmployeeId)) &&
            (get(/databases/$(database)/documents/employees/$(resource.data.targetEmployeeId)).data.get('uid', '') == request.auth.uid ||
-            (request.auth.token.get('email', null) != null && get(/databases/$(database)/documents/employees/$(resource.data.targetEmployeeId)).data.get('email', '') == request.auth.token.email))) ||
+            (hasEmail() && get(/databases/$(database)/documents/employees/$(resource.data.targetEmployeeId)).data.get('email', '').lower() == userEmail().lower()))) ||
           (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
            (get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('employeeId', '') == resource.data.get('targetEmployeeCode', '~') ||
             get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('id', '') == resource.data.targetEmployeeId ||
-            (request.auth.token.get('email', null) != null && get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('email', '') == request.auth.token.email))) ||
+            (hasEmail() && get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.get('email', '').lower() == userEmail().lower()))) ||
           (userDocExists() && (
             getUserDoc().get('employeeId', '') == resource.data.get('targetEmployeeCode', '~') ||
             getUserDoc().get('employeeDocId', '') == resource.data.targetEmployeeId ||
-            (request.auth.token.get('email', null) != null && getUserDoc().get('email', '') == request.auth.token.email)
+            (hasEmail() && getUserDoc().get('email', '').lower() == userEmail().lower())
           ))
         );
       }
@@ -421,7 +434,7 @@ service cloud.firestore {
           isAuthorizedTechLead() ||
           (exists(/databases/$(database)/documents/employees/$(resource.data.reviewerId)) &&
            (get(/databases/$(database)/documents/employees/$(resource.data.reviewerId)).data.get('uid', '') == request.auth.uid ||
-            (request.auth.token.get('email', null) != null && get(/databases/$(database)/documents/employees/$(resource.data.reviewerId)).data.get('email', '') == request.auth.token.email)))
+            (hasEmail() && get(/databases/$(database)/documents/employees/$(resource.data.reviewerId)).data.get('email', '').lower() == userEmail().lower())))
         );
       }
       function callerTier() {
@@ -439,7 +452,7 @@ service cloud.firestore {
           isConfigAdmin() ||
           (exists(/databases/$(database)/documents/employees/$(request.resource.data.reviewerId)) &&
            (get(/databases/$(database)/documents/employees/$(request.resource.data.reviewerId)).data.get('uid', '') == request.auth.uid ||
-            (request.auth.token.get('email', null) != null && get(/databases/$(database)/documents/employees/$(request.resource.data.reviewerId)).data.get('email', '') == request.auth.token.email)))
+            (hasEmail() && get(/databases/$(database)/documents/employees/$(request.resource.data.reviewerId)).data.get('email', '').lower() == userEmail().lower())))
         ) &&
         request.resource.data.targetEmployeeId is string &&
         request.resource.data.targetEmployeeId.size() > 0 &&
@@ -487,6 +500,35 @@ service cloud.firestore {
           request.resource.data.get('employeeId','~') == getEmployeeId()
         );
         allow update, delete: if false;
+      }
+    }
+
+    // ── 19. Work Schedules (per-employee shift/break config) ─────────────────
+    match /workSchedules/{employeeId} {
+      // All signed-in users can read schedules (needed for attendance engine)
+      allow read: if isRealUser();
+      // PM and HR Admin can create/update schedules
+      allow create, update: if isProjectManager() || isHrAdmin();
+      // Only super admin can delete
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── 20. WFH Allowances (monthly per-employee WFH quota) ──────────────────
+    match /wfhAllowances/{employeeId} {
+      allow read: if isRealUser();
+      allow write: if false; // top-level doc not directly written
+
+      match /months/{monthKey} {
+        // PM, HR, and the owning employee can read
+        allow read: if isProjectManager() || isHrAdmin() ||
+          (isRealUser() && (
+            request.auth.uid == employeeId ||
+            getEmployeeDocId() == employeeId ||
+            getEmployeeId() == employeeId
+          ));
+        // PM and HR can write/adjust allowances; system writes go through PM session
+        allow create, update: if isProjectManager() || isHrAdmin();
+        allow delete: if isSuperAdmin();
       }
     }
 

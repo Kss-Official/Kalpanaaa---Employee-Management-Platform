@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { shouldRunMonthlyAutoCredit, setMonthlyCreditLatch, runMonthlyAutoCredit, getMonthKey } from '../lib/leaveBalanceService';
 import { User, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   collection,
@@ -1259,14 +1260,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
-              // LIVE AUTOCORRECT JIGYANSHA (AI/ML Developer, Generative AI specialization)
+              // LIVE AUTOCORRECT JIGYANSHA (AI/ML Developer, Generative AI specialization, joining date Sep 1)
               if (
                 data.id === '8RxH6z3ZzUTmM26iqta1DhCPa8l1' ||
                 data.employeeId === 'KSS2407014' ||
+                data.employeeId === 'KSS2407016' ||
                 (data.fullName && data.fullName.toLowerCase().includes('jigyansha')) ||
                 (data.fullName && data.fullName.toLowerCase().includes('jingyasha'))
               ) {
                 let jChanged = false;
+                if (data.joiningDate !== '2026-09-01') {
+                  data.joiningDate = '2026-09-01';
+                  jChanged = true;
+                }
                 if (data.designation !== 'AI/ML Developer') {
                   data.designation = 'AI/ML Developer';
                   jChanged = true;
@@ -1281,6 +1287,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (jChanged && canMigrate && !migratedEmployeeIds.has(`jig-${data.id}`)) {
                   migratedEmployeeIds.add(`jig-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), {
+                    joiningDate: '2026-09-01',
                     designation: 'AI/ML Developer',
                     skills: ['Generative AI'],
                     specialization: 'Generative AI'
@@ -1914,6 +1921,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setSettings(prev => ({
               ...prev,
               ...firestoreSettings,
+              // Always union official 2026 holidays with whatever is stored in Firestore
+              // so declared public holidays (e.g. Ganesh Chaturthi) are never silently
+              // dropped by a stale or partial database value.
+              holidayDates: Array.from(new Set([
+                ...OFFICIAL_HOLIDAY_DATES_2026,
+                ...(firestoreSettings.holidayDates || []),
+                ...(prev.holidayDates || [])
+              ])),
               // Preserve whichever has MORE wfh dates (local or Firestore) — avoids wipe on sync
               companyWideWfhDates: (() => {
                 const local = prev.companyWideWfhDates || [];
@@ -2125,7 +2140,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const accidentalRange = ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'];
 
-    // 1. Clean employee records (Akash, Asbin, Mahesh, Thabeethal, Koushik, Jingyasha, Jason, and SL balances)
+    // ── VERIFIED LEAVE BALANCE TABLE (October 2026) ───────────────────────────
+    // | Employee          | EL | SL | WFH |
+    // | Asbin             |  0 |  1 |  0  |
+    // | Thabeethal        |  0 |  1 |  1  | (female — 1 WFH/month)
+    // | Akash             |  2 |  0 |  0  |
+    // | Prahlad Sharma    |  2 |  1 |  0  |
+    // | Satya Ranjan Das  |  2 |  1 |  0  |
+    // | Mahesh            |  1 |  0 |  0  |
+    // | Ritish            |  1 |  1 |  0  |
+    // | Pratiksha Harode  |  2 |  1 |  0  |
+    // | Priyanka Kushwah  |  2 |  1 |  0  |
+    // | D. Koushik        |  0 |  0 |  0  |
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // 1. Clean employee records with verified balances
     let employeesChanged = false;
     const nextEmployees = employees.map(emp => {
       let e = { ...emp };
@@ -2133,22 +2162,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const isJingyasha = e.id === '8RxH6z3ZzUTmM26iqta1DhCPa8l1' || e.employeeId === 'KSS2407014' || (e.fullName && (e.fullName.toLowerCase().includes('jigy') || e.fullName.toLowerCase().includes('jing')));
       const isJason = (e.id === 'KfAB95lpbJOeylpKQaWX4GXOPGt2' || e.employeeId === 'KSS2407011' || (e.fullName && e.fullName.toLowerCase().includes('jason'))) && !isJingyasha;
-      const isAkash = e.id === 'emp-KSS2407013' || e.employeeId === 'KSS2407013' || (e.fullName && e.fullName.toLowerCase().includes('akash'));
+      const isAkash = (e.id === 'emp-KSS2407013' || e.employeeId === 'KSS2407013' || (e.fullName && e.fullName.toLowerCase().includes('akash'))) && !isJingyasha;
       const isAsbin = e.id === 'emp-KSS2407004' || e.employeeId === 'KSS2407004' || (e.fullName && e.fullName.toLowerCase().includes('asbin'));
       const isMahesh = e.id === 'emp-KSS2407006' || e.employeeId === 'KSS2407006' || (e.fullName && e.fullName.toLowerCase().includes('mahesh'));
       const isThabeethal = e.id === 'emp-KSS2407005' || e.employeeId === 'KSS2407005' || (e.fullName && e.fullName.toLowerCase().includes('thabeethal'));
-      const isKoushik = e.id === 'emp-KSS2407003' || e.employeeId === 'KSS2407003' || (e.fullName && e.fullName.toLowerCase().includes('koushik'));
+      const isKoushik = e.id === 'emp-KSS2407003' || e.employeeId === 'KSS2407003' || (e.fullName && e.fullName.toLowerCase().includes('koushik') && !e.fullName.toLowerCase().includes('priya'));
+      const isPrahlad = e.id === 'emp-KSS2407010' || e.employeeId === 'KSS2407010' || (e.fullName && e.fullName.toLowerCase().includes('prahlad'));
+      const isSatya = e.id === 'emp-KSS2407012' || e.employeeId === 'KSS2407012' || (e.fullName && (e.fullName.toLowerCase().includes('satya') || e.fullName.toLowerCase().includes('ranjan')));
+      const isRitish = e.id === 'emp-KSS2407007' || e.employeeId === 'KSS2407007' || (e.fullName && e.fullName.toLowerCase().includes('ritish'));
+      const isPratiksha = e.id === 'emp-KSS2407008' || e.employeeId === 'KSS2407008' || (e.fullName && e.fullName.toLowerCase().includes('pratiksha'));
+      const isPriyanka = e.id === 'emp-KSS2407009' || e.employeeId === 'KSS2407009' || (e.fullName && e.fullName.toLowerCase().includes('priyanka'));
 
       if (isAkash) {
+        // Akash: EL=2, SL=0, WFH=0
         const cleanedDates = (e.approvedWfhDates || []).filter(d => !accidentalRange.includes(d));
-        if (e.sickLeaveBalance !== 0 || e.earnLeaveBalance !== 1 || cleanedDates.length !== (e.approvedWfhDates || []).length) {
+        if (e.sickLeaveBalance !== 0 || e.earnLeaveBalance !== 2 || cleanedDates.length !== (e.approvedWfhDates || []).length) {
           e.approvedWfhDates = cleanedDates;
           e.sickLeaveBalance = 0;
-          e.earnLeaveBalance = 1;
+          e.earnLeaveBalance = 2;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: cleanedDates, sickLeaveBalance: 0, earnLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: cleanedDates, sickLeaveBalance: 0, earnLeaveBalance: 2, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isAsbin) {
+        // Asbin: EL=0, SL=1, WFH=0
         const currentDates = e.approvedWfhDates || [];
         const needsDates = !currentDates.includes('2026-08-28') || !currentDates.includes('2026-08-29');
         const needsEl = e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1;
@@ -2161,18 +2197,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isMahesh) {
+        // Mahesh: EL=1, SL=0, WFH=0
         const currentDates = e.approvedWfhDates || [];
         const needsDates = !currentDates.includes('2026-08-27') || !currentDates.includes('2026-08-29') || currentDates.includes('2026-08-26');
-        const needsEl = e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1;
+        const needsEl = e.earnLeaveBalance !== 1 || e.sickLeaveBalance !== 0;
         if (needsDates || needsEl) {
           const updatedDates = Array.from(new Set([...currentDates.filter(d => d !== '2026-08-26'), '2026-08-27', '2026-08-29']));
           e.approvedWfhDates = updatedDates;
-          e.earnLeaveBalance = 0;
-          e.sickLeaveBalance = 1;
+          e.earnLeaveBalance = 1;
+          e.sickLeaveBalance = 0;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 1, sickLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isThabeethal) {
+        // Thabeethal: EL=0, SL=1, WFH=1 (female monthly WFH)
         if (e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1) {
           e.earnLeaveBalance = 0;
           e.sickLeaveBalance = 1;
@@ -2180,18 +2218,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isKoushik) {
-        if (e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1) {
+        // D. Koushik (PM): EL=0, SL=0, WFH=0 — verified policy
+        if (e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 0) {
           e.earnLeaveBalance = 0;
+          e.sickLeaveBalance = 0;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 0, sickLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isPrahlad) {
+        // Prahlad Sharma: EL=2, SL=1, WFH=0
+        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
+          e.earnLeaveBalance = 2;
           e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isSatya) {
+        // Satya Ranjan Das: EL=2, SL=1, WFH=0
+        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
+          e.earnLeaveBalance = 2;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isRitish) {
+        // Ritish: EL=1, SL=1, WFH=0
+        if (e.earnLeaveBalance !== 1 || e.sickLeaveBalance !== 1) {
+          e.earnLeaveBalance = 1;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 1, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isPratiksha) {
+        // Pratiksha Harode: EL=2, SL=1, WFH=0
+        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
+          e.earnLeaveBalance = 2;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        }
+      } else if (isPriyanka) {
+        // Priyanka Kushwah: EL=2, SL=1, WFH=0
+        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
+          e.earnLeaveBalance = 2;
+          e.sickLeaveBalance = 1;
+          changed = true;
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isJingyasha) {
-        if (e.sickLeaveBalance !== 1 || e.earnLeaveBalance !== 1) {
+        if (e.sickLeaveBalance !== 1 || e.earnLeaveBalance !== 1 || e.joiningDate !== '2026-09-01') {
           e.sickLeaveBalance = 1;
           e.earnLeaveBalance = 1;
+          e.joiningDate = '2026-09-01';
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 1, earnLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 1, earnLeaveBalance: 1, joiningDate: '2026-09-01', updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isJason) {
         if (e.sickLeaveBalance !== 0 || e.earnLeaveBalance !== 1 || !e.joiningDate || e.joiningDate !== '2026-08-17') {
@@ -2200,12 +2280,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           e.joiningDate = '2026-08-17';
           changed = true;
           setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 0, earnLeaveBalance: 1, joiningDate: '2026-08-17', updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
-        }
-      } else {
-        if (e.sickLeaveBalance !== 1) {
-          e.sickLeaveBalance = 1;
-          changed = true;
-          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       }
 
@@ -2425,6 +2499,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, employees.length > 0, attendance.length > 0]);
+
+  // ── Monthly Auto-Credit: +1 EL on 1st of every month; female WFH init ────────
+  // Runs once per session on the 1st of the month, gated by a localStorage latch.
+  // Skips D. Koushik (PM, EL=0 by policy) and SUPER_ADMIN accounts.
+  useEffect(() => {
+    if (!isAuthenticated || !employees.length) return;
+
+    const monthKey = getMonthKey(new Date());
+    if (!shouldRunMonthlyAutoCredit(monthKey)) return;
+
+    const performerUid = authUid || 'system';
+    const performerName = activeEmployee?.fullName || 'System';
+
+    runMonthlyAutoCredit(employees, monthKey, performerUid, performerName)
+      .then(({ credited, wfhInitialized, errors }) => {
+        setMonthlyCreditLatch(monthKey);
+        if (credited.length > 0) {
+          console.info(`[Monthly Auto-Credit] +1 EL credited to ${credited.length} employees for ${monthKey}.`);
+        }
+        if (wfhInitialized.length > 0) {
+          console.info(`[Monthly Auto-Credit] WFH allowance initialized for ${wfhInitialized.length} female employees for ${monthKey}.`);
+        }
+        if (errors.length > 0) {
+          console.warn('[Monthly Auto-Credit] Some errors occurred:', errors);
+        }
+        // Refresh employees from Firestore to get updated balances
+        if (credited.length > 0) {
+          setEmployees(prev => prev.map(emp => {
+            if (
+              emp.status !== 'Active' ||
+              emp.role === 'SUPER_ADMIN' ||
+              emp.employeeId === 'KSS2407003'
+            ) return emp;
+            const currentEL = typeof emp.earnLeaveBalance === 'number' ? emp.earnLeaveBalance : 0;
+            return { ...emp, earnLeaveBalance: currentEL + 1 };
+          }));
+        }
+      })
+      .catch(err => {
+        console.warn('[Monthly Auto-Credit] Failed:', err);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, employees.length > 0]);
 
   // ── One-time resume backfill, exposed to admin sessions only ─────────────────
   // Deliberately NOT auto-run: it rewrites every employee document, so an operator

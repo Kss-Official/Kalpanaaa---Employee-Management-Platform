@@ -38,7 +38,7 @@ import {
   SlidersHorizontal,
   ChevronRight
 } from 'lucide-react';
-import { BreakType, Employee } from '../../types';
+import { BreakType, Employee, LeaveCategory } from '../../types';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { EmployeeIdCardModal } from '../admin/EmployeeIdCardModal';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
@@ -439,7 +439,7 @@ export const PMProfileView: React.FC<PMProfileViewProps> = ({ onOpenIdCard }) =>
   // ══════════════════════════════════════════════════════════════
   // LEAVE / WFH FORM STATE
   // ══════════════════════════════════════════════════════════════
-  const [reqType, setReqType] = useState<'WFH' | 'Leave'>('WFH');
+  const [reqType, setReqType] = useState<'WFH' | 'Leave' | 'Sick Leave' | 'Earn Leave'>('WFH');
   const [startDate, setStartDate] = useState(getEmployeeWorkDate(new Date()));
   const [endDate, setEndDate] = useState(getEmployeeWorkDate(new Date()));
   const [reason, setReason] = useState('');
@@ -449,11 +449,19 @@ export const PMProfileView: React.FC<PMProfileViewProps> = ({ onOpenIdCard }) =>
     e.preventDefault();
     if (!targetEmployee || !reason.trim()) return;
 
+    // Derive leaveCategory from reqType for consistent downstream handling
+    const leaveCategory: LeaveCategory | undefined =
+      reqType === 'WFH' ? 'WFH' :
+      reqType === 'Sick Leave' ? 'Sick Leave' :
+      (reqType === 'Earn Leave' || reqType === 'Leave') ? 'Earn Leave' :
+      undefined;
+
     submitLeaveRequest({
       employeeId: targetEmployee.employeeId || targetEmployee.id,
       employeeName: targetEmployee.fullName,
       department: targetEmployee.department || 'Engineering & Product',
       type: reqType,
+      leaveCategory,
       startDate,
       endDate,
       reason
@@ -1388,6 +1396,8 @@ export const PMProfileView: React.FC<PMProfileViewProps> = ({ onOpenIdCard }) =>
                   >
                     <option value="WFH">🏠 Work From Home (WFH)</option>
                     <option value="Leave">🌴 Personal Leave</option>
+                    <option value="Sick Leave">🤒 Sick Leave</option>
+                    <option value="Earn Leave">🏖️ Earn Leave</option>
                   </select>
                 </div>
 

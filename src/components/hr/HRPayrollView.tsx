@@ -13,7 +13,8 @@ import {
   isNonWorkingDay,
   formatMonthKey,
   getWorkDate,
-  isExecutiveOrLeadership
+  isExecutiveOrLeadership,
+  OFFICIAL_HOLIDAY_DATES_2026
 } from '../../lib/attendanceEngine';
 
 interface PayrollAdjustment {
@@ -40,7 +41,11 @@ function readAdjustments(monthKey: string): Record<string, PayrollAdjustment> {
 export const HRPayrollView: React.FC = () => {
   const { employees, attendance, activeEmployee, role, settings, leaveRequests } = useAuth();
   const holidayDates = React.useMemo<string[]>(
-    () => (((settings as any)?.holidayDates) || []) as string[],
+    () => {
+      const stored = (((settings as any)?.holidayDates) || []) as string[];
+      // Always union with official list so public holidays are never silently missing
+      return Array.from(new Set([...OFFICIAL_HOLIDAY_DATES_2026, ...stored]));
+    },
     [settings]
   );
   
@@ -356,7 +361,7 @@ export const HRPayrollView: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-black uppercase tracking-wider text-purple-300">
-                Company Salary Cycle: 27th to 26th (30-Day Period)
+                Company Salary Cycle: 27th to 26th
               </span>
               <span className={`text-[10px] font-mono font-black px-2.5 py-0.5 rounded-md border ${
                 monthBasis.isClosed
@@ -370,7 +375,7 @@ export const HRPayrollView: React.FC = () => {
               Calculation Window: <strong className="text-white font-mono">{cycleLabel}</strong> ({startDate} → {endDate})
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Strictly evaluates working days, leaves, and LOP in this 30-day window. The 26th is the monthly cut-off, and the next cycle starts on the 27th.
+              Strictly evaluates working days, leaves, and LOP in this window. The 26th is the monthly cut-off; the new cycle starts on the 27th.
             </p>
           </div>
         </div>

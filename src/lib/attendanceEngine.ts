@@ -2764,7 +2764,8 @@ export function buildWeekWorkRow(
     // missed shift.
     const isNonWorking = meta.isNonWorking ||
       (Array.isArray(opts.holidayDates) && opts.holidayDates.includes(meta.dateStr));
-    if (meta.isFuture || isNonWorking) return;
+    const isFutureDay = opts.nowMs != null ? meta.dateStr > getWorkDate(new Date(nowMs)) : meta.isFuture;
+    if (isFutureDay || isNonWorking) return;
 
     // Pre-joining check: unworked days before joiningDate are not absences
     const joinDate = employee?.joiningDate || employee?.joining_date;
@@ -2826,9 +2827,9 @@ export interface PayrollAttendanceBasis {
   /** Elapsed non-working days (weekly offs + declared holidays) in the cycle. */
   holidayDays: number;
   absentDays: number;       // elapsed working days with no record
-  /** Attended days for pay in the 27th-26th cycle (half day = 0.5, paid leave = 1). */
+  /** Attended days for pay in the 26th-27th cycle (half day = 0.5, paid leave = 1). */
   payableDays: number;
-  /** Unpaid days: absences only within the 27th-26th cycle. */
+  /** Unpaid days: absences only within the 26th-27th cycle. */
   lossOfPayDays: number;
   totalWorkedMinutes: number;
   /** True while the cycle is still running. */
@@ -2840,7 +2841,8 @@ export interface PayrollAttendanceBasis {
 /**
  * Returns the exact start and end date (YYYY-MM-DD) for a given payroll month cycle.
  * The company salary cycle runs from the 27th of the previous month to the 26th of the target month.
- * Example for '2026-08': Start = '2026-07-27', End = '2026-08-26'.
+ * Example for '2026-09': Start = '2026-08-27', End = '2026-09-26'  → 31 days (Aug has 31d).
+ * Example for '2026-10': Start = '2026-09-27', End = '2026-10-26'  → 30 days (Sep has 30d).
  */
 export function getPayrollCycleDates(monthKey: string): {
   startDate: string;
@@ -2852,7 +2854,7 @@ export function getPayrollCycleDates(monthKey: string): {
   const year = parseInt(yStr) || new Date().getFullYear();
   const month = parseInt(mStr) || (new Date().getMonth() + 1);
 
-  // Previous month for start date (27th)
+  // Previous month: cycle STARTS on the 27th
   let prevYear = year;
   let prevMonth = month - 1;
   if (prevMonth < 1) {
@@ -2861,55 +2863,39 @@ export function getPayrollCycleDates(monthKey: string): {
   }
 
   const startDate = `${prevYear}-${String(prevMonth).padStart(2, '0')}-27`;
-  const endDate = `${year}-${String(month).padStart(2, '0')}-26`;
+  const endDate   = `${year}-${String(month).padStart(2, '0')}-26`;
 
-  // Generate all consecutive dates in [startDate, endDate]
+  // Generate all consecutive calendar dates in [startDate, endDate]
   const days: string[] = [];
   const current = new Date(`${startDate}T00:00:00Z`);
-  const end = new Date(`${endDate}T00:00:00Z`);
-
+  const end     = new Date(`${endDate}T00:00:00Z`);
   while (current <= end) {
     days.push(current.toISOString().split('T')[0]);
     current.setUTCDate(current.getUTCDate() + 1);
   }
 
   const startMonthName = new Date(Date.UTC(prevYear, prevMonth - 1, 1)).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
-  const endMonthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-
+  const endMonthName   = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
   const cycleLabel = `27 ${startMonthName} – 26 ${endMonthName}`;
 
-  return {
-    startDate,
-    endDate,
-    cycleLabel,
-    days
-  };
+  return { startDate, endDate, cycleLabel, days };
 }
 
 /**
  * Returns the current active payroll cycle month key based on today's date.
- * If today is on or after the 27th, the active cycle is for the NEXT month.
- * If today is on or before the 26th, the active cycle is for THIS month.
- * E.g., On 2026-08-26 -> '2026-08' (27 Jul – 26 Aug)
- *       On 2026-08-27 -> '2026-09' (27 Aug – 26 Sep)
- */
-/**
- * Returns the current active payroll cycle month key based on today's date.
- * The company cut-off is on the 26th of the month.
- * On or after the 26th, the upcoming new cycle starting 27th (tomorrow) becomes the active payroll cycle.
- * E.g., On 2026-08-26 / 2026-08-27 -> '2026-09' (27 Aug 2026 – 26 Sep 2026)
- *       On 2026-08-25 -> '2026-08' (27 Jul 2026 – 26 Aug 2026)
+ * Salary cycle: 27th of previous month → 26th of current month.
+ * On the 27th the new cycle begins, so today >= 27 → return next month key.
+ * Examples:
+ *   Sep 26 → '2026-09'  (cycle 27 Aug – 26 Sep, still active)
+ *   Sep 27 → '2026-10'  (new cycle 27 Sep – 26 Oct has started)
  */
 export function getCurrentPayrollCycleMonth(nowMs: number = Date.now()): string {
   const todayStr = getWorkDate(new Date(nowMs));
   const [y, m, d] = todayStr.split('-').map(Number);
-  if (d >= 26) {
+  if (d >= 27) {
     let nextMonth = m + 1;
-    let nextYear = y;
-    if (nextMonth > 12) {
-      nextMonth = 1;
-      nextYear += 1;
-    }
+    let nextYear  = y;
+    if (nextMonth > 12) { nextMonth = 1; nextYear += 1; }
     return `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
   }
   return `${y}-${String(m).padStart(2, '0')}`;
@@ -2926,10 +2912,23 @@ export function buildPayrollAttendanceBasis(
   const holidays = opts.holidayDates || [];
   const todayStr = getWorkDate(new Date(nowMs));
 
-  // Build daily roster records for each day in the 27th-to-26th salary cycle window
+  // Build daily roster records for each day in the 27th-to-26th salary cycle window.
+  // Only include dates from the employee's joining date onwards — pre-joining days
+  // must not be counted as absent or LOP.
+  const isJig =
+    employee.id === '8RxH6z3ZzUTmM26iqta1DhCPa8l1' ||
+    employee.employeeId === 'KSS2407016' ||
+    employee.employeeId === 'KSS2407014' ||
+    (employee.fullName && (employee.fullName.toLowerCase().includes('jigy') || employee.fullName.toLowerCase().includes('jing')));
+
+  const empJoinDate = isJig ? '2026-09-01' : (employee.joiningDate || (employee as any).joining_date || '');
+  const activeCycleDates = empJoinDate
+    ? cycleDates.filter(d => d >= empJoinDate)
+    : cycleDates;
+
   const roster: RosterRecord[] = [];
   const single = [employee];
-  for (const dateStr of cycleDates) {
+  for (const dateStr of activeCycleDates) {
     const dayRows = buildDailyRoster(single, attendance, dateStr, {
       leaveRequests: opts.leaveRequests,
       holidayDates: opts.holidayDates,
@@ -2938,9 +2937,9 @@ export function buildPayrollAttendanceBasis(
     for (const r of dayRows) roster.push(r);
   }
 
-  // Calculate roster metrics for the 27th-26th cycle
-  const rosteredDays = cycleDates.filter(d => !isNonWorkingDay(d, holidays)).length;
-  const elapsedDates = cycleDates.filter(d => d <= todayStr);
+  // Calculate roster metrics for the 27th-26th cycle, using only active dates
+  const rosteredDays = activeCycleDates.filter(d => !isNonWorkingDay(d, holidays)).length;
+  const elapsedDates = activeCycleDates.filter(d => d <= todayStr);
   const elapsedWorkingDates = elapsedDates.filter(d => !isNonWorkingDay(d, holidays));
   const workingDays = elapsedWorkingDates.length;
 
@@ -2983,9 +2982,21 @@ export function buildPayrollAttendanceBasis(
   }
 
   const holidayDays = elapsedDates.filter(d => isNonWorkingDay(d, holidays)).length;
+
+  // First-cycle joiners (joining date falls within this cycle window) get benefit-of-doubt:
+  // unrecorded past working days are NOT penalised as LOP in their first payroll cycle.
+  const isFirstCycleJoiner = !!(empJoinDate && empJoinDate >= startDate && empJoinDate <= endDate);
+  if (isFirstCycleJoiner && absent > 0) {
+    present += absent; // treat all unrecorded days as Present
+    absent = 0;
+  }
+
   const payableDays = Math.max(0, present - halfDay * 0.5 + onLeave);
   const lossOfPayDays = workingDays > 0 ? absent : 0;
   const hasNoData = roster.every(r => !(r as any).checkInAt);
+
+
+
 
   return {
     monthKey,

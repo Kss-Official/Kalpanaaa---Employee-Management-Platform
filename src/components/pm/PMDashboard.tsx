@@ -12,6 +12,8 @@ import {
   TrendingUp, 
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Flame,
   FileText,
   UserCheck,
@@ -66,6 +68,9 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttendanceModal';
 import { useHaptic } from '../../hooks/useHaptic';
 import { FaceCaptureModal } from '../shared/LazyFaceCaptureModal';
+import { PMAttendanceCycleSection } from './PMAttendanceCycleSection';
+import { PMLeaveManagement } from './PMLeaveManagement';
+import { PMWorkSchedule } from './PMWorkSchedule';
 
 interface PMDashboardProps {
   onNavigateTab: (tab: string) => void;
@@ -305,6 +310,10 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
   } | null>(null);
 
   const [monthlyAttendanceEmp, setMonthlyAttendanceEmp] = useState<Employee | null>(null);
+
+  // ── PM-only management panels (collapsed by default) ──────────────────────
+  const [showLeaveManagement, setShowLeaveManagement] = useState(false);
+  const [showWorkSchedule, setShowWorkSchedule] = useState(false);
 
   // Time & ISO String formatting helpers for PM Overrides
   const getCurrentIstTimeInput = (): string => {
@@ -1328,6 +1337,9 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         </div>
       </div>
 
+      {/* ── 3.5. EXECUTIVE ATTENDANCE & SALARY DISBURSEMENT STATEMENT (26TH TO 26TH) ── */}
+      <PMAttendanceCycleSection />
+
       {/* ── 4. FULL LIVE WORKFORCE ROSTER TABLE MODAL ── */}
       {isRosterModalOpen && (
         <div className="fixed inset-0 z-[150] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
@@ -1740,7 +1752,73 @@ export const PMDashboard: React.FC<PMDashboardProps> = ({ onNavigateTab }) => {
         </div>
       )}
 
-      {/* ── 6. MONTHLY ATTENDANCE MODAL (With PM/Admin Day Editor) ── */}
+      {/* ── 6. LEAVE & WFH MANAGEMENT PANEL ─────────────────────────────── */}
+      <div className="bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl overflow-hidden">
+        <button
+          onClick={() => setShowLeaveManagement(prev => !prev)}
+          className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-800/40 transition-colors group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-600 flex items-center justify-center shadow-lg">
+              <Users className="w-4 h-4 text-white" />
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-black text-white">Leave & WFH Management</div>
+              <div className="text-[10px] text-slate-400">Edit EL · SL · Monthly WFH Allowances per employee</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+              PM ONLY
+            </span>
+            {showLeaveManagement
+              ? <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" />
+              : <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" />}
+          </div>
+        </button>
+        {showLeaveManagement && (
+          <div className="px-6 pb-6 border-t border-slate-800/60">
+            <div className="pt-4">
+              <PMLeaveManagement />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 7. WORK SCHEDULE & BREAK MANAGEMENT PANEL ───────────────────── */}
+      <div className="bg-slate-900/60 rounded-3xl border border-slate-800 shadow-xl overflow-hidden">
+        <button
+          onClick={() => setShowWorkSchedule(prev => !prev)}
+          className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-800/40 transition-colors group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-600 to-indigo-600 flex items-center justify-center shadow-lg">
+              <Clock className="w-4 h-4 text-white" />
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-black text-white">Work Schedule & Break Management</div>
+              <div className="text-[10px] text-slate-400">Configure shift times · Meal breaks · Snacks breaks · Weekly working days</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+              PM ONLY
+            </span>
+            {showWorkSchedule
+              ? <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" />
+              : <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" />}
+          </div>
+        </button>
+        {showWorkSchedule && (
+          <div className="px-6 pb-6 border-t border-slate-800/60">
+            <div className="pt-4">
+              <PMWorkSchedule />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 8. MONTHLY ATTENDANCE MODAL (With PM/Admin Day Editor) ── */}
       {monthlyAttendanceEmp && (
         <EmployeeMonthlyAttendanceModal
           employee={monthlyAttendanceEmp}

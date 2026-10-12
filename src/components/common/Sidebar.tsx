@@ -74,6 +74,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const pmNavItems = [
     { id: 'pm_dashboard', label: 'PM Control Center', icon: LayoutDashboard },
+    { id: 'reports', label: 'Attendance & Salary Excel', icon: FileSpreadsheet },
+    { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
     { id: 'employees', label: 'Team Directory', icon: Users },
     { id: 'feedback_hub', label: 'Team Feedback & Growth', icon: MessageSquare },
     { id: 'leave_approvals', label: 'Team Leave Approvals', icon: FileText },
