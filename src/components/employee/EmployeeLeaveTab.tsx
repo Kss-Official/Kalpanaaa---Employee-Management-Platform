@@ -175,7 +175,7 @@ export const EmployeeLeaveTab: React.FC = () => {
                 <span className="text-[9px] text-purple-400 font-bold bg-purple-500/10 px-1.5 py-0.2 rounded border border-purple-500/20">Monthly</span>
               </div>
               <span className="text-sm sm:text-base font-black text-purple-300 font-mono block mt-0.5">
-                {myEarnLeave.balance} Days Left
+                {myEarnLeave.balance} {myEarnLeave.balance === 1 ? 'Day' : 'Days'} Left
               </span>
               <span className="text-[10px] text-purple-400/80 font-semibold group-hover:text-purple-300 flex items-center gap-1 mt-0.5">
                 <span>View Monthly Credit History</span>

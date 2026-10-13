@@ -2176,110 +2176,135 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (isAkash) {
         // Akash: EL=2, SL=0, WFH=0
         const cleanedDates = (e.approvedWfhDates || []).filter(d => !accidentalRange.includes(d));
-        if (e.sickLeaveBalance !== 0 || e.earnLeaveBalance !== 2 || cleanedDates.length !== (e.approvedWfhDates || []).length) {
+        const datesChanged = cleanedDates.length !== (e.approvedWfhDates || []).length;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (datesChanged || needsEl || needsSl) {
           e.approvedWfhDates = cleanedDates;
-          e.sickLeaveBalance = 0;
-          e.earnLeaveBalance = 2;
+          if (needsSl) e.sickLeaveBalance = 0;
+          if (needsEl) e.earnLeaveBalance = 2;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: cleanedDates, sickLeaveBalance: 0, earnLeaveBalance: 2, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: cleanedDates, sickLeaveBalance: e.sickLeaveBalance, earnLeaveBalance: e.earnLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isAsbin) {
         // Asbin: EL=0, SL=1, WFH=0
         const currentDates = e.approvedWfhDates || [];
         const needsDates = !currentDates.includes('2026-08-28') || !currentDates.includes('2026-08-29');
-        const needsEl = e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1;
-        if (needsDates || needsEl) {
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsDates || needsEl || needsSl) {
           const updatedDates = Array.from(new Set([...currentDates, '2026-08-28', '2026-08-29']));
           e.approvedWfhDates = updatedDates;
-          e.earnLeaveBalance = 0;
-          e.sickLeaveBalance = 1;
+          if (needsEl) e.earnLeaveBalance = 0;
+          if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isMahesh) {
         // Mahesh: EL=1, SL=0, WFH=0
         const currentDates = e.approvedWfhDates || [];
         const needsDates = !currentDates.includes('2026-08-27') || !currentDates.includes('2026-08-29') || currentDates.includes('2026-08-26');
-        const needsEl = e.earnLeaveBalance !== 1 || e.sickLeaveBalance !== 0;
-        if (needsDates || needsEl) {
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsDates || needsEl || needsSl) {
           const updatedDates = Array.from(new Set([...currentDates.filter(d => d !== '2026-08-26'), '2026-08-27', '2026-08-29']));
           e.approvedWfhDates = updatedDates;
-          e.earnLeaveBalance = 1;
-          e.sickLeaveBalance = 0;
+          if (needsEl) e.earnLeaveBalance = 1;
+          if (needsSl) e.sickLeaveBalance = 0;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: 1, sickLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { approvedWfhDates: updatedDates, earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isThabeethal) {
         // Thabeethal: EL=0, SL=1, WFH=1 (female monthly WFH)
-        if (e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 1) {
-          e.earnLeaveBalance = 0;
-          e.sickLeaveBalance = 1;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsEl || needsSl) {
+          if (needsEl) e.earnLeaveBalance = 0;
+          if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 0, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isKoushik) {
         // D. Koushik (PM): EL=0, SL=0, WFH=0 — verified policy
-        if (e.earnLeaveBalance !== 0 || e.sickLeaveBalance !== 0) {
-          e.earnLeaveBalance = 0;
-          e.sickLeaveBalance = 0;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsEl || needsSl) {
+          if (needsEl) e.earnLeaveBalance = 0;
+          if (needsSl) e.sickLeaveBalance = 0;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 0, sickLeaveBalance: 0, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isPrahlad) {
         // Prahlad Sharma: EL=2, SL=1, WFH=0
-        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
-          e.earnLeaveBalance = 2;
-          e.sickLeaveBalance = 1;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsEl || needsSl) {
+          if (needsEl) e.earnLeaveBalance = 2;
+          if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isSatya) {
         // Satya Ranjan Das: EL=2, SL=1, WFH=0
-        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
-          e.earnLeaveBalance = 2;
-          e.sickLeaveBalance = 1;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsEl || needsSl) {
+          if (needsEl) e.earnLeaveBalance = 2;
+          if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isRitish) {
         // Ritish: EL=1, SL=1, WFH=0
-        if (e.earnLeaveBalance !== 1 || e.sickLeaveBalance !== 1) {
-          e.earnLeaveBalance = 1;
-          e.sickLeaveBalance = 1;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsEl || needsSl) {
+          if (needsEl) e.earnLeaveBalance = 1;
+          if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 1, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isPratiksha) {
         // Pratiksha Harode: EL=2, SL=1, WFH=0
-        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
-          e.earnLeaveBalance = 2;
-          e.sickLeaveBalance = 1;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsEl || needsSl) {
+          if (needsEl) e.earnLeaveBalance = 2;
+          if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isPriyanka) {
         // Priyanka Kushwah: EL=2, SL=1, WFH=0
-        if (e.earnLeaveBalance !== 2 || e.sickLeaveBalance !== 1) {
-          e.earnLeaveBalance = 2;
-          e.sickLeaveBalance = 1;
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        if (needsEl || needsSl) {
+          if (needsEl) e.earnLeaveBalance = 2;
+          if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 2, sickLeaveBalance: 1, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isJingyasha) {
-        if (e.sickLeaveBalance !== 1 || e.earnLeaveBalance !== 1 || e.joiningDate !== '2026-09-01') {
-          e.sickLeaveBalance = 1;
-          e.earnLeaveBalance = 1;
-          e.joiningDate = '2026-09-01';
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        const needsDate = !e.joiningDate || e.joiningDate !== '2026-09-01';
+        if (needsEl || needsSl || needsDate) {
+          if (needsSl) e.sickLeaveBalance = 1;
+          if (needsEl) e.earnLeaveBalance = 1;
+          if (needsDate) e.joiningDate = '2026-09-01';
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 1, earnLeaveBalance: 1, joiningDate: '2026-09-01', updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: e.sickLeaveBalance, earnLeaveBalance: e.earnLeaveBalance, joiningDate: e.joiningDate, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isJason) {
-        if (e.sickLeaveBalance !== 0 || e.earnLeaveBalance !== 1 || !e.joiningDate || e.joiningDate !== '2026-08-17') {
-          e.sickLeaveBalance = 0;
-          e.earnLeaveBalance = 1;
-          e.joiningDate = '2026-08-17';
+        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        const needsSl = typeof e.sickLeaveBalance !== 'number';
+        const needsDate = !e.joiningDate || e.joiningDate !== '2026-08-17';
+        if (needsEl || needsSl || needsDate) {
+          if (needsSl) e.sickLeaveBalance = 0;
+          if (needsEl) e.earnLeaveBalance = 1;
+          if (needsDate) e.joiningDate = '2026-08-17';
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: 0, earnLeaveBalance: 1, joiningDate: '2026-08-17', updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { sickLeaveBalance: e.sickLeaveBalance, earnLeaveBalance: e.earnLeaveBalance, joiningDate: e.joiningDate, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       }
 

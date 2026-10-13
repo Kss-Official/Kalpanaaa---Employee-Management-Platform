@@ -208,14 +208,23 @@ export function computeEmployeeLeaveBalance(
     return isApproved && isEarnLeave;
   }).length;
 
+  // ── PM / MASTER PORTAL BALANCE SYNCHRONIZATION ──
+  // If the PM portal has a configured or edited earnLeaveBalance, respect it directly as master truth.
+  if (typeof emp.earnLeaveBalance === 'number') {
+    const bal = Math.max(0, emp.earnLeaveBalance);
+    return {
+      credited: Math.max(bal + approvedLeavesTaken, rawCredited, 1),
+      taken: approvedLeavesTaken,
+      balance: bal,
+      history
+    };
+  }
+
   const isAkash = empCode.includes('kss2407013') || empName.includes('akash') || empId.includes('kss2407013');
   const isJingyasha = empCode === 'kss2407014' || empId === '8rxh6z3zzutmm26iqta1dhcpa8l1' || empName.includes('jigy') || empName.includes('jing');
   const isJason = !isJingyasha && (empId === 'kfab95lpbjoeylpkqawx4gxopgt2' || empCode.includes('kss2407011') || empName.includes('jason'));
   const isExcludedFromEarnLeaveZero = isAkash || isJason;
 
-  // RULE: If an employee has already taken Earn Leave (approvedLeavesTaken >= 1), or is a known employee who took Earn Leave
-  // (Asbin, Mahesh, Thabeethal, Koushik), or emp.earnLeaveBalance === 0, their Earn Leave balance MUST be strictly 0.
-  // Employees who only took Sick Leave (Akash, Jason) must NOT have their Earn Leave zeroed out.
   const hasTakenEarnLeave = approvedLeavesTaken > 0 || isKnownEarnLeaveTaker || (!isExcludedFromEarnLeaveZero && emp.earnLeaveBalance === 0);
 
   if (hasTakenEarnLeave) {
@@ -233,16 +242,6 @@ export function computeEmployeeLeaveBalance(
       credited: 1,
       taken: 0,
       balance: 1,
-      history
-    };
-  }
-
-  if (typeof emp.earnLeaveBalance === 'number') {
-    const bal = Math.min(1, Math.max(0, emp.earnLeaveBalance));
-    return {
-      credited: 1,
-      taken: Math.max(0, 1 - bal),
-      balance: bal,
       history
     };
   }
@@ -382,9 +381,18 @@ export function computeSickLeaveBalance(
   const isKoushik = emp.id === 'emp-KSS2407003' || emp.employeeId === 'KSS2407003' || (emp.fullName && emp.fullName.toLowerCase().includes('koushik'));
   const isKnownEarnLeaveOnlyTaker = isAsbin || isMahesh || isThabeethal || isKoushik || isJingyasha;
 
-  // RULE: If an employee has taken Sick Leave in the cycle/tenure,
-  // or is Jason / Akash who took sick leave in August, their Sick Leave balance MUST be strictly 0.
-  // Employees who took Earn Leave (Asbin, Mahesh, Thabeethal, Koushik) and Jingyasha must NOT have their Sick Leave zeroed out.
+  // ── PM / MASTER PORTAL BALANCE SYNCHRONIZATION ──
+  // If the PM portal has a configured or edited sickLeaveBalance, respect it directly as master truth.
+  if (typeof emp.sickLeaveBalance === 'number') {
+    const bal = Math.max(0, emp.sickLeaveBalance);
+    return {
+      credited: Math.max(bal + totalApprovedLeavesTaken, 1),
+      taken: totalApprovedLeavesTaken,
+      balance: bal,
+      history
+    };
+  }
+
   const hasTakenSickLeave = totalApprovedLeavesTaken > 0 || approvedLeavesTakenInCycle > 0 || isKnownSickLeaveTaker || (!isKnownEarnLeaveOnlyTaker && emp.sickLeaveBalance === 0);
 
   if (hasTakenSickLeave) {
@@ -393,15 +401,6 @@ export function computeSickLeaveBalance(
       credited: taken,
       taken: taken,
       balance: 0,
-      history
-    };
-  }
-
-  if (typeof emp.sickLeaveBalance === 'number') {
-    return {
-      credited: Math.max(emp.sickLeaveBalance, 1),
-      taken: 0,
-      balance: emp.sickLeaveBalance,
       history
     };
   }
@@ -418,8 +417,7 @@ export function computeSickLeaveBalance(
 
 /**
  * Computes Casual Leave balance:
- * - 1 day credited every 2 months after joining (6 per year).
- * - Deducts all approved Casual Leave requests.
+ * Per calendar update policy: Casual Leave is set to 0 for all employees.
  */
 export function computeCasualLeaveBalance(
   emp: any,
@@ -427,18 +425,6 @@ export function computeCasualLeaveBalance(
   refDate: Date = new Date()
 ): { credited: number; taken: number; balance: number; monthlyBalance: number } {
   if (!emp) return { credited: 0, taken: 0, balance: 0, monthlyBalance: 0 };
-
-  const joinDate = emp.joiningDate ? new Date(emp.joiningDate) : new Date(refDate.getFullYear(), 0, 1);
-  if (isNaN(joinDate.getTime())) return { credited: 0, taken: 0, balance: 0, monthlyBalance: 0 };
-
-  // Credit 1 day every 2 months from joining up to refDate
-  let credited = 0;
-  const cursor = new Date(joinDate);
-  cursor.setMonth(cursor.getMonth() + 2); // first credit after 2 months
-  while (cursor <= refDate) {
-    credited++;
-    cursor.setMonth(cursor.getMonth() + 2);
-  }
 
   const approvedLeavesTaken = (leaveRequests || []).filter(l => {
     if (!l) return false;
@@ -454,24 +440,7 @@ export function computeCasualLeaveBalance(
     return isEmp && isApproved && isCasual;
   }).length;
 
-  const balance = Math.max(0, credited - approvedLeavesTaken);
-  const currentMonthPrefix = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}`;
-  const monthTaken = (leaveRequests || []).filter(l => {
-    if (!l) return false;
-    const isEmp =
-      (!!l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeId)) ||
-      (!!l.employeeUid && (l.employeeUid === emp.uid || l.employeeUid === emp.id)) ||
-      (!!l.employeeName && !!emp.fullName && l.employeeName.trim().toLowerCase() === emp.fullName.trim().toLowerCase());
-    const isApproved = l.status === 'Approved' ||
-      ((l.pmStatus === 'Approved' || l.pmStatus === 'N/A' || l.pmStatus === 'Bypassed') &&
-       (l.hrStatus === 'Approved' || l.hrStatus === 'N/A' || l.hrStatus === 'Bypassed') &&
-       l.ceoStatus === 'Approved' && l.ctoStatus === 'Approved');
-    const isCasual = l.type === 'Casual Leave' || (l as any).leaveCategory === 'Casual Leave';
-    const isInMonth = l.startDate ? l.startDate.startsWith(currentMonthPrefix) : false;
-    return isEmp && isApproved && isCasual && isInMonth;
-  }).length;
-
-  return { credited, taken: approvedLeavesTaken, balance, monthlyBalance: Math.max(0, balance - monthTaken) };
+  return { credited: 0, taken: approvedLeavesTaken, balance: 0, monthlyBalance: 0 };
 }
 
 /**
@@ -498,12 +467,6 @@ export function computeTotalLeaveBalances(
   const empCode = ((emp?.employeeId || emp?.employeeCode || '') as string).toLowerCase();
   const empId = ((emp?.id || emp?.uid || '') as string).toLowerCase();
 
-  const isMahesh = empName.includes('mahesh') || empCode.includes('kss2407006') || empId.includes('kss2407006') || empId === '8t19zoi3notdcgeye4bwsviwseq1';
-  const isAsbin = empName.includes('asbin') || empCode.includes('kss2407004') || empId.includes('kss2407004');
-  const isThabeethal = empName.includes('thabeethal') || empCode.includes('kss2407005') || empId.includes('kss2407005');
-  const isKoushik = empName.includes('koushik') || empCode.includes('kss2407003') || empId.includes('kss2407003');
-  const isKnownEarnLeaveTaker = isMahesh || isAsbin || isThabeethal || isKoushik;
-
   const currentMonthPrefix = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}`;
   const elMonthTaken = (leaveRequests || []).filter(l => {
     if (!l) return false;
@@ -523,23 +486,12 @@ export function computeTotalLeaveBalances(
     return isEmp && isApproved && isEarnLeave && isInMonth;
   }).length;
 
-  let finalEarnLeave: { credited: number; taken: number; balance: number; monthlyBalance: number };
-  if (isKnownEarnLeaveTaker || emp?.earnLeaveBalance === 0) {
-    const taken = Math.max(1, el.taken);
-    finalEarnLeave = {
-      credited: taken,
-      taken: taken,
-      balance: 0,
-      monthlyBalance: 0
-    };
-  } else {
-    finalEarnLeave = {
-      credited: el.credited,
-      taken: el.taken,
-      balance: el.balance,
-      monthlyBalance: Math.max(0, el.balance - elMonthTaken)
-    };
-  }
+  const finalEarnLeave = {
+    credited: el.credited,
+    taken: el.taken,
+    balance: el.balance,
+    monthlyBalance: Math.max(0, el.balance - elMonthTaken)
+  };
 
   return {
     earnLeave: finalEarnLeave,

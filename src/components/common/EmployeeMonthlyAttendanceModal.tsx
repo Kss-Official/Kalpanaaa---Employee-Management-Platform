@@ -96,7 +96,7 @@ const LeaveBalanceKpiBox: React.FC<{
         </div>
         <div className="flex items-center justify-center my-0.5">
           <span className="text-base font-black text-white group-hover:text-indigo-200 font-mono transition-colors">
-            {overview.totalBalance} Days
+            {overview.totalBalance} {overview.totalBalance === 1 ? 'Day' : 'Days'}
           </span>
         </div>
         <div className="text-[9px] font-bold text-indigo-400 group-hover:text-indigo-300 transition-colors">
@@ -246,11 +246,11 @@ const LeaveBalanceKpiBox: React.FC<{
                     <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
                       <div className="flex justify-between"><span className="text-slate-400">Total Credited:</span><span className="font-bold font-mono text-white">{overview.casualLeave.credited} Days</span></div>
                       <div className="flex justify-between"><span className="text-slate-400">Approved Taken:</span><span className="font-bold font-mono text-rose-400">{overview.casualLeave.taken} Days</span></div>
-                      <div className="flex justify-between pt-1 border-t border-slate-800"><span className="text-slate-400">Policy:</span><span className="font-bold text-cyan-400">6 Days / Year</span></div>
+                      <div className="flex justify-between pt-1 border-t border-slate-800"><span className="text-slate-400">Policy:</span><span className="font-bold text-cyan-400">0 Days / Calendar Update</span></div>
                     </div>
                     <div className="text-[10px] text-slate-400 flex items-start gap-1.5">
                       <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
-                      <span>1 day credited every 2 months (6 per year).</span>
+                      <span>Set to 0 days for all employees in calendar update.</span>
                     </div>
                   </div>
                 </div>
