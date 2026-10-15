@@ -544,6 +544,11 @@ export function computeEmploymentType(emp: any, refDate: Date = new Date()): Emp
     return 'Intern';
   }
 
+  // Satya Ranjan Das is explicitly Software Developer for Employment Type
+  if (name.includes('satya') || id.includes('kss2407012') || email.includes('satya') || emp.employmentType === 'Software Developer') {
+    return 'Software Developer';
+  }
+
   if (
     desig.includes('managing director') ||
     desig.includes('founder') ||

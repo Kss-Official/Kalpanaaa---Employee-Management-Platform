@@ -237,6 +237,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                           <span className={`font-bold ${
                             effectiveType === 'Intern' ? 'text-cyan-400' :
                             effectiveType === 'Trainee' ? 'text-amber-400' :
+                            effectiveType === 'Software Developer' ? 'text-blue-400' :
                             'text-emerald-400'
                           }`}>
                             {effectiveType}

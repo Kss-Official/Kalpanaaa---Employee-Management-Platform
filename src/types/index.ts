@@ -1,6 +1,6 @@
 export type UserRole = 'SUPER_ADMIN' | 'HR_ADMIN' | 'PROJECT_MANAGER' | 'EMPLOYEE';
 
-export type EmploymentType = 'Full-Time' | 'Part-Time' | 'Contract' | 'Intern' | 'Trainee';
+export type EmploymentType = 'Full-Time' | 'Part-Time' | 'Contract' | 'Intern' | 'Trainee' | 'Software Developer';
 
 export type EmployeeStatus = 'Active' | 'On Leave' | 'Inactive' | 'Suspended' | 'Terminated';
 
