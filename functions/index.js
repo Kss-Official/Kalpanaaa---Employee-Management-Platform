@@ -239,3 +239,164 @@ exports.scheduledEveningCheckoutReminder = onSchedule(
     }
   }
 );
+
+// ── Scheduled Monthly Earn Leave (EL) Auto-Credit (1st of every month at 00:00 IST) ──
+// Accrues 1 EL day for all active employees (excluding policy exceptions like D. Koushik),
+// records immutable ledger transactions, and initializes monthly WFH for female staff.
+// Runs with idempotency guarantees so multiple executions never double-credit.
+exports.scheduledMonthlyELCredit = onSchedule(
+  {
+    schedule: '0 0 1 * *', // Midnight IST on the 1st of every month
+    timeZone: 'Asia/Kolkata',
+    retryCount: 2,
+    memory: '512MiB'
+  },
+  async () => {
+    try {
+      // Calculate monthKey (YYYY-MM) in IST
+      const now = new Date();
+      const istString = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+      const istDate = new Date(istString);
+      const yyyy = istDate.getFullYear();
+      const mm = String(istDate.getMonth() + 1).padStart(2, '0');
+      const monthKey = `${yyyy}-${mm}`;
+      const nowIso = now.toISOString();
+
+      console.info(`[MonthlyAutoCredit] Starting monthly EL credit run for ${monthKey}...`);
+
+      const employeesSnap = await db.collection('employees').where('status', '==', 'Active').get();
+      if (employeesSnap.empty) {
+        console.info('[MonthlyAutoCredit] No active employees found.');
+        return;
+      }
+
+      let creditedCount = 0;
+      let skippedCount = 0;
+      let wfhInitCount = 0;
+
+      for (const empDoc of employeesSnap.docs) {
+        const emp = empDoc.data();
+        const empDocId = empDoc.id;
+        const empCode = emp.employeeId || empDocId;
+        const empName = emp.fullName || emp.name || 'Employee';
+
+        // Policy exception: D. Koushik (KSS2407003) has 0 EL by company policy
+        if (empCode === 'KSS2407003') {
+          console.info(`[MonthlyAutoCredit] Skipping ${empCode} (${empName}) by policy.`);
+          continue;
+        }
+
+        // Idempotency check: check if ledger entry already exists
+        const ledgerTxnId = `credit_el_${empDocId}_${monthKey}`;
+        const ledgerRef = db.collection('employees').doc(empDocId).collection('leaveLedger').doc(ledgerTxnId);
+        const ledgerSnap = await ledgerRef.get();
+
+        if (ledgerSnap.exists) {
+          skippedCount++;
+          continue;
+        }
+
+        // Atomic transaction: increment earnLeaveBalance, write ledger, write audit log
+        try {
+          let resultingBal = 0;
+          await db.runTransaction(async (txn) => {
+            const empRef = db.collection('employees').doc(empDocId);
+            const currentSnap = await txn.get(empRef);
+            if (!currentSnap.exists) return;
+
+            const currentData = currentSnap.data();
+            const currentEL = typeof currentData.earnLeaveBalance === 'number' ? currentData.earnLeaveBalance : 0;
+            resultingBal = currentEL + 1;
+
+            txn.update(empRef, {
+              earnLeaveBalance: resultingBal,
+              updatedAt: nowIso
+            });
+
+            // Write ledger entry
+            txn.set(ledgerRef, {
+              txnId: ledgerTxnId,
+              employeeId: empDocId,
+              employeeCode: empCode,
+              leaveType: 'Earn Leave',
+              txnType: 'CREDIT',
+              days: 1,
+              accrualMonth: monthKey,
+              date: `${monthKey}-01`,
+              timestamp: nowIso,
+              reason: `Monthly EL auto-credit for ${monthKey}`,
+              performedBy: 'System Auto-Credit (Cloud Function)',
+              performedByUid: 'system-scheduler',
+              resultingBalance: resultingBal
+            });
+
+            // Write audit log
+            const auditLogId = `autocredit_el_${empDocId}_${monthKey}`;
+            const auditRef = db.collection('auditLogs').doc(auditLogId);
+            txn.set(auditRef, {
+              id: auditLogId,
+              actorId: 'system-scheduler',
+              actorName: 'System Auto-Credit',
+              actorRole: 'SUPER_ADMIN',
+              action: 'EARN_LEAVE_AUTO_CREDITED',
+              target: `${empCode} (${empName})`,
+              details: `Monthly EL auto-credit for ${monthKey}: +1 day -> ${resultingBal}`,
+              timestamp: nowIso,
+              performedBy: 'System Auto-Credit',
+              performedByUid: 'system-scheduler',
+              targetEmployee: empName,
+              targetEmployeeUid: empDocId,
+              role: 'SUPER_ADMIN',
+              monthKey
+            });
+          });
+
+          creditedCount++;
+        } catch (txnErr) {
+          console.error(`[MonthlyAutoCredit] Transaction error for ${empCode}:`, txnErr);
+        }
+
+        // Female employee WFH allowance initialization (1 WFH/month)
+        if (emp.gender === 'Female') {
+          try {
+            const wfhRef = db.collection('wfhAllowances').doc(empDocId).collection('months').doc(monthKey);
+            const wfhSnap = await wfhRef.get();
+            if (!wfhSnap.exists) {
+              await wfhRef.set({
+                employeeId: empDocId,
+                employeeCode: empCode,
+                employeeName: empName,
+                monthKey,
+                allowance: 1,
+                usedApproved: 0,
+                remaining: 1,
+                updatedAt: nowIso,
+                updatedBy: 'system-scheduler',
+                updatedByName: 'System Auto-Init'
+              });
+              wfhInitCount++;
+            }
+          } catch (wfhErr) {
+            console.warn(`[MonthlyAutoCredit] WFH allowance init warning for ${empCode}:`, wfhErr);
+          }
+        }
+      }
+
+      // Notify SuperAdmin & HR of successful auto-credit run
+      await db.collection('notifications').add({
+        type: 'SYSTEM_ALERT',
+        title: `📅 Monthly EL Credit Completed (${monthKey})`,
+        body: `Processed monthly Earn Leave credit for ${monthKey}: ${creditedCount} credited, ${skippedCount} previously credited, ${wfhInitCount} WFH allowances initialized.`,
+        audience: ['SUPER_ADMIN', 'HR_ADMIN'],
+        actorName: 'KSS Automated Scheduler',
+        createdAt: nowIso,
+        _fcmStatus: 'pending'
+      }).catch(() => {});
+
+      console.info(`[MonthlyAutoCredit] Completed ${monthKey}: ${creditedCount} credited, ${skippedCount} skipped, ${wfhInitCount} WFH initialized.`);
+    } catch (err) {
+      console.error('[MonthlyAutoCredit] Fatal error in scheduledMonthlyELCredit:', err);
+    }
+  }
+);
+

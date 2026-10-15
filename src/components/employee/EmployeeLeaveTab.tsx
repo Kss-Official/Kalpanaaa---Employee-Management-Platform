@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { 
   Check, X, Clock, CalendarDays, Plus, Send, Calendar, ChevronRight, 
-  Palmtree, Stethoscope, Info, ArrowUpRight
+  Palmtree, Stethoscope, Info, ArrowUpRight, History, TrendingUp, TrendingDown, RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useHaptic } from '../../hooks/useHaptic';
@@ -13,6 +13,7 @@ import {
   computeEarnLeaveMonthlyCreditHistory,
   computeSickLeaveCreditHistory
 } from '../../lib/attendanceEngine';
+import { subscribeLeaveLedger, LeaveLedgerEntry } from '../../lib/leaveService';
 import { todayInIST } from '../../lib/absoluteTime';
 
 export const EmployeeLeaveTab: React.FC = () => {
@@ -31,17 +32,36 @@ export const EmployeeLeaveTab: React.FC = () => {
   const [isEarnLeaveModalOpen, setIsEarnLeaveModalOpen] = useState(false);
   const [isSickLeaveModalOpen, setIsSickLeaveModalOpen] = useState(false);
 
+  // Leave Ledger State
+  const [ledgerEntries, setLedgerEntries] = useState<LeaveLedgerEntry[]>([]);
+  const [historyViewTab, setHistoryViewTab] = useState<'requests' | 'ledger'>('requests');
+
   const [filterType, setFilterType] = useState<'All' | 'Earn Leave' | 'Sick Leave' | 'WFH'>('All');
   const [timeFilter, setTimeFilter] = useState<'All' | 'Today' | 'Upcoming' | 'Previous' | 'Approved' | 'Rejected'>('All');
   const todayStr = todayInIST();
 
-  const myRequests = leaveRequests.filter(r => 
-    (r.employeeUid && activeEmployee?.uid && r.employeeUid === activeEmployee.uid) ||
-    isEmployeeMatch(activeEmployee, r.employeeId) || 
-    r.employeeId === activeEmployee?.id || 
-    r.employeeId === activeEmployee?.employeeId || 
-    (r.employeeName && activeEmployee?.fullName && r.employeeName.trim().toLowerCase() === activeEmployee.fullName.trim().toLowerCase())
-  );
+  // Subscribe to real-time Leave Ledger for active employee
+  useEffect(() => {
+    const empDocId = activeEmployee?.id;
+    if (!empDocId) return;
+    const unsub = subscribeLeaveLedger(empDocId, (entries) => {
+      setLedgerEntries(entries);
+    });
+    return () => unsub();
+  }, [activeEmployee?.id]);
+
+  // UID-primary filter: prevents cross-employee data bleed from fuzzy name matching.
+  // Priority: UID match → employee code match → employee doc ID match.
+  // Name match is intentionally omitted to avoid leaking records to employees with similar names.
+  const myRequests = leaveRequests.filter(r => {
+    // 1. Firebase Auth UID match (most reliable — canonical anchor)
+    if (r.employeeUid && activeEmployee?.uid && r.employeeUid === activeEmployee.uid) return true;
+    // 2. Employee corporate code match (e.g. KSS2407004)
+    if (activeEmployee?.employeeId && r.employeeId === activeEmployee.employeeId) return true;
+    // 3. Firestore doc ID match
+    if (activeEmployee?.id && r.employeeId === activeEmployee.id) return true;
+    return false;
+  });
 
   const filteredMyRequests = myRequests.filter(r => {
     // Normalise legacy 'Leave' type to 'Earn Leave'
@@ -69,6 +89,16 @@ export const EmployeeLeaveTab: React.FC = () => {
     }
     return true;
   });
+
+  // Deduplicate by document ID: guarantees no request card is ever rendered multiple times
+  const uniqueFilteredRequests = useMemo(() => {
+    const seen = new Set<string>();
+    return filteredMyRequests.filter(r => {
+      if (!r.id || seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    });
+  }, [filteredMyRequests]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,8 +143,20 @@ export const EmployeeLeaveTab: React.FC = () => {
     }
   };
 
+  // Balance source of truth: use the Firestore-stored balance field (earnLeaveBalance / sickLeaveBalance).
+  // computeEmployee* functions are used only for credit/taken breakdown display, NOT for the primary balance.
+  // If the stored field is absent (legacy accounts), fall back to the computed value.
   const myEarnLeave = computeEmployeeLeaveBalance(activeEmployee as any, leaveRequests);
   const mySickLeave = computeSickLeaveBalance(activeEmployee as any, leaveRequests);
+
+  // Authoritative displayed balance: trust Firestore stored value; use computed as fallback.
+  const displayedElBalance = typeof activeEmployee?.earnLeaveBalance === 'number'
+    ? activeEmployee.earnLeaveBalance
+    : myEarnLeave.balance;
+  const displayedSlBalance = typeof activeEmployee?.sickLeaveBalance === 'number'
+    ? activeEmployee.sickLeaveBalance
+    : mySickLeave.balance;
+
   const earnLeaveHistory = computeEarnLeaveMonthlyCreditHistory(activeEmployee as any);
   const sickLeaveHistory = computeSickLeaveCreditHistory(activeEmployee as any);
 
@@ -175,7 +217,7 @@ export const EmployeeLeaveTab: React.FC = () => {
                 <span className="text-[9px] text-purple-400 font-bold bg-purple-500/10 px-1.5 py-0.2 rounded border border-purple-500/20">Monthly</span>
               </div>
               <span className="text-sm sm:text-base font-black text-purple-300 font-mono block mt-0.5">
-                {myEarnLeave.balance} {myEarnLeave.balance === 1 ? 'Day' : 'Days'} Left
+                {displayedElBalance} {displayedElBalance === 1 ? 'Day' : 'Days'} Left
               </span>
               <span className="text-[10px] text-purple-400/80 font-semibold group-hover:text-purple-300 flex items-center gap-1 mt-0.5">
                 <span>View Monthly Credit History</span>
@@ -204,7 +246,7 @@ export const EmployeeLeaveTab: React.FC = () => {
                 <span className="text-[9px] text-rose-400 font-bold bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">Recurring</span>
               </div>
               <span className="text-sm sm:text-base font-black text-rose-300 font-mono block mt-0.5">
-                {mySickLeave.balance} {mySickLeave.balance === 1 ? 'Day' : 'Days'} Left
+                {displayedSlBalance} {displayedSlBalance === 1 ? 'Day' : 'Days'} Left
               </span>
               <span className="text-[10px] text-rose-400/80 font-semibold group-hover:text-rose-300 flex items-center gap-1 mt-0.5">
                 <span>1 day / 3 months ({mySickLeave.taken} used)</span>
@@ -314,15 +356,38 @@ export const EmployeeLeaveTab: React.FC = () => {
         </form>
       )}
 
-      {/* ── Request History Section ── */}
+      {/* ── Request & Ledger History Section ── */}
       <div className="mt-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
-          <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
-            <Clock className="w-4 h-4 text-blue-400 shrink-0" />
-            <span>Request History</span>
-          </h3>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { triggerHaptic(); setHistoryViewTab('requests'); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
+                historyViewTab === 'requests'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-900/30'
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 shrink-0" />
+              <span>Leave Requests ({uniqueFilteredRequests.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { triggerHaptic(); setHistoryViewTab('ledger'); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
+                historyViewTab === 'ledger'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-900/30'
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <History className="w-3.5 h-3.5 shrink-0" />
+              <span>Balance Ledger ({ledgerEntries.length})</span>
+            </button>
+          </div>
 
-          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+          {historyViewTab === 'requests' && (
+            <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
             {/* Time Filter Dropdown */}
             <select
               value={timeFilter}
@@ -346,13 +411,89 @@ export const EmployeeLeaveTab: React.FC = () => {
               <option value="All">All Categories</option>
               <option value="Earn Leave">Earn Leave</option>
               <option value="Sick Leave">Sick Leave</option>
-              <option value="WFH">WFH Only</option>
             </select>
           </div>
+          )}
         </div>
         
+        {historyViewTab === 'ledger' ? (
+          <div className="space-y-3">
+            {ledgerEntries.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="py-12 flex flex-col items-center justify-center text-center bg-slate-950/60 border border-slate-800 rounded-3xl"
+              >
+                <div className="w-16 h-16 rounded-2xl bg-slate-900 flex items-center justify-center mb-4 text-purple-400">
+                  <History className="w-8 h-8" />
+                </div>
+                <h3 className="text-white font-bold text-sm">No Ledger Transactions Yet</h3>
+                <p className="text-slate-500 text-xs mt-1 max-w-sm">
+                  Every monthly EL auto-credit, approved leave deduction, and cancellation reversal is permanently logged in this immutable audit ledger.
+                </p>
+              </motion.div>
+            ) : (
+              <div className="space-y-2.5">
+                {ledgerEntries.map((entry) => {
+                  const isCredit = entry.txnType === 'CREDIT';
+                  const isDebit = entry.txnType === 'DEBIT';
+                  const isReversal = entry.txnType === 'REVERSAL';
+                  
+                  const badgeClass = isCredit 
+                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                    : isDebit
+                    ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                    : isReversal
+                    ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
+                    : 'bg-amber-500/10 text-amber-300 border-amber-500/30';
+
+                  const deltaSign = entry.days > 0 ? `+${entry.days}` : `${entry.days}`;
+
+                  return (
+                    <motion.div
+                      key={entry.txnId}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-slate-950/80 rounded-2xl border border-slate-800/90 p-4 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700 transition-colors"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${badgeClass}`}>
+                          {isCredit ? (
+                            <TrendingUp className="w-4 h-4" />
+                          ) : isDebit ? (
+                            <TrendingDown className="w-4 h-4" />
+                          ) : (
+                            <RotateCcw className="w-4 h-4" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-white font-bold text-xs">{entry.leaveType}</span>
+                            <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${badgeClass}`}>
+                              {entry.txnType} ({deltaSign} {Math.abs(entry.days) === 1 ? 'Day' : 'Days'})
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-500">{entry.date}</span>
+                          </div>
+                          <p className="text-xs text-slate-300 mt-1 leading-snug">{entry.reason}</p>
+                          <span className="text-[10px] text-slate-500">Authorized by {entry.performedBy}</span>
+                        </div>
+                      </div>
+
+                      {typeof entry.resultingBalance === 'number' && (
+                        <div className="text-right shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance After</span>
+                          <span className="text-sm font-black text-white font-mono">{entry.resultingBalance} Days</span>
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="space-y-4">
-          {filteredMyRequests.length === 0 ? (
+          {uniqueFilteredRequests.length === 0 ? (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -374,7 +515,7 @@ export const EmployeeLeaveTab: React.FC = () => {
               }}
               className="space-y-3"
             >
-              {filteredMyRequests.map((req) => {
+              {uniqueFilteredRequests.map((req) => {
                 const isApplicantPmOrHr = req.employeeRole === 'PROJECT_MANAGER' || req.employeeRole === 'HR_ADMIN' ||
                   (req.department || '').toLowerCase().includes('hr') ||
                   (req.employeeName || '').toLowerCase().includes('koushik') ||
@@ -461,24 +602,30 @@ export const EmployeeLeaveTab: React.FC = () => {
                         {displayType}
                       </span>
                       
-                      {currentStatus !== 'Pending' ? (
-                        <span className="text-slate-400 text-[10px] max-w-[200px] truncate" title={req.reviewNotes || `Reviewed by ${req.reviewedBy}`}>
-                          {req.reviewNotes || `Final Sanction by ${req.reviewedBy || 'Executive Board'}`}
-                        </span>
-                      ) : (
+                      {currentStatus === 'Pending' || (currentStatus === 'Approved' && req.startDate >= todayStr) ? (
                         <button 
                           onClick={() => {
                             triggerHaptic('warning');
-                            if (window.confirm(`Cancel this ${displayType} request for ${req.startDate}?`)) {
-                              cancelLeaveRequest(req.id);
-                              setFeedback({ success: true, message: `${displayType} request cancelled successfully.` });
-                              setTimeout(() => setFeedback(null), 3000);
+                            const actionMsg = currentStatus === 'Approved'
+                              ? `Cancel approved ${displayType} from ${req.startDate} to ${req.endDate}? This will reverse the deduction and restore your leave balance.`
+                              : `Cancel this ${displayType} request for ${req.startDate}?`;
+                            if (window.confirm(actionMsg)) {
+                              cancelLeaveRequest(req.id, req.employeeId, req.startDate, req.endDate);
+                              setFeedback({ 
+                                success: true, 
+                                message: `${displayType} request cancelled${currentStatus === 'Approved' ? ' and days restored to balance.' : '.'}` 
+                              });
+                              setTimeout(() => setFeedback(null), 3500);
                             }
                           }} 
                           className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-1.5 rounded-lg active:scale-95 transition-all hover:bg-rose-500/20 flex items-center gap-1 cursor-pointer"
                         >
                           <X className="w-3 h-3" /> Cancel Request
                         </button>
+                      ) : (
+                        <span className="text-slate-400 text-[10px] max-w-[200px] truncate" title={req.reviewNotes || `Reviewed by ${req.reviewedBy}`}>
+                          {req.reviewNotes || `Final Sanction by ${req.reviewedBy || 'Executive Board'}`}
+                        </span>
                       )}
                     </div>
                   </motion.div>
@@ -487,6 +634,7 @@ export const EmployeeLeaveTab: React.FC = () => {
             </motion.div>
           )}
         </div>
+        )}
       </div>
 
       {/* ── MODAL 1: Earn Leave Monthly Credit History Table ── */}

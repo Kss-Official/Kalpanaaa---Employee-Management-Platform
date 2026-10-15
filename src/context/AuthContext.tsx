@@ -1857,14 +1857,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
 
+          // Build authoritative list from Firestore only — no INITIAL_LEAVE_REQUESTS injection.
+          // Using a Map keyed by doc ID deduplicates any repeated Firestore snapshot events.
           const reqMap = new Map<string, LeaveRequest>();
-          INITIAL_LEAVE_REQUESTS.forEach(r => reqMap.set(r.id, r));
           fetched.forEach(r => {
-            const isDummy = (r.reason && (r.reason.toLowerCase().includes('dummy') || r.reason.toLowerCase().includes('test leave'))) ||
-              r.id.startsWith('dummy-') || r.id.startsWith('test-');
-            if (!isDummy) {
-              reqMap.set(r.id, { ...(reqMap.get(r.id) || {}), ...r });
-            }
+            reqMap.set(r.id, r);
           });
           const authoritativeList = Array.from(reqMap.values());
           authoritativeList.sort((a, b) => {
@@ -4434,7 +4431,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else if (stage === 'CEO') {
         await LeaveService.reviewCeoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
       } else if (stage === 'CTO') {
-        await LeaveService.reviewCtoStage(id, decision, revUid, reviewerName, notes, empId, sDate, eDate);
+        // Resolve the employee's Firestore doc ID and leave type for balance deduction.
+        // employeeDocId: prefer UID-matched employee's Firestore doc.id, fall back to empId.
+        const targetEmpForDeduct = employees.find(e =>
+          (e.uid && targetReq?.employeeUid && e.uid === targetReq.employeeUid) ||
+          e.id === empId ||
+          e.employeeId === empId
+        );
+        const employeeDocIdForDeduct = targetEmpForDeduct?.id || empId || '';
+        const leaveTypeForDeduct = targetReq?.type || targetReq?.leaveCategory || '';
+        await LeaveService.reviewCtoStage(
+          id, decision, revUid, reviewerName, notes,
+          empId, sDate, eDate,
+          employeeDocIdForDeduct,
+          leaveTypeForDeduct
+        );
       }
     } catch (fsErr) {
       console.warn('[AuthContext] Firestore stage update error, attempting direct fallback write:', fsErr);
@@ -4567,12 +4578,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const cancelLeaveRequest = async (id: string, employeeId?: string, startDate?: string, endDate?: string) => {
     const targetReq = leaveRequests.find(r => r.id === id);
-    const empId = employeeId || targetReq?.employeeId || activeEmployee?.employeeId || '';
+    const targetEmp = employees.find(e =>
+      (e.uid && targetReq?.employeeUid && e.uid === targetReq.employeeUid) ||
+      e.id === (employeeId || targetReq?.employeeId) ||
+      e.employeeId === (employeeId || targetReq?.employeeId)
+    );
+    const empDocId = targetEmp?.id || employeeId || targetReq?.employeeId || activeEmployee?.id || '';
     const sDate = startDate || targetReq?.startDate || '';
     const eDate = endDate || targetReq?.endDate || '';
+    const revName = activeEmployee?.fullName || user?.displayName || 'Employee';
+    const revUid = user?.uid || activeEmployee?.uid || 'uid-user';
 
-    await LeaveService.cancelRequest(id, empId, sDate, eDate);
-    addAuditLog('LEAVE_CANCELLED', activeEmployee?.fullName || 'Employee', `Cancelled leave/WFH request ${id}`);
+    await LeaveService.cancelRequest(id, empDocId, sDate, eDate, revName, revUid);
+    addAuditLog('LEAVE_CANCELLED', revName, `Cancelled leave/WFH request ${id}`);
   };
 
   const resetToDemoData = () => {

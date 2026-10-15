@@ -30,13 +30,18 @@ import {
   Info,
   CalendarDays,
   Layers,
-  RotateCcw
+  RotateCcw,
+  Plus,
+  Minus,
+  Loader2
 } from 'lucide-react';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType, COMPANY_START_DATE, computeTotalLeaveBalances } from '../../lib/attendanceEngine';
 import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { useHaptic } from '../../hooks/useHaptic';
+import { toast } from 'sonner';
+import { adjustLeaveBalance } from '../../lib/leaveBalanceService';
 
 /* ─── Leave Balance KPI Box + Detail Modal ─── */
 const LeaveBalanceKpiBox: React.FC<{
@@ -48,19 +53,43 @@ const LeaveBalanceKpiBox: React.FC<{
 }> = ({ employee, leaveRequests, year, month, onOpen }) => {
   const [open, setOpen] = React.useState(false);
   const [tab, setTab] = React.useState<'All' | 'Earn Leave' | 'Sick Leave' | 'Casual Leave' | 'WFH'>('All');
+  const [isUpdatingLeave, setIsUpdatingLeave] = React.useState<string | null>(null);
+
+  const { employees, activeEmployee, updateEmployee } = useAuth();
+  const { triggerHaptic } = useHaptic();
+
+  // Dynamically resolve freshest employee document from live context
+  const liveEmp = React.useMemo(() => {
+    const empCode = ((employee?.employeeId || (employee as any)?.employeeCode || '') as string).toLowerCase();
+    const empId = ((employee?.id || (employee as any)?.uid || '') as string).toLowerCase();
+    const empName = ((employee?.fullName || (employee as any)?.name || '') as string).toLowerCase().trim();
+
+    return (employees || []).find((e: any) => {
+      if (!e) return false;
+      const eCode = ((e.employeeId || e.employeeCode || '') as string).toLowerCase();
+      const eId = ((e.id || e.uid || '') as string).toLowerCase();
+      const eName = ((e.fullName || e.name || '') as string).toLowerCase().trim();
+
+      return (
+        (!!eId && (eId === empId || eId === empCode)) ||
+        (!!eCode && (eCode === empCode || eCode === empId)) ||
+        (!!eName && !!empName && (eName === empName || empName.includes(eName) || eName.includes(empName)))
+      );
+    }) || employee;
+  }, [employees, employee]);
 
   const refDate = React.useMemo(() => new Date(year, month - 1, 1), [year, month]);
   const overview = React.useMemo(
-    () => computeTotalLeaveBalances(employee, leaveRequests, refDate),
-    [employee, leaveRequests, refDate]
+    () => computeTotalLeaveBalances(liveEmp, leaveRequests, refDate),
+    [liveEmp, leaveRequests, refDate]
   );
 
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
   const allReqs = React.useMemo(() => {
-    const eName = (employee?.fullName || (employee as any)?.name || '').toLowerCase();
-    const eCode = (employee?.employeeId || '').toLowerCase();
-    const eId = (employee?.id || (employee as any)?.uid || '').toLowerCase();
+    const eName = (liveEmp?.fullName || (liveEmp as any)?.name || '').toLowerCase();
+    const eCode = (liveEmp?.employeeId || '').toLowerCase();
+    const eId = (liveEmp?.id || (liveEmp as any)?.uid || '').toLowerCase();
 
     return (leaveRequests || []).filter((l: any) => {
       if (!l) return false;
@@ -78,7 +107,70 @@ const LeaveBalanceKpiBox: React.FC<{
 
       return directMatch || isMahesh;
     });
-  }, [leaveRequests, employee]);
+  }, [leaveRequests, liveEmp]);
+
+  // Real-time Cloud Database update handler for increment & decrement
+  const handleAdjustLeave = async (
+    field: 'earnLeaveBalance' | 'sickLeaveBalance' | 'casualLeaveBalance',
+    delta: number
+  ) => {
+    triggerHaptic();
+
+    let currentBalance = 0;
+    let leaveLabel = 'Leave';
+    if (field === 'earnLeaveBalance') {
+      currentBalance = typeof liveEmp.earnLeaveBalance === 'number' ? liveEmp.earnLeaveBalance : overview.earnLeave.balance;
+      leaveLabel = 'Earn Leave';
+    } else if (field === 'sickLeaveBalance') {
+      currentBalance = typeof liveEmp.sickLeaveBalance === 'number' ? liveEmp.sickLeaveBalance : overview.sickLeave.balance;
+      leaveLabel = 'Sick Leave';
+    } else if (field === 'casualLeaveBalance') {
+      currentBalance = typeof liveEmp.casualLeaveBalance === 'number' ? liveEmp.casualLeaveBalance : overview.casualLeave.balance;
+      leaveLabel = 'Casual Leave';
+    }
+
+    const newBalance = Math.max(0, currentBalance + delta);
+    if (newBalance === currentBalance && delta < 0) {
+      toast.info(`${leaveLabel} balance is already 0.`);
+      return;
+    }
+
+    setIsUpdatingLeave(field);
+
+    try {
+      const targetId = liveEmp.id || liveEmp.employeeId || (liveEmp as any).uid;
+
+      // 1. Direct real-time Context & Firestore Cloud Database Update
+      await updateEmployee(targetId, { [field]: newBalance });
+      if (liveEmp.employeeId && liveEmp.employeeId !== targetId) {
+        await updateEmployee(liveEmp.employeeId, { [field]: newBalance }).catch(() => {});
+      }
+      if (liveEmp.id && liveEmp.id !== targetId) {
+        await updateEmployee(liveEmp.id, { [field]: newBalance }).catch(() => {});
+      }
+
+      // 2. Adjust leave balance & write audit log
+      await adjustLeaveBalance({
+        employeeId: targetId,
+        employeeCode: liveEmp.employeeId || '',
+        employeeName: liveEmp.fullName || '',
+        field,
+        previousValue: currentBalance,
+        newValue: newBalance,
+        adjustedBy: activeEmployee?.id || activeEmployee?.uid || 'manager',
+        adjustedByName: activeEmployee?.fullName || 'Project Manager',
+        adjustedAt: new Date().toISOString(),
+        reason: `Quick ${delta > 0 ? 'increment (+1)' : 'decrement (-1)'} via Leave Ledger modal`,
+      }).catch(err => console.warn('[LeaveLedger] Audit log error:', err));
+
+      toast.success(`${leaveLabel} balance updated: ${newBalance} ${newBalance === 1 ? 'Day' : 'Days'}`);
+    } catch (err: any) {
+      console.error('Failed to update leave balance:', err);
+      toast.error(err?.message || `Failed to update ${leaveLabel} balance`);
+    } finally {
+      setIsUpdatingLeave(null);
+    }
+  };
 
   return (
     <>
@@ -129,13 +221,13 @@ const LeaveBalanceKpiBox: React.FC<{
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-slate-300">{employee.fullName}</span>
+                      <span className="font-semibold text-slate-300">{liveEmp.fullName}</span>
                       <span>•</span>
-                      <span className="font-mono text-blue-400">{employee.employeeId}</span>
+                      <span className="font-mono text-blue-400">{liveEmp.employeeId}</span>
                       <span>•</span>
-                      <span>{employee.designation || 'Staff'}</span>
+                      <span>{liveEmp.designation || 'Staff'}</span>
                       <span>•</span>
-                      <span className="text-slate-500">Joined: {employee.joiningDate || '2026-07-27'}</span>
+                      <span className="text-slate-500">Joined: {liveEmp.joiningDate || '2026-07-27'}</span>
                     </p>
                   </div>
                 </div>
@@ -187,10 +279,43 @@ const LeaveBalanceKpiBox: React.FC<{
                       </div>
                       <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-300 border border-purple-500/30">Monthly</span>
                     </div>
-                    <div className="text-center py-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
-                      <span className="text-2xl font-black text-purple-300 font-mono">{overview.earnLeave.balance} <span className="text-xs text-slate-400 font-sans">Days</span></span>
+
+                    <div className="text-center py-1.5 flex flex-col items-center">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Balance Available</span>
+                      <div className="flex items-center justify-center gap-2.5 bg-slate-900/90 px-3.5 py-1.5 rounded-2xl border border-purple-500/30 shadow-inner">
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustLeave('earnLeaveBalance', -1)}
+                          disabled={isUpdatingLeave === 'earnLeaveBalance' || overview.earnLeave.balance <= 0}
+                          className="w-7 h-7 rounded-xl bg-purple-500/20 hover:bg-purple-500/35 active:scale-90 border border-purple-500/40 text-purple-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                          title="Decrement Earn Leave (-1 Day)"
+                          aria-label="Decrement Earn Leave"
+                        >
+                          <Minus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        </button>
+                        <div className="min-w-[70px] text-center flex items-center justify-center gap-1">
+                          {isUpdatingLeave === 'earnLeaveBalance' ? (
+                            <Loader2 className="w-5 h-5 text-purple-400 animate-spin my-0.5" />
+                          ) : (
+                            <>
+                              <span className="text-2xl font-black text-purple-300 font-mono">{overview.earnLeave.balance}</span>
+                              <span className="text-xs text-slate-400 font-sans">{overview.earnLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustLeave('earnLeaveBalance', 1)}
+                          disabled={isUpdatingLeave === 'earnLeaveBalance'}
+                          className="w-7 h-7 rounded-xl bg-purple-500/20 hover:bg-purple-500/35 active:scale-90 border border-purple-500/40 text-purple-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                          title="Increment Earn Leave (+1 Day)"
+                          aria-label="Increment Earn Leave"
+                        >
+                          <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        </button>
+                      </div>
                     </div>
+
                     <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
                       <div className="flex justify-between"><span className="text-slate-400">Total Credited:</span><span className="font-bold font-mono text-white">{overview.earnLeave.credited} Days</span></div>
                       <div className="flex justify-between"><span className="text-slate-400">Approved Taken:</span><span className="font-bold font-mono text-rose-400">{overview.earnLeave.taken} Days</span></div>
@@ -213,10 +338,43 @@ const LeaveBalanceKpiBox: React.FC<{
                       </div>
                       <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/30">Recurring</span>
                     </div>
-                    <div className="text-center py-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
-                      <span className="text-2xl font-black text-rose-300 font-mono">{overview.sickLeave.balance} <span className="text-xs text-slate-400 font-sans">Days</span></span>
+
+                    <div className="text-center py-1.5 flex flex-col items-center">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Balance Available</span>
+                      <div className="flex items-center justify-center gap-2.5 bg-slate-900/90 px-3.5 py-1.5 rounded-2xl border border-rose-500/30 shadow-inner">
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustLeave('sickLeaveBalance', -1)}
+                          disabled={isUpdatingLeave === 'sickLeaveBalance' || overview.sickLeave.balance <= 0}
+                          className="w-7 h-7 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 active:scale-90 border border-rose-500/40 text-rose-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                          title="Decrement Sick Leave (-1 Day)"
+                          aria-label="Decrement Sick Leave"
+                        >
+                          <Minus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        </button>
+                        <div className="min-w-[70px] text-center flex items-center justify-center gap-1">
+                          {isUpdatingLeave === 'sickLeaveBalance' ? (
+                            <Loader2 className="w-5 h-5 text-rose-400 animate-spin my-0.5" />
+                          ) : (
+                            <>
+                              <span className="text-2xl font-black text-rose-300 font-mono">{overview.sickLeave.balance}</span>
+                              <span className="text-xs text-slate-400 font-sans">{overview.sickLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustLeave('sickLeaveBalance', 1)}
+                          disabled={isUpdatingLeave === 'sickLeaveBalance'}
+                          className="w-7 h-7 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 active:scale-90 border border-rose-500/40 text-rose-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                          title="Increment Sick Leave (+1 Day)"
+                          aria-label="Increment Sick Leave"
+                        >
+                          <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        </button>
+                      </div>
                     </div>
+
                     <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
                       <div className="flex justify-between"><span className="text-slate-400">Total Credited:</span><span className="font-bold font-mono text-white">{overview.sickLeave.credited} Days</span></div>
                       <div className="flex justify-between"><span className="text-slate-400">Approved Taken:</span><span className="font-bold font-mono text-rose-400">{overview.sickLeave.taken} Days</span></div>
@@ -239,18 +397,56 @@ const LeaveBalanceKpiBox: React.FC<{
                       </div>
                       <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">Bi-Monthly</span>
                     </div>
-                    <div className="text-center py-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
-                      <span className="text-2xl font-black text-cyan-300 font-mono">{overview.casualLeave.balance} <span className="text-xs text-slate-400 font-sans">Days</span></span>
+
+                    <div className="text-center py-1.5 flex flex-col items-center">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Balance Available</span>
+                      <div className="flex items-center justify-center gap-2.5 bg-slate-900/90 px-3.5 py-1.5 rounded-2xl border border-cyan-500/30 shadow-inner">
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustLeave('casualLeaveBalance', -1)}
+                          disabled={isUpdatingLeave === 'casualLeaveBalance' || overview.casualLeave.balance <= 0}
+                          className="w-7 h-7 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/35 active:scale-90 border border-cyan-500/40 text-cyan-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                          title="Decrement Casual Leave (-1 Day)"
+                          aria-label="Decrement Casual Leave"
+                        >
+                          <Minus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        </button>
+                        <div className="min-w-[70px] text-center flex items-center justify-center gap-1">
+                          {isUpdatingLeave === 'casualLeaveBalance' ? (
+                            <Loader2 className="w-5 h-5 text-cyan-400 animate-spin my-0.5" />
+                          ) : (
+                            <>
+                              <span className="text-2xl font-black text-cyan-300 font-mono">{overview.casualLeave.balance}</span>
+                              <span className="text-xs text-slate-400 font-sans">{overview.casualLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAdjustLeave('casualLeaveBalance', 1)}
+                          disabled={isUpdatingLeave === 'casualLeaveBalance'}
+                          className="w-7 h-7 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/35 active:scale-90 border border-cyan-500/40 text-cyan-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                          title="Increment Casual Leave (+1 Day)"
+                          aria-label="Increment Casual Leave"
+                        >
+                          <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                        </button>
+                      </div>
                     </div>
+
                     <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
                       <div className="flex justify-between"><span className="text-slate-400">Total Credited:</span><span className="font-bold font-mono text-white">{overview.casualLeave.credited} Days</span></div>
                       <div className="flex justify-between"><span className="text-slate-400">Approved Taken:</span><span className="font-bold font-mono text-rose-400">{overview.casualLeave.taken} Days</span></div>
-                      <div className="flex justify-between pt-1 border-t border-slate-800"><span className="text-slate-400">Policy:</span><span className="font-bold text-cyan-400">0 Days / Calendar Update</span></div>
+                      <div className="flex justify-between pt-1 border-t border-slate-800">
+                        <span className="text-slate-400">Policy:</span>
+                        <span className={`font-bold ${overview.casualLeave.balance > 0 ? 'text-emerald-400' : 'text-cyan-400'}`}>
+                          {overview.casualLeave.balance > 0 ? `${overview.casualLeave.balance} Days Allocated` : '0 Days / Calendar Update'}
+                        </span>
+                      </div>
                     </div>
                     <div className="text-[10px] text-slate-400 flex items-start gap-1.5">
                       <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
-                      <span>Set to 0 days for all employees in calendar update.</span>
+                      <span>{overview.casualLeave.balance > 0 ? 'Custom quota allocated by management.' : 'Set to 0 days for all employees in calendar update.'}</span>
                     </div>
                   </div>
                 </div>
@@ -358,8 +554,28 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   onClose,
   isInline = false
 }) => {
-  const { attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection, unmarkAttendanceRecord, updateEmployee } = useAuth();
+  const { employees, attendance, leaveRequests, settings, role, activeEmployee, applyAttendanceCorrection, unmarkAttendanceRecord, updateEmployee } = useAuth();
   const { triggerHaptic } = useHaptic();
+
+  // Resolve freshest real-time employee profile from context/Firestore sync
+  const liveEmployee = useMemo(() => {
+    const empCode = ((employee?.employeeId || (employee as any)?.employeeCode || '') as string).toLowerCase();
+    const empId = ((employee?.id || (employee as any)?.uid || '') as string).toLowerCase();
+    const empName = ((employee?.fullName || (employee as any)?.name || '') as string).toLowerCase().trim();
+
+    return (employees || []).find((e: any) => {
+      if (!e) return false;
+      const eCode = ((e.employeeId || e.employeeCode || '') as string).toLowerCase();
+      const eId = ((e.id || e.uid || '') as string).toLowerCase();
+      const eName = ((e.fullName || e.name || '') as string).toLowerCase().trim();
+
+      return (
+        (!!eId && (eId === empId || eId === empCode)) ||
+        (!!eCode && (eCode === empCode || eCode === empId)) ||
+        (!!eName && !!empName && (eName === empName || empName.includes(eName) || eName.includes(empName)))
+      );
+    }) || employee;
+  }, [employees, employee]);
 
   const isSuperAdmin = role === 'SUPER_ADMIN' || activeEmployee?.role === 'SUPER_ADMIN';
   const isHr = role === 'HR_ADMIN' || activeEmployee?.role === 'HR_ADMIN';
@@ -407,26 +623,26 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
   };
 
   // Joining Date editing state — stays in sync with live context updates after save
-  const [joiningDateValue, setJoiningDateValue] = useState<string>(employee.joiningDate || (employee as any).joining_date || '2026-07-27');
+  const [joiningDateValue, setJoiningDateValue] = useState<string>(liveEmployee.joiningDate || (liveEmployee as any).joining_date || '2026-07-27');
   const [isSavingJoiningDate, setIsSavingJoiningDate] = useState(false);
   const [joiningDateToast, setJoiningDateToast] = useState<string | null>(null);
 
   // Re-sync local state whenever the employee record is updated in context (e.g., after save)
   useEffect(() => {
-    const fresh = employee.joiningDate || (employee as any).joining_date || '2026-07-27';
+    const fresh = liveEmployee.joiningDate || (liveEmployee as any).joining_date || '2026-07-27';
     setJoiningDateValue(fresh);
-  }, [employee.joiningDate, (employee as any).joining_date]);
+  }, [liveEmployee.joiningDate, (liveEmployee as any).joining_date]);
 
   const handleSaveJoiningDate = async () => {
     if (!joiningDateValue) return;
     triggerHaptic();
     setIsSavingJoiningDate(true);
     try {
-      const targetId = employee.id || employee.employeeId || (employee as any).uid;
+      const targetId = liveEmployee.id || liveEmployee.employeeId || (liveEmployee as any).uid;
       await updateEmployee(targetId, { joiningDate: joiningDateValue });
       // In case id differed from employeeId, also ensure employeeId is targeted
-      if (employee.employeeId && employee.employeeId !== targetId) {
-        await updateEmployee(employee.employeeId, { joiningDate: joiningDateValue });
+      if (liveEmployee.employeeId && liveEmployee.employeeId !== targetId) {
+        await updateEmployee(liveEmployee.employeeId, { joiningDate: joiningDateValue });
       }
       setJoiningDateToast('✓ Saved!');
       setTimeout(() => setJoiningDateToast(null), 3000);
@@ -1087,7 +1303,7 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
                 {/* 🌟 Interactive Leave Balance Section Box */}
                 <LeaveBalanceKpiBox
-                  employee={employee}
+                  employee={liveEmployee}
                   leaveRequests={leaveRequests}
                   year={year}
                   month={month}

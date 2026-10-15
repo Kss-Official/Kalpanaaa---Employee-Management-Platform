@@ -83,6 +83,14 @@ export interface LeaveRequest {
   isEmergencyOverride?: boolean;
   overrideBy?: string;
   overrideReason?: string;
+
+  // Leave deduction tracking — set to true after balance deducted on final approval
+  // Prevents duplicate deductions if the same approval event fires more than once.
+  _deductionApplied?: boolean;
+  _deductionAppliedAt?: string;
+  _deductionDays?: number;
+  _reversalApplied?: boolean;
+  _reversalAppliedAt?: string;
 }
 
 export interface EarnLeaveCreditEntry {
@@ -197,6 +205,7 @@ export interface Employee {
   approvedWfhDates?: string[]; // YYYY-MM-DD format
   sickLeaveBalance?: number;
   earnLeaveBalance?: number;
+  casualLeaveBalance?: number;
   currentSessionId?: string; // For backward compatibility
   desktopSessionId?: string; // Active Laptop/Desktop session ID
   mobileSessionId?: string;  // Active Mobile/Tablet session ID

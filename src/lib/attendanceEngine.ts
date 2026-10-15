@@ -160,8 +160,8 @@ export function computeEmployeeLeaveBalance(
   const rawCredited = history
     .filter(h => h.status === 'Credited')
     .reduce((acc, h) => acc + h.creditedDays, 0);
-  // Cap Earn Leave credited strictly at 1 (1 EL per active cycle, total 2 days combined with 1 SL)
-  const creditedAcrossMonths = Math.min(1, Math.max(0, rawCredited));
+  // EL accrues 1 day per eligible month across tenure — capped at 2 per policy (max 2 EL for all employees)
+  const creditedAcrossMonths = Math.min(2, Math.max(0, rawCredited));
 
   const empName = ((emp?.fullName || emp?.name || emp?.employeeName || '') as string).toLowerCase();
   const empCode = ((emp?.employeeId || emp?.employeeCode || '') as string).toLowerCase();
@@ -213,7 +213,8 @@ export function computeEmployeeLeaveBalance(
   if (typeof emp.earnLeaveBalance === 'number') {
     const bal = Math.max(0, emp.earnLeaveBalance);
     return {
-      credited: Math.max(bal + approvedLeavesTaken, rawCredited, 1),
+      // Policy: max 2 EL credited for all employees
+      credited: Math.min(2, Math.max(bal + approvedLeavesTaken, Math.min(rawCredited, 2), 1)),
       taken: approvedLeavesTaken,
       balance: bal,
       history
@@ -246,7 +247,7 @@ export function computeEmployeeLeaveBalance(
     };
   }
 
-  const balance = Math.min(1, Math.max(0, creditedAcrossMonths - approvedLeavesTaken));
+  const balance = Math.max(0, creditedAcrossMonths - approvedLeavesTaken);
 
   return {
     credited: creditedAcrossMonths,
@@ -386,7 +387,8 @@ export function computeSickLeaveBalance(
   if (typeof emp.sickLeaveBalance === 'number') {
     const bal = Math.max(0, emp.sickLeaveBalance);
     return {
-      credited: Math.max(bal + totalApprovedLeavesTaken, 1),
+      // Policy: max 1 SL credited for all employees
+      credited: Math.min(1, Math.max(bal + totalApprovedLeavesTaken, 1)),
       taken: totalApprovedLeavesTaken,
       balance: bal,
       history
@@ -398,7 +400,8 @@ export function computeSickLeaveBalance(
   if (hasTakenSickLeave) {
     const taken = Math.max(1, totalApprovedLeavesTaken, approvedLeavesTakenInCycle);
     return {
-      credited: taken,
+      // Policy: max 1 SL credited for all employees
+      credited: 1,
       taken: taken,
       balance: 0,
       history
@@ -439,6 +442,18 @@ export function computeCasualLeaveBalance(
     const isCasual = l.type === 'Casual Leave' || (l as any).leaveCategory === 'Casual Leave';
     return isEmp && isApproved && isCasual;
   }).length;
+
+  // ── PM / MASTER PORTAL BALANCE SYNCHRONIZATION ──
+  // If the PM/Admin has a configured or edited casualLeaveBalance, respect it directly as master truth.
+  if (typeof emp.casualLeaveBalance === 'number') {
+    const bal = Math.max(0, emp.casualLeaveBalance);
+    return {
+      credited: bal + approvedLeavesTaken,
+      taken: approvedLeavesTaken,
+      balance: bal,
+      monthlyBalance: bal
+    };
+  }
 
   return { credited: 0, taken: approvedLeavesTaken, balance: 0, monthlyBalance: 0 };
 }
@@ -497,7 +512,8 @@ export function computeTotalLeaveBalances(
     earnLeave: finalEarnLeave,
     sickLeave: { credited: sl.credited, taken: sl.taken, balance: sl.balance },
     casualLeave: cl,
-    totalCredited: finalEarnLeave.credited + sl.credited + cl.credited,
+    // Policy: max 2 EL + 1 SL = max 3 total credited. CL is always 0 per policy and must not inflate this total.
+    totalCredited: Math.min(finalEarnLeave.credited, 2) + sl.credited,
     totalTaken: finalEarnLeave.taken + sl.taken + cl.taken,
     totalBalance: finalEarnLeave.balance + sl.balance + cl.balance,
   };

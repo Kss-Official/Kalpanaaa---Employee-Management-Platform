@@ -190,7 +190,7 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly([
         'id','actorId','actorName','actorRole','action','target','details','timestamp',
         'performedBy','performedByUid','targetEmployee','targetEmployeeUid',
-        'role','ipAddress','userAgent','sessionId'
+        'role','ipAddress','userAgent','sessionId','monthKey'
       ]) &&
       request.resource.data.get('action','') is string &&
       request.resource.data.get('action','').size() <= 80 &&
@@ -261,6 +261,13 @@ service cloud.firestore {
         allow read: if isConfigAdmin() ||
           (isRealUser() && (employeeId == request.auth.uid || employeeId == getEmployeeDocId()));
         allow write: if isConfigAdmin();
+      }
+
+      // 2c. Leave Ledger subcollection (immutable audit trail of all EL/SL credits, debits, reversals)
+      match /leaveLedger/{txnId} {
+        allow read: if isRealUser() && (isConfigAdmin() || isProjectManager() || ownsEmployeeRecord(employeeId));
+        allow create: if isSignedIn() && (isConfigAdmin() || isProjectManager() || ownsEmployeeRecord(employeeId));
+        allow update, delete: if isSuperAdmin();
       }
     }
 

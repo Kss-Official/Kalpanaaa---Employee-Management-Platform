@@ -109,7 +109,7 @@ export interface LeaveBalanceAdjustment {
   employeeId: string;         // Firestore document ID
   employeeCode: string;
   employeeName: string;
-  field: 'earnLeaveBalance' | 'sickLeaveBalance';
+  field: 'earnLeaveBalance' | 'sickLeaveBalance' | 'casualLeaveBalance';
   previousValue: number;
   newValue: number;
   reason?: string;
@@ -120,7 +120,7 @@ export interface LeaveBalanceAdjustment {
 }
 
 /**
- * Updates an employee's EL or SL balance directly.
+ * Updates an employee's EL, SL, or CL balance directly.
  * Validates the new value, writes to Firestore, and writes an audit log.
  */
 export async function adjustLeaveBalance(
@@ -133,6 +133,12 @@ export async function adjustLeaveBalance(
   if (!Number.isInteger(adjustment.newValue) && adjustment.newValue % 0.5 !== 0) {
     return { success: false, message: 'Balance must be a whole or half number.' };
   }
+
+  const fieldLabel = adjustment.field === 'earnLeaveBalance' 
+    ? 'Earned Leave' 
+    : adjustment.field === 'sickLeaveBalance' 
+      ? 'Sick Leave' 
+      : 'Casual Leave';
 
   try {
     // 1. Update the employee document
@@ -154,7 +160,7 @@ export async function adjustLeaveBalance(
       actorRole: 'PROJECT_MANAGER',
       action: 'LEAVE_BALANCE_ADJUSTED',
       target: `${adjustment.employeeCode} (${adjustment.employeeName})`,
-      details: `${adjustment.field === 'earnLeaveBalance' ? 'Earned Leave' : 'Sick Leave'} adjusted from ${adjustment.previousValue} to ${adjustment.newValue}${adjustment.reason ? ` | Reason: ${adjustment.reason}` : ''}`,
+      details: `${fieldLabel} adjusted from ${adjustment.previousValue} to ${adjustment.newValue}${adjustment.reason ? ` | Reason: ${adjustment.reason}` : ''}`,
       timestamp: adjustment.adjustedAt,
       performedBy: adjustment.adjustedByName,
       performedByUid: adjustment.adjustedBy,
@@ -168,7 +174,7 @@ export async function adjustLeaveBalance(
       { merge: true }
     );
 
-    return { success: true, message: `${adjustment.field === 'earnLeaveBalance' ? 'Earned Leave' : 'Sick Leave'} balance updated to ${adjustment.newValue}.` };
+    return { success: true, message: `${fieldLabel} balance updated to ${adjustment.newValue}.` };
   } catch (err: any) {
     return { success: false, message: err?.message || 'Failed to update leave balance.' };
   }
@@ -260,6 +266,11 @@ export function setMonthlyCreditLatch(monthKey: string): void {
  * Runs monthly EL auto-credit (+1) for all active employees.
  * Also auto-initialises monthly WFH allowance for female employees (1 WFH/month).
  *
+ * Race-condition fix: uses Firestore transactions per employee (read-current-then-increment)
+ * instead of reading stale in-memory balance and doing a raw batch write.
+ * Idempotency: a deterministic auditLog doc ID (`autocredit_el_{empId}_{monthKey}`) is
+ * written with merge:true; if it already exists the balance was already incremented.
+ *
  * Called only on the 1st of the month, once per browser session,
  * gated by a localStorage latch.
  */
@@ -273,9 +284,8 @@ export async function runMonthlyAutoCredit(
   const wfhInitialized: string[] = [];
   const errors: string[] = [];
 
-  const BATCH_SIZE = 400;
+  const { runTransaction, doc: firestoreDoc } = await import('firebase/firestore');
 
-  // Split employees into chunks for Firestore batch writes
   const activeEmps = employees.filter(
     (e) =>
       e.status === 'Active' &&
@@ -283,97 +293,124 @@ export async function runMonthlyAutoCredit(
       e.employeeId !== 'KSS2407003' // D. Koushik has EL=0 by policy
   );
 
-  for (let i = 0; i < activeEmps.length; i += BATCH_SIZE) {
-    const chunk = activeEmps.slice(i, i + BATCH_SIZE);
-    const batch = writeBatch(db);
+  const nowIso = new Date().toISOString();
 
-    for (const emp of chunk) {
-      // ── EL +1 auto-credit ────────────────────────────────────────────────
-      const currentEL = typeof emp.earnLeaveBalance === 'number' ? emp.earnLeaveBalance : 0;
-      const newEL = currentEL + 1;
-      batch.set(
-        doc(db, 'employees', emp.id),
-        cleanFirestorePayload({ earnLeaveBalance: newEL, updatedAt: new Date().toISOString() }),
-        { merge: true }
-      );
+  for (const emp of activeEmps) {
+    // ── Idempotency guard: check if audit log already exists for this month ──
+    const elLogId = `autocredit_el_${emp.id}_${monthKey}`;
+    try {
+      const auditSnap = await getDoc(doc(db, 'auditLogs', elLogId));
+      if (auditSnap.exists()) {
+        // Already credited this month — skip entirely for this employee
+        credited.push(emp.fullName); // count as done
+        continue;
+      }
+    } catch { /* non-fatal: proceed */ }
 
-      // Audit log for EL credit
-      const elLogId = `autocredit_el_${emp.id}_${monthKey}`;
-      batch.set(
-        doc(db, 'auditLogs', elLogId),
-        cleanFirestorePayload({
+    // ── Atomic EL increment via Firestore transaction ────────────────────────
+    try {
+      let newEL = 0;
+      await runTransaction(db, async (txn) => {
+        const empRef = doc(db, 'employees', emp.id);
+        const empSnap = await txn.get(empRef);
+        const currentEL = empSnap.exists()
+          ? (typeof empSnap.data().earnLeaveBalance === 'number' ? empSnap.data().earnLeaveBalance : 0)
+          : 0;
+        newEL = currentEL + 1;
+
+        txn.set(empRef, cleanFirestorePayload({
+          earnLeaveBalance: newEL,
+          updatedAt: nowIso
+        }), { merge: true });
+
+        // Write audit log inside transaction to serve as idempotency key
+        txn.set(doc(db, 'auditLogs', elLogId), cleanFirestorePayload({
           id: elLogId,
           actorId: 'system',
           actorName: 'System Auto-Credit',
           actorRole: 'SUPER_ADMIN',
           action: 'EARN_LEAVE_AUTO_CREDITED',
           target: `${emp.employeeId} (${emp.fullName})`,
-          details: `Monthly EL auto-credit for ${monthKey}: ${currentEL} → ${newEL}`,
-          timestamp: new Date().toISOString(),
+          details: `Monthly EL auto-credit for ${monthKey}: +1 day → ${newEL}`,
+          timestamp: nowIso,
           performedBy: performedByName,
           performedByUid,
           targetEmployee: emp.fullName,
           targetEmployeeUid: emp.id,
           role: 'SUPER_ADMIN',
-        }),
-        { merge: true }
-      );
+          monthKey,
+        }), { merge: true });
+      });
+
+      // Write ledger entry (outside transaction — non-fatal)
+      const ledgerTxnId = `credit_el_${emp.id}_${monthKey}`;
+      setDoc(
+        doc(db, 'employees', emp.id, 'leaveLedger', ledgerTxnId),
+        cleanFirestorePayload({
+          txnId: ledgerTxnId,
+          employeeId: emp.id,
+          employeeCode: emp.employeeId,
+          leaveType: 'Earn Leave',
+          txnType: 'CREDIT',
+          days: 1,
+          accrualMonth: monthKey,
+          date: `${monthKey}-01`,
+          timestamp: nowIso,
+          reason: `Monthly EL auto-credit for ${monthKey}`,
+          performedBy: 'System Auto-Credit',
+          performedByUid: 'system',
+          resultingBalance: newEL,
+        })
+      ).catch(e => console.warn('[LeaveBalanceService] Ledger write failed (non-fatal):', e));
 
       credited.push(emp.fullName);
-
-      // ── Female employee WFH auto-init (1 WFH/month) ──────────────────────
-      if (emp.gender === 'Female') {
-        const wfhDocRef = doc(db, 'wfhAllowances', emp.id, 'months', monthKey);
-        // Only set if it doesn't already exist
-        const existing = await getDoc(wfhDocRef).catch(() => null);
-        if (!existing?.exists()) {
-          batch.set(
-            wfhDocRef,
-            cleanFirestorePayload({
-              employeeId: emp.id,
-              employeeCode: emp.employeeId,
-              employeeName: emp.fullName,
-              monthKey,
-              allowance: 1,
-              usedApproved: 0,
-              remaining: 1,
-              updatedAt: new Date().toISOString(),
-              updatedBy: 'system',
-              updatedByName: 'System Auto-Init',
-            }),
-            { merge: true }
-          );
-
-          const wfhLogId = `autocredit_wfh_${emp.id}_${monthKey}`;
-          batch.set(
-            doc(db, 'auditLogs', wfhLogId),
-            cleanFirestorePayload({
-              id: wfhLogId,
-              actorId: 'system',
-              actorName: 'System Auto-Init',
-              actorRole: 'SUPER_ADMIN',
-              action: 'WFH_ALLOWANCE_AUTO_INITIALIZED',
-              target: `${emp.employeeId} (${emp.fullName})`,
-              details: `Monthly WFH allowance auto-initialized to 1 for female employee for ${monthKey}`,
-              timestamp: new Date().toISOString(),
-              performedBy: performedByName,
-              performedByUid,
-              targetEmployee: emp.fullName,
-              targetEmployeeUid: emp.id,
-              role: 'SUPER_ADMIN',
-            }),
-            { merge: true }
-          );
-
-          wfhInitialized.push(emp.fullName);
-        }
-      }
+    } catch (err: any) {
+      errors.push(`EL credit failed for ${emp.fullName}: ${err?.message}`);
     }
 
-    try {
-      await batch.commit();
-    } catch (err: any) {
-      errors.push(`Batch failed: ${err?.message}`);
+    // ── Female employee WFH auto-init (1 WFH/month) ──────────────────────────
+    if (emp.gender === 'Female') {
+      const wfhDocRef = doc(db, 'wfhAllowances', emp.id, 'months', monthKey);
+      try {
+        const existing = await getDoc(wfhDocRef).catch(() => null);
+        if (!existing?.exists()) {
+          const wfhBatch = writeBatch(db);
+          wfhBatch.set(wfhDocRef, cleanFirestorePayload({
+            employeeId: emp.id,
+            employeeCode: emp.employeeId,
+            employeeName: emp.fullName,
+            monthKey,
+            allowance: 1,
+            usedApproved: 0,
+            remaining: 1,
+            updatedAt: nowIso,
+            updatedBy: 'system',
+            updatedByName: 'System Auto-Init',
+          }), { merge: true });
+
+          const wfhLogId = `autocredit_wfh_${emp.id}_${monthKey}`;
+          wfhBatch.set(doc(db, 'auditLogs', wfhLogId), cleanFirestorePayload({
+            id: wfhLogId,
+            actorId: 'system',
+            actorName: 'System Auto-Init',
+            actorRole: 'SUPER_ADMIN',
+            action: 'WFH_ALLOWANCE_AUTO_INITIALIZED',
+            target: `${emp.employeeId} (${emp.fullName})`,
+            details: `Monthly WFH allowance auto-initialized to 1 for female employee for ${monthKey}`,
+            timestamp: nowIso,
+            performedBy: performedByName,
+            performedByUid,
+            targetEmployee: emp.fullName,
+            targetEmployeeUid: emp.id,
+            role: 'SUPER_ADMIN',
+          }), { merge: true });
+
+          await wfhBatch.commit();
+          wfhInitialized.push(emp.fullName);
+        }
+      } catch (err: any) {
+        errors.push(`WFH init failed for ${emp.fullName}: ${err?.message}`);
+      }
     }
   }
 

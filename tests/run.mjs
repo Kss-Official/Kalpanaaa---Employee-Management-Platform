@@ -25,7 +25,8 @@ const testFiles = [
   join('tests', 'regression.test.mjs'),
   join('tests', 'fcm.test.mjs'),
   join('tests', 'rtdb.test.mjs'),
-  join('tests', 'hierarchy.test.mjs')
+  join('tests', 'hierarchy.test.mjs'),
+  join('tests', 'leave.test.mjs')
 ];
 
 const testRes = spawnSync(
