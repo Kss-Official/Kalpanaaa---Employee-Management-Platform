@@ -135,9 +135,9 @@ export const INITIAL_EMPLOYEES: Employee[] = [
   {
     id: 'emp-KSS2407004',
     employeeId: 'KSS2407004',
-    uid: 'uid-KSS2407004',
+    uid: 'GCIqrMaffebCGNdmbuzPbcl6IpQ2',
     fullName: 'Asbin T S',
-    email: 'asbin.ts@kalpanaaa.in',
+    email: 'asbin.t.s@kalpanaaa.in',
     phone: '7603872359',
     gender: 'Male',
     dateOfBirth: '1998-11-05',
