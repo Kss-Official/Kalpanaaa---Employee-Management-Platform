@@ -549,6 +549,11 @@ export function computeEmploymentType(emp: any, refDate: Date = new Date()): Emp
     return 'Software Developer';
   }
 
+  // Pratiksha Harode is explicitly Full Stack Development for Employment Type
+  if (name.includes('pratiksha') || id.includes('kss2407008') || email.includes('pratiksha')) {
+    return 'Full Stack Development';
+  }
+
   if (
     desig.includes('managing director') ||
     desig.includes('founder') ||

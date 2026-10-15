@@ -273,7 +273,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     department: 'Software Engineering',
     designation: 'Software Engineer',
     joiningDate: '2024-04-01',
-    employmentType: 'Full-Time',
+    employmentType: 'Full Stack Development',
     reportingManager: 'D. Koushik',
     workLocation: 'Main Office HQ',
     status: 'Active',
