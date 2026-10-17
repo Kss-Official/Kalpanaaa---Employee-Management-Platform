@@ -38,6 +38,7 @@ import { EmployeeMonthlyAttendanceModal } from '../common/EmployeeMonthlyAttenda
 const DEPARTMENTS = [
   'ALL',
   'IT',
+  'Engineering',
   'HR',
   'Product & Design',
   'Management',

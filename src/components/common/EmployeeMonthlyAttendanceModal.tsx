@@ -668,10 +668,15 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
   // Filter employee attendance records for this selected year & month
   const empRecords = useMemo(() => {
+    const empUid = (employee as any).uid || employee.id;
     return attendance.filter(rec => {
       const isEmpMatch = 
         rec.employeeId === employee.id || 
+        rec.employeeId === employee.employeeId ||
         rec.employeeCode === employee.employeeId || 
+        rec.employeeCode === employee.id ||
+        (!!empUid && (rec.employeeUid === empUid || rec.uid === empUid || rec.employeeId === empUid)) ||
+        (!!employee.id && (rec.employeeUid === employee.id || rec.uid === employee.id)) ||
         (rec.employeeName && employee.fullName && rec.employeeName.trim().toLowerCase() === employee.fullName.trim().toLowerCase()) ||
         (employee.email && rec.employeeName && employee.email.toLowerCase().includes(rec.employeeName.toLowerCase()));
       const isMonthMatch = rec.date && rec.date.startsWith(selectedYearMonth);
@@ -864,7 +869,8 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
     const currentJoinDate = joiningDateValue || employee.joiningDate || (employee as any).joining_date;
     const effectiveStartDate = currentJoinDate && currentJoinDate > COMPANY_START_DATE ? currentJoinDate : COMPANY_START_DATE;
-    const isPreInception = dateFormatted < effectiveStartDate;
+    const hasRecordedWork = rec && (rec.checkInAt || rec.status === 'Present' || rec.status === 'Work From Home' || rec.status === 'Late' || rec.status === 'Half Day');
+    const isPreInception = dateFormatted < effectiveStartDate && !hasRecordedWork;
     if (isPreInception) {
       // Days before company start (27 July 2026) or before employee joining date are unmarked (not present, late, or absent)
       continue;
@@ -1465,7 +1471,8 @@ export const EmployeeMonthlyAttendanceModal: React.FC<EmployeeMonthlyAttendanceM
 
                   const currentJoinDate = joiningDateValue || employee.joiningDate || (employee as any).joining_date;
                   const effectiveStartDate = currentJoinDate && currentJoinDate > COMPANY_START_DATE ? currentJoinDate : COMPANY_START_DATE;
-                  const isPreInception = dateFormatted < effectiveStartDate;
+                  const hasRecordedWork = rec && (rec.checkInAt || rec.status === 'Present' || rec.status === 'Work From Home' || rec.status === 'Late' || rec.status === 'Half Day');
+                  const isPreInception = dateFormatted < effectiveStartDate && !hasRecordedWork;
 
                   let statusBg = 'bg-slate-950 border-slate-800 text-slate-400';
                   let statusLabel = 'Absent';

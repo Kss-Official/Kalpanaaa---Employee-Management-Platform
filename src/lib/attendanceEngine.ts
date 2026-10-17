@@ -376,7 +376,7 @@ export function computeSickLeaveBalance(
     };
   }
 
-  const isAsbin = emp.id === 'emp-KSS2407004' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin'));
+  const isAsbin = emp.id === 'emp-KSS2407004' || emp.id === 'GCIqrMaffebCGNdmbuzPbcl6IpQ2' || emp.uid === 'GCIqrMaffebCGNdmbuzPbcl6IpQ2' || emp.employeeId === 'KSS2407004' || (emp.fullName && emp.fullName.toLowerCase().includes('asbin')) || (emp.email && emp.email.toLowerCase().includes('asbin'));
   const isMahesh = emp.id === 'emp-KSS2407006' || emp.employeeId === 'KSS2407006' || (emp.fullName && emp.fullName.toLowerCase().includes('mahesh'));
   const isThabeethal = emp.id === 'emp-KSS2407005' || emp.employeeId === 'KSS2407005' || (emp.fullName && emp.fullName.toLowerCase().includes('thabeethal'));
   const isKoushik = emp.id === 'emp-KSS2407003' || emp.employeeId === 'KSS2407003' || (emp.fullName && emp.fullName.toLowerCase().includes('koushik'));

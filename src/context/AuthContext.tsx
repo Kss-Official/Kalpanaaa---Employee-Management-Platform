@@ -97,35 +97,100 @@ const sanitizeInput = <T extends any>(data: T): T => {
   return data;
 };
 
-// Helper for allocating specific employee IDs to founders and starting others from 004
-const getAssignedEmployeeDetails = (fullName: string, employees: Employee[]) => {
+// Helper for allocating specific employee IDs to known staff and generating next sequential IDs with safety floor
+const getAssignedEmployeeDetails = (fullName: string, employees: Employee[], email?: string) => {
   const name = (fullName || '').toLowerCase().trim();
+  const cleanEmail = (email || '').toLowerCase().trim();
   
-  if (name.includes('gaurav')) {
+  if (name.includes('gaurav') || cleanEmail.includes('founder') || cleanEmail.includes('gaurav')) {
     return {
       employeeId: 'KSS2407001',
       role: 'SUPER_ADMIN' as UserRole,
       designation: 'CTO And Founder And MD'
     };
   }
-  if (name.includes('akshit')) {
+  if (name.includes('akshit') || cleanEmail.includes('akshit')) {
     return {
       employeeId: 'KSS2407002',
       role: 'SUPER_ADMIN' as UserRole,
       designation: 'CEO'
     };
   }
-  if (name.includes('koushik')) {
+  if (name.includes('koushik') || cleanEmail.includes('koushik')) {
     return {
       employeeId: 'KSS2407003',
       role: 'PROJECT_MANAGER' as UserRole,
       designation: 'Project Manager'
     };
   }
+  if (name.includes('asbin') || cleanEmail.includes('asbin')) {
+    return {
+      employeeId: 'KSS2407004',
+      role: 'EMPLOYEE' as UserRole,
+      designation: 'Software Developer'
+    };
+  }
+  if (name.includes('thabeethal') || cleanEmail.includes('thabeethal')) {
+    return {
+      employeeId: 'KSS2407005',
+      role: 'EMPLOYEE' as UserRole,
+      designation: 'Backend Developer'
+    };
+  }
+  if (name.includes('mahesh') || cleanEmail.includes('mahesh')) {
+    return {
+      employeeId: 'KSS2407006',
+      role: 'EMPLOYEE' as UserRole,
+      designation: 'Frontend Developer'
+    };
+  }
+  if (name.includes('ritish') || cleanEmail.includes('ritish')) {
+    return {
+      employeeId: 'KSS2407007',
+      role: 'EMPLOYEE' as UserRole,
+      designation: 'Full Stack Developer'
+    };
+  }
+  if (name.includes('pratiksha') || cleanEmail.includes('pratiksha')) {
+    return {
+      employeeId: 'KSS2407008',
+      role: 'EMPLOYEE' as UserRole,
+      designation: 'Full Stack Development'
+    };
+  }
+  if (name.includes('priyanka') || cleanEmail.includes('priyanka')) {
+    return {
+      employeeId: 'KSS2407009',
+      role: 'EMPLOYEE' as UserRole,
+      designation: 'Frontend Developer'
+    };
+  }
+  if (name.includes('prahlad') || cleanEmail.includes('prahlad')) {
+    return {
+      employeeId: 'KSS2407010',
+      role: 'EMPLOYEE' as UserRole,
+      designation: 'Frontend Developer'
+    };
+  }
 
-  // General employees start from KSS2407004
-  let maxSeq = 3; 
-  employees.forEach(emp => {
+  // Cross-check INITIAL_EMPLOYEES first to match any seeded staff by email or name
+  const existingInitial = INITIAL_EMPLOYEES.find(e =>
+    (cleanEmail && e.email && e.email.toLowerCase() === cleanEmail) ||
+    (name && e.fullName && e.fullName.toLowerCase() === name)
+  );
+  if (existingInitial) {
+    return {
+      employeeId: existingInitial.employeeId,
+      role: existingInitial.role,
+      designation: existingInitial.designation
+    };
+  }
+
+  // General employees: calculate max sequence with safety floor of 17 (KSS2407017 is highest seeded)
+  // Combine INITIAL_EMPLOYEES with current live employees so a cold cache never reverts to 004
+  const pool = [...INITIAL_EMPLOYEES, ...(employees || [])];
+  let maxSeq = 17; 
+  pool.forEach(emp => {
     if (emp.employeeId?.startsWith('KSS2407') || emp.employeeId?.startsWith('KSS2707')) {
       const numStr = emp.employeeId.replace('KSS2407', '').replace('KSS2707', '');
       const num = parseInt(numStr, 10);
@@ -719,6 +784,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         (e.email && e.email.toLowerCase().includes('d.koushik'))
       ) || INITIAL_EMPLOYEES.find(e => e.employeeId === 'KSS2407003' || e.id === 'emp-KSS2407003');
       if (koushik) return koushik;
+    }
+
+    // Direct mapping for Asbin T.S. Auth UID & identity anchors
+    if (search === 'gciqrmaffebcgndmbuzpbcl6ipq2' || search === 'asbin' || search === 'asbin t s' || search === 'asbin.t.s@kalpanaaa.in') {
+      const asbin = employeesRef.current.find(e =>
+        e.id === 'GCIqrMaffebCGNdmbuzPbcl6IpQ2' ||
+        e.uid === 'GCIqrMaffebCGNdmbuzPbcl6IpQ2' ||
+        (e.email && e.email.toLowerCase() === 'asbin.t.s@kalpanaaa.in') ||
+        (e.fullName && e.fullName.toLowerCase().includes('asbin')) ||
+        e.employeeId === 'KSS2407004' ||
+        e.id === 'emp-KSS2407004'
+      ) || INITIAL_EMPLOYEES.find(e => e.employeeId === 'KSS2407004' || e.id === 'emp-KSS2407004' || (e.email && e.email.toLowerCase() === 'asbin.t.s@kalpanaaa.in'));
+      if (asbin) return asbin;
+    }
+
+    // Direct mapping for Prahlad Sharma Auth UID
+    if (search === 'taq2d87ufqmrd6z036kuthiew9n2') {
+      const prahlad = employeesRef.current.find(e =>
+        e.id === 'taq2d87UFqMrd6z036KuTHIeW9n2' ||
+        e.uid === 'taq2d87UFqMrd6z036KuTHIeW9n2' ||
+        e.employeeId === 'KSS2407010' ||
+        e.id === 'emp-KSS2407010' ||
+        (e.email && e.email.toLowerCase().includes('prahlad'))
+      ) || INITIAL_EMPLOYEES.find(e => e.employeeId === 'KSS2407010' || e.id === 'emp-KSS2407010');
+      if (prahlad) return prahlad;
     }
     return employeesRef.current.find(e =>
       (e.id && e.id.toLowerCase() === search) ||
@@ -1369,6 +1459,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // LIVE AUTOCORRECT PRAHLAD SHARMA (Engineering, Frontend Development, joiningDate: 2026-07-27)
+              const isPrahladEmp =
+                data.id === 'taq2d87UFqMrd6z036KuTHIeW9n2' ||
+                data.id === 'emp-1785907335001' ||
+                data.id === 'emp-KSS2407010' ||
+                data.employeeId === 'KSS2407010' ||
+                (data.fullName && data.fullName.toLowerCase().includes('prahlad'));
+              if (isPrahladEmp) {
+                let pChanged = false;
+                if (!data.joiningDate || data.joiningDate > '2026-08-05') {
+                  data.joiningDate = '2026-07-27';
+                  pChanged = true;
+                }
+                if (!data.specialization || data.specialization !== 'Frontend Development') {
+                  data.specialization = 'Frontend Development';
+                  pChanged = true;
+                }
+                if (pChanged && canMigrate && !migratedEmployeeIds.has(`prahlad-jd-${data.id}`)) {
+                  migratedEmployeeIds.add(`prahlad-jd-${data.id}`);
+                  setDoc(doc(db, 'employees', data.id), {
+                    joiningDate: '2026-07-27',
+                    specialization: 'Frontend Development'
+                  }, { merge: true }).catch(() => { });
+                }
+              }
+
               // LIVE AUTOCORRECT WORKFORCE REPORTING MANAGER TO D. KOUSHIK
               if (
                 !isExecutiveOrLeadership(data) &&
@@ -1395,11 +1511,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               fetched.push(data);
             });
 
-            // Safe in-memory deduplication (keep newest, never delete real Firestore docs automatically)
+            // Safe in-memory deduplication (deduplicate primarily by corporate email to prevent cross-account collisions)
             const deduplicated: Employee[] = [];
-            const seen = new Set<string>();
+            const seenEmails = new Set<string>();
+            const seenEmpIds = new Set<string>();
             
-            // Sort by createdAt descending so we keep the newest record
+            // Sort by createdAt / updatedAt descending so newest records are evaluated first
             fetched.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0).getTime() - new Date(a.createdAt || a.updatedAt || 0).getTime());
             
             for (const emp of fetched) {
@@ -1411,13 +1528,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const emailKey = (emp.email || '').toLowerCase().trim();
               const idKey = emp.employeeId?.trim();
               
-              if ((emailKey && seen.has(emailKey)) || (idKey && seen.has(idKey))) {
-                // In-memory deduplication only - do NOT delete from Firestore
+              // Deduplicate identical accounts for the same human (e.g. seeded doc vs Auth UID doc)
+              if (emailKey && seenEmails.has(emailKey)) {
                 continue;
               }
+
+              // ID Collision Protection:
+              // If an employeeId is already claimed, only skip if the email is absent or it's a true duplicate.
+              // If distinct emails collide on an employeeId, protect canonical assignments:
+              // Asbin T S is the rightful owner of KSS2407004.
+              if (idKey && seenEmpIds.has(idKey)) {
+                if (idKey === 'KSS2407004' && (emailKey.includes('asbin') || (emp.fullName && emp.fullName.toLowerCase().includes('asbin')))) {
+                  // Asbin takes priority for KSS2407004: replace any accidental occupant
+                  const existingIdx = deduplicated.findIndex(e => e.employeeId === 'KSS2407004');
+                  if (existingIdx !== -1 && !deduplicated[existingIdx].email?.toLowerCase().includes('asbin')) {
+                    deduplicated[existingIdx] = emp;
+                    if (emailKey) seenEmails.add(emailKey);
+                    continue;
+                  }
+                } else if (!emailKey) {
+                  continue;
+                }
+              }
               
-              if (emailKey) seen.add(emailKey);
-              if (idKey) seen.add(idKey);
+              if (emailKey) seenEmails.add(emailKey);
+              if (idKey) seenEmpIds.add(idKey);
               deduplicated.push(emp);
             }
 
@@ -1475,6 +1610,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (canMigrate && !didSeedProjectManager && !snapshot.metadata.fromCache) {
                 didSeedProjectManager = true;
                 setDoc(doc(db, 'employees', officialKoushik.id), officialKoushik, { merge: true }).catch(() => { });
+              }
+            }
+
+            // Ensure Official Asbin T S exists in Team Directory
+            const asbinExists = deduplicated.some(e =>
+              e.employeeId === 'KSS2407004' ||
+              e.id === 'GCIqrMaffebCGNdmbuzPbcl6IpQ2' ||
+              (e.email || '').toLowerCase().includes('asbin.t.s@kalpanaaa.in')
+            );
+
+            if (!asbinExists) {
+              const asbinRecord = fetched.find(e =>
+                e.id === 'GCIqrMaffebCGNdmbuzPbcl6IpQ2' ||
+                (e.email || '').toLowerCase().includes('asbin.t.s@kalpanaaa.in') ||
+                e.employeeId === 'KSS2407004'
+              ) || INITIAL_EMPLOYEES.find(e => e.employeeId === 'KSS2407004');
+
+              if (asbinRecord) {
+                deduplicated.push({
+                  ...asbinRecord,
+                  id: asbinRecord.id || 'GCIqrMaffebCGNdmbuzPbcl6IpQ2',
+                  uid: 'GCIqrMaffebCGNdmbuzPbcl6IpQ2',
+                  employeeId: 'KSS2407004',
+                  fullName: 'Asbin T S',
+                  email: 'asbin.t.s@kalpanaaa.in',
+                  status: 'Active',
+                  department: asbinRecord.department || 'IT',
+                  designation: asbinRecord.designation || 'Software Developer'
+                });
               }
             }
 
@@ -2875,7 +3039,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           } catch (e) { }
 
-          const autoDetails = getAssignedEmployeeDetails(savedFullName, employees);
+          const autoDetails = getAssignedEmployeeDetails(savedFullName, employees, cleanEmail);
           const empCode = autoDetails.employeeId;
           
           const basicEmp: Employee = {
@@ -3223,39 +3387,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fieldsToUpdate: Record<string, any> = { ...sanitizedUpdates };
     delete fieldsToUpdate.resumeUrl; // handle resume separately below
 
-    // Guard: Enforce official specializations and departments for key roles
-    const isPM =
-      targetDocId === 'emp-KSS2407003' ||
-      targetDocId === 'uid-KSS2407003' ||
-      fieldsToUpdate.role === 'PROJECT_MANAGER' ||
-      (fieldsToUpdate.designation && String(fieldsToUpdate.designation).toLowerCase().includes('project manager')) ||
-      (existingEmp?.role === 'PROJECT_MANAGER') ||
-      (existingEmp?.employeeId === 'KSS2407003') ||
-      (existingEmp?.fullName && existingEmp.fullName.toLowerCase().includes('koushik'));
-    if (isPM) {
-      fieldsToUpdate.department = 'IT';
-      fieldsToUpdate.specialization = 'Project Management';
-      fieldsToUpdate.skills = ['Project Management'];
-    }
+    // Guard: Enforce official specializations and departments for key roles ONLY when modified by Admin/PM or when explicitly provided
+    const callerIsAdminOrPM =
+      role === 'SUPER_ADMIN' ||
+      role === 'HR_ADMIN' ||
+      role === 'PROJECT_MANAGER' ||
+      activeEmployee?.role === 'SUPER_ADMIN' ||
+      activeEmployee?.role === 'HR_ADMIN' ||
+      activeEmployee?.role === 'PROJECT_MANAGER' ||
+      isAuthorizedTechLead(activeEmployee);
+    if (callerIsAdminOrPM) {
+      const isPM =
+        targetDocId === 'emp-KSS2407003' ||
+        targetDocId === 'uid-KSS2407003' ||
+        fieldsToUpdate.role === 'PROJECT_MANAGER' ||
+        (fieldsToUpdate.designation && String(fieldsToUpdate.designation).toLowerCase().includes('project manager')) ||
+        (existingEmp?.role === 'PROJECT_MANAGER') ||
+        (existingEmp?.employeeId === 'KSS2407003') ||
+        (existingEmp?.fullName && existingEmp.fullName.toLowerCase().includes('koushik'));
+      if (isPM) {
+        fieldsToUpdate.department = 'IT';
+        fieldsToUpdate.specialization = 'Project Management';
+        fieldsToUpdate.skills = ['Project Management'];
+      }
 
-    const isTL =
-      isAuthorizedTechLead(existingEmp) ||
-      (existingEmp?.role as string) === 'TECH_LEAD' ||
-      (existingEmp?.designation && (existingEmp.designation.toLowerCase().includes('tech lead') || existingEmp.designation.toLowerCase().includes('technical lead'))) ||
-      (fieldsToUpdate.designation && (String(fieldsToUpdate.designation).toLowerCase().includes('tech lead') || String(fieldsToUpdate.designation).toLowerCase().includes('technical lead')));
-    if (isTL && !isPM) {
-      fieldsToUpdate.specialization = 'Technical Leadership';
-      fieldsToUpdate.skills = ['Technical Leadership'];
-    }
+      const isTL =
+        isAuthorizedTechLead(existingEmp) ||
+        (existingEmp?.role as string) === 'TECH_LEAD' ||
+        (existingEmp?.designation && (existingEmp.designation.toLowerCase().includes('tech lead') || existingEmp.designation.toLowerCase().includes('technical lead'))) ||
+        (fieldsToUpdate.designation && (String(fieldsToUpdate.designation).toLowerCase().includes('tech lead') || String(fieldsToUpdate.designation).toLowerCase().includes('technical lead')));
+      if (isTL && !isPM) {
+        fieldsToUpdate.specialization = 'Technical Leadership';
+        fieldsToUpdate.skills = ['Technical Leadership'];
+      }
 
-    const isJig =
-      targetDocId === 'emp-KSS2407014' ||
-      (existingEmp?.employeeId === 'KSS2407014') ||
-      (existingEmp?.fullName && (existingEmp.fullName.toLowerCase().includes('jigyansha') || existingEmp.fullName.toLowerCase().includes('jingyasha')));
-    if (isJig && !isPM && !isTL) {
-      fieldsToUpdate.designation = 'AI/ML Developer';
-      fieldsToUpdate.specialization = 'Generative AI';
-      fieldsToUpdate.skills = ['Generative AI'];
+      const isJig =
+        targetDocId === 'emp-KSS2407014' ||
+        (existingEmp?.employeeId === 'KSS2407014') ||
+        (existingEmp?.fullName && (existingEmp.fullName.toLowerCase().includes('jigyansha') || existingEmp.fullName.toLowerCase().includes('jingyasha')));
+      if (isJig && !isPM && !isTL) {
+        fieldsToUpdate.designation = 'AI/ML Developer';
+        fieldsToUpdate.specialization = 'Generative AI';
+        fieldsToUpdate.skills = ['Generative AI'];
+      }
     }
     
     const cleanPayload: Record<string, any> = cleanFirestorePayload({
@@ -3266,6 +3440,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 3. Persist update directly to Firestore Cloud Database
     try {
       await setDoc(doc(db, 'employees', targetDocId), cleanPayload, { merge: true });
+      if (cleanPayload.profilePhotoUrl && user?.uid) {
+        // Also mirror profile photo to users/{uid} for quick header retrieval
+        setDoc(doc(db, 'users', user.uid), { profilePhotoUrl: cleanPayload.profilePhotoUrl }, { merge: true }).catch(() => {});
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `employees/${targetDocId}`);
       throw err;

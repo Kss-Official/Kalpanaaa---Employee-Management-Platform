@@ -87,6 +87,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         return map[g.color] || 'bg-slate-700/40 text-slate-300 border-slate-600/30';
       }
     }
+    if (spec.includes('Development')) return 'bg-blue-500/15 text-blue-300 border-blue-500/25';
+    if (spec.includes('Design')) return 'bg-pink-500/15 text-pink-300 border-pink-500/25';
+    if (spec.includes('Leadership') || spec.includes('Management')) return 'bg-indigo-500/15 text-indigo-300 border-indigo-500/25';
+    if (spec.includes('AI')) return 'bg-violet-500/15 text-violet-300 border-violet-500/25';
     return 'bg-slate-700/40 text-slate-300 border-slate-600/30';
   };
 
@@ -107,19 +111,62 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
     }
 
     // Jigyansha: Generative AI
-    if (empId === 'KSS2407014' || name.includes('jigyansha') || name.includes('jingyasha')) {
+    if (empId === 'KSS2407014' || empId === 'KSS2407016' || name.includes('jigyansha') || name.includes('jingyasha')) {
       return ['Generative AI'];
     }
 
+    // Known roster mappings
+    if (empId === 'KSS2407001' || name.includes('gaurav')) return ['Technical Leadership'];
+    if (empId === 'KSS2407002' || name.includes('akshit')) return ['Project Management'];
+    if (empId === 'KSS2407004' || name.includes('asbin')) return ['Frontend Development'];
+    if (empId === 'KSS2407005' || name.includes('thabeethal')) return ['Backend Development'];
+    if (empId === 'KSS2407006' || name.includes('kuruva') || name.includes('mahesh')) return ['UI/UX Design'];
+    if (empId === 'KSS2407007' || name.includes('ritish')) return ['UI/UX Design'];
+    if (empId === 'KSS2407008' || name.includes('pratiksha')) return ['Full Stack Development'];
+    if (empId === 'KSS2407009' || name.includes('priyanka')) return ['Full Stack Development'];
+    if (empId === 'KSS2407010' || name.includes('prahlad')) return ['Frontend Development'];
+    if (empId === 'KSS2407013' || name.includes('akash')) return ['Backend Development'];
+    if (empId === 'KSS2407015' || name.includes('rahul kr pathak') || name.includes('pathak')) return ['Solution Architecture'];
+    if (empId === 'KSS2407017' || name.includes('shruti')) return ['Full Stack Development'];
+    if (name.includes('hr department') || (emp?.department || '').toLowerCase().includes('hr')) return ['HR Operations'];
+
     const result: string[] = [];
     let hasDesign = false;
+
+    // 1. Explicit specialization field from employee doc
+    if (emp?.specialization && typeof emp.specialization === 'string') {
+      const spec = emp.specialization.trim();
+      if (spec) {
+        const cleanSpec = (spec === 'UI Design' || spec === 'UX Design') ? 'UI/UX Design' : spec;
+        result.push(cleanSpec);
+        if (cleanSpec.includes('Design')) hasDesign = true;
+      }
+    }
+
+    // 2. Explicit skills array
     for (const s of skills) {
       if (s === 'UI Design' || s === 'UX Design' || s === 'UI/UX Design') {
         if (!hasDesign) { result.push('UI/UX Design'); hasDesign = true; }
-      } else if (SPEC_GROUPS.some(g => g.items.includes(s)) || s.includes('Development') || s.includes('AI') || s.includes('Design')) {
+      } else if (SPEC_GROUPS.some(g => g.items.includes(s)) || s.includes('Development') || s.includes('AI') || s.includes('Design') || s.includes('Testing') || s.includes('Architecture') || s.includes('Leadership')) {
         if (!result.includes(s)) result.push(s);
       }
     }
+
+    // 3. Fallback inference by designation / employmentType / department
+    if (result.length === 0) {
+      const empType = (emp?.employmentType || '').toLowerCase();
+      if (designationText.includes('frontend') || empType.includes('frontend')) result.push('Frontend Development');
+      else if (designationText.includes('backend') || empType.includes('backend')) result.push('Backend Development');
+      else if (designationText.includes('full stack') || designationText.includes('software engineer') || designationText.includes('software developer') || empType.includes('development')) result.push('Full Stack Development');
+      else if (designationText.includes('designer') || designationText.includes('ui') || designationText.includes('ux')) result.push('UI/UX Design');
+      else if (designationText.includes('ai') || designationText.includes('machine learning')) result.push('Generative AI');
+      else if (designationText.includes('hr') || (emp?.department || '').toLowerCase().includes('hr')) result.push('HR Operations');
+      else if (designationText.includes('coo') || designationText.includes('cto') || designationText.includes('architect')) result.push('Solution Architecture');
+      else if (designationText.includes('ceo') || designationText.includes('director')) result.push('Project Management');
+      else if (emp?.department === 'IT' || emp?.department === 'Engineering') result.push('Full Stack Development');
+      else result.push('Full Stack Development');
+    }
+
     return result;
   };
 
@@ -473,7 +520,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         <div className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
                           {shownSpecs.length === 0 ? (
-                            <span className="text-slate-600 text-[11px]">—</span>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap inline-block bg-blue-500/15 text-blue-300 border-blue-500/25">
+                              Full Stack Development
+                            </span>
                           ) : (
                             <>
                               {shownSpecs.map(s => (

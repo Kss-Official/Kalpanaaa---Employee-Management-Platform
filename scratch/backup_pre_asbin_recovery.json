@@ -1,0 +1,894 @@
+{
+  "timestamp": "2026-10-15T07:12:37.590Z",
+  "records": {
+    "employees/GCIqrMaffebCGNdmbuzPbcl6IpQ2": {
+      "name": "projects/kalpanaaa-employees-website/databases/(default)/documents/employees/GCIqrMaffebCGNdmbuzPbcl6IpQ2",
+      "fields": {
+        "earnLeaveBalance": {
+          "integerValue": "0"
+        },
+        "postalCode": {
+          "stringValue": "629153"
+        },
+        "role": {
+          "stringValue": "EMPLOYEE"
+        },
+        "sickLeaveBalance": {
+          "integerValue": "1"
+        },
+        "phone": {
+          "stringValue": "7603872359"
+        },
+        "status": {
+          "stringValue": "Active"
+        },
+        "leaveBalances": {
+          "mapValue": {
+            "fields": {
+              "totalBalance": {
+                "integerValue": "2"
+              },
+              "earnLeave": {
+                "integerValue": "1"
+              },
+              "totalTaken": {
+                "integerValue": "0"
+              },
+              "sickLeave": {
+                "integerValue": "1"
+              },
+              "casualLeave": {
+                "integerValue": "0"
+              }
+            }
+          }
+        },
+        "emergencyContact": {
+          "stringValue": "7598987487"
+        },
+        "updatedAt": {
+          "stringValue": "2026-10-14T16:01:16.009Z"
+        },
+        "gender": {
+          "stringValue": "Male"
+        },
+        "casualLeaveTaken": {
+          "integerValue": "0"
+        },
+        "approvedWfhDates": {
+          "arrayValue": {
+            "values": [
+              {
+                "stringValue": "2026-08-28"
+              },
+              {
+                "stringValue": "2026-08-29"
+              }
+            ]
+          }
+        },
+        "casualLeaveBalance": {
+          "integerValue": "0"
+        },
+        "createdAt": {
+          "stringValue": "2026-08-04T06:13:10.741Z"
+        },
+        "linkedinUrl": {
+          "stringValue": ""
+        },
+        "fullName": {
+          "stringValue": "Asbin T S"
+        },
+        "mobileSessionId": {
+          "stringValue": "sess_mobile_1787146368299_e3ah3ab"
+        },
+        "isFaceEnrolled": {
+          "booleanValue": true
+        },
+        "department": {
+          "stringValue": "IT"
+        },
+        "id": {
+          "stringValue": "GCIqrMaffebCGNdmbuzPbcl6IpQ2"
+        },
+        "employmentType": {
+          "stringValue": "Intern"
+        },
+        "designation": {
+          "stringValue": "Software Developer"
+        },
+        "currentSessionId": {
+          "stringValue": "sess_1786173242285_h7uxqww"
+        },
+        "emergencyRelationship": {
+          "stringValue": "Mother"
+        },
+        "permanentAddress": {
+          "stringValue": "2-213 Vattavila Near Fathimanager, Sooriacode(P.O)"
+        },
+        "faceDescriptor": {
+          "arrayValue": {
+            "values": [
+              {
+                "doubleValue": 0.08885124230573063
+              },
+              {
+                "doubleValue": 0.08171953646315483
+              },
+              {
+                "doubleValue": 0.03820416283397835
+              },
+              {
+                "doubleValue": 0.0009249725349434802
+              },
+              {
+                "doubleValue": 0.01807558141487501
+              },
+              {
+                "doubleValue": 0.04901115033475938
+              },
+              {
+                "doubleValue": 0.06563646276671556
+              },
+              {
+                "doubleValue": 0.04130083451499098
+              },
+              {
+                "doubleValue": 0.09399045836438769
+              },
+              {
+                "doubleValue": 0.01637780636524273
+              },
+              {
+                "doubleValue": 0.03334712490006806
+              },
+              {
+                "doubleValue": 0.013710474143191466
+              },
+              {
+                "doubleValue": 0.037227777605191026
+              },
+              {
+                "doubleValue": 0.005660925809083972
+              },
+              {
+                "doubleValue": 0.023348485216793526
+              },
+              {
+                "doubleValue": 0.03016202010900192
+              },
+              {
+                "doubleValue": 0.08884198631886858
+              },
+              {
+                "doubleValue": 0.09549830454660978
+              },
+              {
+                "doubleValue": 0.004010592854319795
+              },
+              {
+                "doubleValue": 0.04963356727250228
+              },
+              {
+                "doubleValue": 0.05275800772839339
+              },
+              {
+                "doubleValue": 0.05816450030563863
+              },
+              {
+                "doubleValue": 0.057369436782076524
+              },
+              {
+                "doubleValue": 0.01990682955068164
+              },
+              {
+                "doubleValue": 0.07197328273519772
+              },
+              {
+                "doubleValue": 0.013418331806892192
+              },
+              {
+                "doubleValue": 0.0967568857824862
+              },
+              {
+                "doubleValue": 0.05721458187847833
+              },
+              {
+                "doubleValue": 0.07156854404031042
+              },
+              {
+                "doubleValue": 0.015265071251748608
+              },
+              {
+                "doubleValue": 0.01688847829599063
+              },
+              {
+                "doubleValue": 0.009818826141615923
+              },
+              {
+                "doubleValue": 0.06897772567107767
+              },
+              {
+                "doubleValue": 0.05049364224916351
+              },
+              {
+                "doubleValue": 0.08013080481553816
+              },
+              {
+                "doubleValue": 0.09503726146190293
+              },
+              {
+                "doubleValue": 0.001766656943757017
+              },
+              {
+                "doubleValue": 0.06253754488537742
+              },
+              {
+                "doubleValue": 0.04317682678560056
+              },
+              {
+                "doubleValue": 0.0316313132356155
+              },
+              {
+                "doubleValue": 0.06309165142204819
+              },
+              {
+                "doubleValue": 0.0688106774835814
+              },
+              {
+                "doubleValue": 0.09886629564727792
+              },
+              {
+                "doubleValue": 0.029698641152949137
+              },
+              {
+                "doubleValue": 0.041612276471061305
+              },
+              {
+                "doubleValue": 0.08478931295188386
+              },
+              {
+                "doubleValue": 0.02158394567998001
+              },
+              {
+                "doubleValue": 0.04574155881808204
+              },
+              {
+                "doubleValue": 0.08350413262576789
+              },
+              {
+                "doubleValue": 0.043824145546397714
+              },
+              {
+                "doubleValue": 0.05000383232404568
+              },
+              {
+                "doubleValue": 0.028256229232556208
+              },
+              {
+                "doubleValue": 0.024138970823858342
+              },
+              {
+                "doubleValue": 0.013972719585519012
+              },
+              {
+                "doubleValue": 0.029392072730416233
+              },
+              {
+                "doubleValue": 0.032691751765164666
+              },
+              {
+                "doubleValue": 0.0796311100588073
+              },
+              {
+                "doubleValue": 0.04414260418634344
+              },
+              {
+                "doubleValue": 0.0851105989663603
+              },
+              {
+                "doubleValue": 0.04363512692148533
+              },
+              {
+                "doubleValue": 0.09426950263911142
+              },
+              {
+                "doubleValue": 0.07550370910373191
+              },
+              {
+                "doubleValue": 0.07900314902008507
+              },
+              {
+                "doubleValue": 0.021609899145363244
+              },
+              {
+                "doubleValue": 0.09362672307999204
+              },
+              {
+                "doubleValue": 0.09799496763243366
+              },
+              {
+                "doubleValue": 0.007583089887077532
+              },
+              {
+                "doubleValue": 0.0778441057514083
+              },
+              {
+                "doubleValue": 0.08924522538363555
+              },
+              {
+                "doubleValue": 0.02624242004090679
+              },
+              {
+                "doubleValue": 0.023612162385127634
+              },
+              {
+                "doubleValue": 0.07262612327866615
+              },
+              {
+                "doubleValue": 0.023182111739228607
+              },
+              {
+                "doubleValue": 0.028477170879678028
+              },
+              {
+                "doubleValue": 0.05641272730943572
+              },
+              {
+                "doubleValue": 0.003994331988958599
+              },
+              {
+                "doubleValue": 0.0028121885348918133
+              },
+              {
+                "doubleValue": 0.03253768609332047
+              },
+              {
+                "doubleValue": 0.07647894883095961
+              },
+              {
+                "doubleValue": 0.03781808510016436
+              },
+              {
+                "doubleValue": 0.03958712987137002
+              },
+              {
+                "doubleValue": 0.08633478003890355
+              },
+              {
+                "doubleValue": 0.011327233704746198
+              },
+              {
+                "doubleValue": 0.05160548340385444
+              },
+              {
+                "doubleValue": 0.02014226456793814
+              },
+              {
+                "doubleValue": 0.010551341421747629
+              },
+              {
+                "doubleValue": 0.05215647261302763
+              },
+              {
+                "doubleValue": 0.05851997913742061
+              },
+              {
+                "doubleValue": 0.07326021152837725
+              },
+              {
+                "doubleValue": 0.09317929604715593
+              },
+              {
+                "doubleValue": 0.016037196245334517
+              },
+              {
+                "doubleValue": 0.01111443070846867
+              },
+              {
+                "doubleValue": 0.047799682920972454
+              },
+              {
+                "doubleValue": 0.035891150018912556
+              },
+              {
+                "doubleValue": 0.09061596140978578
+              },
+              {
+                "doubleValue": 0.04778426800787449
+              },
+              {
+                "doubleValue": 0.03773357624307825
+              },
+              {
+                "doubleValue": 0.09533360857094181
+              },
+              {
+                "doubleValue": 0.08743384335729719
+              },
+              {
+                "doubleValue": 0.04556118720096806
+              },
+              {
+                "doubleValue": 0.02098301453728879
+              },
+              {
+                "doubleValue": 0.0889802136180537
+              },
+              {
+                "doubleValue": 0.08437317541077649
+              },
+              {
+                "doubleValue": 0.06984114734883619
+              },
+              {
+                "doubleValue": 0.05157934021732015
+              },
+              {
+                "doubleValue": 0.07132759393782338
+              },
+              {
+                "doubleValue": 0.01169485236696679
+              },
+              {
+                "doubleValue": 0.015483026642513654
+              },
+              {
+                "doubleValue": 0.0861096797564688
+              },
+              {
+                "doubleValue": 0.026733839584556798
+              },
+              {
+                "doubleValue": 0.08901487069213436
+              },
+              {
+                "doubleValue": 0.06167116411670699
+              },
+              {
+                "doubleValue": 0.04273536596076804
+              },
+              {
+                "doubleValue": 0.050229192826830596
+              },
+              {
+                "doubleValue": 0.07465154330278563
+              },
+              {
+                "doubleValue": 0.01641867774382624
+              },
+              {
+                "doubleValue": 0.07554303162480602
+              },
+              {
+                "doubleValue": 0.007652460108809234
+              },
+              {
+                "doubleValue": 0.04286473987262734
+              },
+              {
+                "doubleValue": 0.07330817980626207
+              },
+              {
+                "doubleValue": 0.030263342123433457
+              },
+              {
+                "doubleValue": 0.04836715387776194
+              },
+              {
+                "doubleValue": 0.0010885880159882456
+              },
+              {
+                "doubleValue": 0.059518676632980716
+              },
+              {
+                "doubleValue": 0.09489957379694319
+              },
+              {
+                "doubleValue": 0.08841589530336053
+              },
+              {
+                "doubleValue": 0.07059071035225091
+              },
+              {
+                "doubleValue": 0.07040603459087681
+              }
+            ]
+          }
+        },
+        "reportingManagerUid": {
+          "stringValue": "uid-KSS2407003"
+        },
+        "workLocation": {
+          "stringValue": "Kalpanaaa Main Office HQ"
+        },
+        "faceEnrolledAt": {
+          "stringValue": "2026-08-13T04:41:21.640Z"
+        },
+        "employeeId": {
+          "stringValue": "KSS2407004"
+        },
+        "bio": {
+          "stringValue": "Dedicated software engineering professional at Kalpanaaa HRMS."
+        },
+        "reportingManager": {
+          "stringValue": "D. Koushik"
+        },
+        "skills": {
+          "arrayValue": {
+            "values": [
+              {
+                "stringValue": "Frontend Development"
+              }
+            ]
+          }
+        },
+        "totalLeavesTaken": {
+          "integerValue": "0"
+        },
+        "totalLeaveBalance": {
+          "integerValue": "2"
+        },
+        "failedLoginCount": {
+          "integerValue": "1"
+        },
+        "preferredShift": {
+          "stringValue": "General Shift (09:00 - 18:00)"
+        },
+        "currentAddress": {
+          "stringValue": "VMK Pg For Gents 18, 1st Main, Jai Jawan Nagar, Chikka Banaswadi Main Road, Muniswamappa Road, behind Panchamukhi hotel, Bengaluru, Karnataka 560033"
+        },
+        "shift": {
+          "stringValue": "General Shift (09:00 - 18:00)"
+        },
+        "email": {
+          "stringValue": "asbin.t.s@kalpanaaa.in"
+        },
+        "profilePhotoUrl": {
+          "stringValue": "data:image/jpeg;base64,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"
+        },
+        "sessionFingerprint": {
+          "stringValue": "TW96aWxsYS81LjAgKGlQaG9uZTsgQ1BVIGlQaG9uZSBPUyAyNl81XzIgbGlrZSBNYWMgT1MgWCkgQXBwbGVXZWJLaXQvNjA1LjEuMTUgKEtIVE1MLCBsaWtlIEdlY2tvKSBDcmlPUy8xNTEuMC43OTIyLjU3IE1vYmlsZS8xNUUxNDggU2FmYXJpLzYwNC4xfDM5MHg4NDR8ZW4tSU58LTMzMA=="
+        },
+        "dateOfBirth": {
+          "stringValue": "2004-12-11"
+        },
+        "qrToken": {
+          "stringValue": "KSS2707004"
+        },
+        "earnLeaveTaken": {
+          "integerValue": "0"
+        },
+        "state": {
+          "stringValue": "Tamil Nadu"
+        },
+        "sickLeaveTaken": {
+          "integerValue": "0"
+        },
+        "joiningDate": {
+          "stringValue": "2026-07-27"
+        },
+        "city": {
+          "stringValue": "Marthandam"
+        },
+        "desktopSessionId": {
+          "stringValue": "sess_desktop_1787924341564_sauopqi"
+        }
+      },
+      "createTime": "2026-08-04T06:13:10.974260Z",
+      "updateTime": "2026-10-15T04:44:11.408381Z"
+    },
+    "employees/NTirYBVT1pSuLj5thrdsjM54F303": {
+      "name": "projects/kalpanaaa-employees-website/databases/(default)/documents/employees/NTirYBVT1pSuLj5thrdsjM54F303",
+      "fields": {
+        "currentSessionId": {
+          "stringValue": "sess_1792038652943_x5yd9f9"
+        },
+        "uid": {
+          "stringValue": "NTirYBVT1pSuLj5thrdsjM54F303"
+        },
+        "postalCode": {
+          "stringValue": "560102"
+        },
+        "qrToken": {
+          "stringValue": "KSS2407004"
+        },
+        "dateOfBirth": {
+          "stringValue": ""
+        },
+        "phone": {
+          "stringValue": ""
+        },
+        "earnLeaveBalance": {
+          "integerValue": "0"
+        },
+        "gender": {
+          "stringValue": "Male"
+        },
+        "createdAt": {
+          "stringValue": "2026-10-15T04:31:05.811Z"
+        },
+        "currentAddress": {
+          "stringValue": "Bengaluru HQ Campus"
+        },
+        "joiningDate": {
+          "stringValue": "2026-10-15"
+        },
+        "employeeId": {
+          "stringValue": "KSS2407004"
+        },
+        "email": {
+          "stringValue": "pratiksha.harode@kalpanaaa.in"
+        },
+        "approvedWfhDates": {
+          "arrayValue": {
+            "values": [
+              {
+                "stringValue": "2026-08-28"
+              },
+              {
+                "stringValue": "2026-08-29"
+              }
+            ]
+          }
+        },
+        "emergencyRelationship": {
+          "stringValue": ""
+        },
+        "emergencyContact": {
+          "stringValue": ""
+        },
+        "permanentAddress": {
+          "stringValue": "Bengaluru HQ Campus"
+        },
+        "shift": {
+          "stringValue": "Day Shift (10:00 AM – 7:00 PM)"
+        },
+        "sessionFingerprint": {
+          "stringValue": "TW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzE1NS4wLjAuMCBTYWZhcmkvNTM3LjM2fDE1MzZ4ODY0fGVuLVVTfC0zMzA="
+        },
+        "status": {
+          "stringValue": "Active"
+        },
+        "sickLeaveBalance": {
+          "integerValue": "1"
+        },
+        "updatedAt": {
+          "timestampValue": "2026-10-15T04:43:18.250Z"
+        },
+        "state": {
+          "stringValue": "Karnataka"
+        },
+        "fullName": {
+          "stringValue": "Pratiksha Harode"
+        },
+        "city": {
+          "stringValue": "Bengaluru"
+        },
+        "reportingManager": {
+          "stringValue": "D. Koushik"
+        },
+        "role": {
+          "stringValue": "EMPLOYEE"
+        },
+        "employmentType": {
+          "stringValue": "Full-Time"
+        },
+        "department": {
+          "stringValue": "Engineering"
+        },
+        "designation": {
+          "stringValue": "Software Engineer"
+        },
+        "id": {
+          "stringValue": "NTirYBVT1pSuLj5thrdsjM54F303"
+        },
+        "workLocation": {
+          "stringValue": "Kalpanaaa Main Office HQ, Bengaluru"
+        }
+      },
+      "createTime": "2026-10-15T04:31:08.796407Z",
+      "updateTime": "2026-10-15T04:43:18.286128Z"
+    },
+    "employees/emp-KSS2407004": {
+      "name": "projects/kalpanaaa-employees-website/databases/(default)/documents/employees/emp-KSS2407004",
+      "fields": {
+        "status": {
+          "stringValue": "Active"
+        },
+        "profilePhotoUrl": {
+          "stringValue": "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300"
+        },
+        "permanentAddress": {
+          "stringValue": "Bengaluru HQ Campus"
+        },
+        "totalLeaveBalance": {
+          "integerValue": "2"
+        },
+        "createdAt": {
+          "stringValue": "2024-03-01T10:00:00Z"
+        },
+        "employmentType": {
+          "stringValue": "Full-Time"
+        },
+        "isDeleted": {
+          "booleanValue": false
+        },
+        "casualLeaveTaken": {
+          "integerValue": "0"
+        },
+        "id": {
+          "stringValue": "emp-KSS2407004"
+        },
+        "workLocation": {
+          "stringValue": "Main Office HQ"
+        },
+        "leaveBalances": {
+          "mapValue": {
+            "fields": {
+              "totalBalance": {
+                "integerValue": "2"
+              },
+              "sickLeave": {
+                "integerValue": "1"
+              },
+              "totalTaken": {
+                "integerValue": "0"
+              },
+              "earnLeave": {
+                "integerValue": "1"
+              },
+              "casualLeave": {
+                "integerValue": "0"
+              }
+            }
+          }
+        },
+        "reportingManager": {
+          "stringValue": "D. Koushik"
+        },
+        "approvedWfhDates": {
+          "arrayValue": {
+            "values": [
+              {
+                "stringValue": "2026-08-28"
+              },
+              {
+                "stringValue": "2026-08-29"
+              }
+            ]
+          }
+        },
+        "emergencyContact": {
+          "stringValue": "7603872359"
+        },
+        "earnLeaveTaken": {
+          "integerValue": "0"
+        },
+        "updatedAt": {
+          "stringValue": "2026-10-15T05:02:55.856Z"
+        },
+        "city": {
+          "stringValue": "Bengaluru"
+        },
+        "state": {
+          "stringValue": "Karnataka"
+        },
+        "emergencyRelationship": {
+          "stringValue": "Family"
+        },
+        "role": {
+          "stringValue": "EMPLOYEE"
+        },
+        "dateOfBirth": {
+          "stringValue": "1998-11-05"
+        },
+        "shift": {
+          "stringValue": "Day Shift (10:00 - 19:00)"
+        },
+        "phone": {
+          "stringValue": "7603872359"
+        },
+        "totalLeavesTaken": {
+          "integerValue": "0"
+        },
+        "sickLeaveTaken": {
+          "integerValue": "0"
+        },
+        "fullName": {
+          "stringValue": "Asbin T S"
+        },
+        "uid": {
+          "stringValue": "GCIqrMaffebCGNdmbuzPbcl6IpQ2"
+        },
+        "pmUid": {
+          "stringValue": "uid-KSS2407003"
+        },
+        "skills": {
+          "arrayValue": {
+            "values": [
+              {
+                "stringValue": "Frontend Development"
+              }
+            ]
+          }
+        },
+        "sickLeaveBalance": {
+          "integerValue": "1"
+        },
+        "specialization": {
+          "stringValue": "Frontend Development"
+        },
+        "employeeId": {
+          "stringValue": "KSS2407004"
+        },
+        "earnLeaveBalance": {
+          "integerValue": "0"
+        },
+        "gender": {
+          "stringValue": "Male"
+        },
+        "postalCode": {
+          "stringValue": "560102"
+        },
+        "casualLeaveBalance": {
+          "integerValue": "0"
+        },
+        "department": {
+          "stringValue": "Engineering"
+        },
+        "qrToken": {
+          "stringValue": "QR-KSS2407004"
+        },
+        "email": {
+          "stringValue": "asbin.t.s@kalpanaaa.in"
+        },
+        "reportingManagerUid": {
+          "stringValue": "uid-KSS2407003"
+        },
+        "joiningDate": {
+          "stringValue": "2024-03-01"
+        },
+        "currentAddress": {
+          "stringValue": "Bengaluru HQ Campus"
+        },
+        "designation": {
+          "stringValue": "Frontend Developer"
+        }
+      },
+      "createTime": "2026-08-18T17:09:53.997759Z",
+      "updateTime": "2026-10-15T05:02:56.858700Z"
+    },
+    "users/GCIqrMaffebCGNdmbuzPbcl6IpQ2": {
+      "name": "projects/kalpanaaa-employees-website/databases/(default)/documents/users/GCIqrMaffebCGNdmbuzPbcl6IpQ2",
+      "fields": {
+        "employeeId": {
+          "stringValue": "KSS2407004"
+        },
+        "email": {
+          "stringValue": "asbin.t.s@kalpanaaa.in"
+        },
+        "fullName": {
+          "stringValue": "Asbin T S"
+        },
+        "role": {
+          "stringValue": "EMPLOYEE"
+        },
+        "uid": {
+          "stringValue": "GCIqrMaffebCGNdmbuzPbcl6IpQ2"
+        },
+        "updatedAt": {
+          "timestampValue": "2026-10-15T04:37:01.387Z"
+        },
+        "createdAt": {
+          "stringValue": "2026-08-04T06:13:09.658Z"
+        },
+        "employeeDocId": {
+          "stringValue": "GCIqrMaffebCGNdmbuzPbcl6IpQ2"
+        }
+      },
+      "createTime": "2026-08-04T06:13:10.583480Z",
+      "updateTime": "2026-10-15T04:37:01.467503Z"
+    }
+  }
+}

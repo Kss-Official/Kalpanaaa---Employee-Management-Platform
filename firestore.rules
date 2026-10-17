@@ -101,17 +101,15 @@ service cloud.firestore {
 
     // ── Ownership helpers ────────────────────────────────────────────────────
     function ownsEmployeeRecord(employeeId) {
-      return isRealUser() && (
+      return isSignedIn() && (
         request.auth.uid == employeeId ||
-        (getEmployeeDocId() != null && employeeId == getEmployeeDocId()) ||
-        (getEmployeeId() != null && employeeId == getEmployeeId()) ||
         (resource != null && (
           resource.data.get('uid', '~') == request.auth.uid ||
-          (getEmployeeId() != null && resource.data.get('employeeId', '~') == getEmployeeId()) ||
-          (hasEmail() && (
-            resource.data.get('email', '~') == userEmail() ||
-            resource.data.get('email', '~').lower() == userEmail().lower()
-          ))
+          (hasEmail() && resource.data.get('email', '~') == userEmail())
+        )) ||
+        (userDocExists() && (
+          getUserDoc().get('employeeDocId', '~') == employeeId ||
+          (resource != null && resource.data.get('employeeId', '~') != '~' && resource.data.get('employeeId', '~') == getUserDoc().get('employeeId', '~~'))
         ))
       );
     }
@@ -130,10 +128,7 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/employees/$(d.employeeId)) &&
           (
             employeeRecord(d.employeeId).get('uid', '~') == request.auth.uid ||
-            (hasEmail() && (
-              employeeRecord(d.employeeId).get('email', '~') == userEmail() ||
-              employeeRecord(d.employeeId).get('email', '~').lower() == userEmail().lower()
-            ))
+            (hasEmail() && employeeRecord(d.employeeId).get('email', '~') == userEmail())
           )
         )
       );
@@ -230,15 +225,23 @@ service cloud.firestore {
           (userDocExists() && getUserDoc().role == request.resource.data.role)
         )
       );
-      allow update: if isConfigAdmin() || isProjectManager() || isAuthorizedTechLead() || (
-        ownsEmployeeRecord(employeeId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'role', 'executiveRole', 'employeeId', 'email', 'salary', 'ctc',
-          'probationEndDate', 'bankAccountNumber', 'bankIfscCode', 'panNumber',
-          'approvedWfhDates', 'designation', 'department', 'status', 'shift',
-          'pmUid', 'reportingManagerUid', 'qrToken', 'accessLevel', 'permissions'
-        ])
-      );
+      allow update: if (
+        (request.auth.uid == employeeId || ownsEmployeeRecord(employeeId)) && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'profilePhotoUrl', 'bio', 'phone', 'gender', 'dateOfBirth',
+            'permanentAddress', 'currentAddress', 'city', 'state', 'postalCode',
+            'emergencyContact', 'emergencyRelationship', 'skills', 'specialization',
+            'preferredShift', 'linkedinUrl', 'faceDescriptor', 'isFaceEnrolled',
+            'faceEnrolledAt', 'fullName', 'updatedAt'
+          ]) ||
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'role', 'executiveRole', 'employeeId', 'email', 'salary', 'ctc',
+            'probationEndDate', 'bankAccountNumber', 'bankIfscCode', 'panNumber',
+            'approvedWfhDates', 'designation', 'department', 'status', 'shift',
+            'pmUid', 'reportingManagerUid', 'qrToken', 'accessLevel', 'permissions'
+          ])
+        )
+      ) || isConfigAdmin() || isProjectManager() || isAuthorizedTechLead();
       allow delete: if isSuperAdmin() || isConfigAdmin() || isProjectManager();
 
       // 2a. Leave date-locks
