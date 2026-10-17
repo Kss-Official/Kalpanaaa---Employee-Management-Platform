@@ -213,7 +213,7 @@ service cloud.firestore {
           unchanged('role')
         )
       );
-      allow delete: if isSuperAdmin();
+      allow delete: if isConfigAdmin();
     }
 
     // ── 2. Employees Directory (PII + biometrics) ───────────────────────────
@@ -287,7 +287,7 @@ service cloud.firestore {
         ownsAttendanceData(resource.data) ||
         ownsAttendanceData(request.resource.data)
       ) && (request.resource.data.get('date', '') == '' || request.resource.data.get('date', '') >= '2026-07-27');
-      allow delete: if isSuperAdmin() || (resource != null && resource.data.get('date', '') < '2026-07-27');
+      allow delete: if isConfigAdmin() || isSuperAdmin() || (resource != null && resource.data.get('date', '') < '2026-07-27');
     }
 
     // ── 4. Leave & WFH Requests ──────────────────────────────────────────────
