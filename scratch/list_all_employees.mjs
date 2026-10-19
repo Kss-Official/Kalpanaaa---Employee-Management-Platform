@@ -48,11 +48,17 @@ async function main() {
   const token = await signIn(ADMIN_EMAIL, ADMIN_PASS);
   console.log('✅ Authenticated.\n');
 
-  const res = await request(`${FIRESTORE_BASE}/employees?pageSize=300`, 'GET', null, token);
-  const docs = res.documents || [];
-  console.log(`Total ${docs.length} employee documents:\n`);
+  let allDocs = [];
+  let pageToken = '';
+  do {
+    const url = `${FIRESTORE_BASE}/employees?pageSize=100${pageToken ? `&pageToken=${pageToken}` : ''}`;
+    const res = await request(url, 'GET', null, token);
+    allDocs = allDocs.concat(res.documents || []);
+    pageToken = res.nextPageToken;
+  } while (pageToken);
 
-  for (const doc of docs) {
+  console.log(`Total ${allDocs.length} employee documents:\n`);
+  for (const doc of allDocs) {
     const docId = doc.name.split('/').pop();
     const f = doc.fields || {};
     console.log(`- ID: ${docId.padEnd(30)} | EmpID: ${(f.employeeId?.stringValue || '---').padEnd(12)} | ${(f.fullName?.stringValue || '').padEnd(25)} | ${f.email?.stringValue || ''}`);

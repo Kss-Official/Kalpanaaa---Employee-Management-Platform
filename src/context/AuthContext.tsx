@@ -3684,10 +3684,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // would reject with "Already checked in for today."
     const existingRec = resolveAttendanceRecord(attendance, { ...emp, uid: empUid }, todayStr);
 
-    const isSelfCheckIn = !!emp && !!activeEmployee && (
-      emp.id === activeEmployee.id ||
-      emp.employeeId === activeEmployee.employeeId ||
-      emp.uid === activeEmployee.uid
+    const isSelfCheckIn = !!emp && (
+      (!!activeEmployee && (
+        emp.id === activeEmployee.id ||
+        emp.employeeId === activeEmployee.employeeId ||
+        emp.uid === activeEmployee.uid ||
+        (!!emp.email && !!activeEmployee.email && emp.email.toLowerCase() === activeEmployee.email.toLowerCase())
+      )) ||
+      (!!user && (
+        emp.uid === user.uid ||
+        emp.id === user.uid ||
+        empUid === user.uid ||
+        (!!emp.email && !!user.email && emp.email.toLowerCase() === user.email.toLowerCase())
+      ))
     );
     const isAdminCheckIn = !isSelfCheckIn && (
       role === 'SUPER_ADMIN' || role === 'HR_ADMIN' ||
@@ -3774,19 +3783,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           uid: empUid,
           employeeUid: empUid,
           // P0 FIX: the REAL Firebase auth uid of whoever performed this
-          // check-in. `uid`/`employeeUid` above both come from
-          // getCanonicalEmployeeUid(), which for the 15 seeded accounts returns
-          // the demoData PLACEHOLDER 'uid-KSS...' — so neither could ever match
-          // request.auth.uid, and the security rules had no cheap way to prove
-          // the owner. Recording it makes ownership provable from this document
+          // check-in. Recording it makes ownership provable from this document
           // alone (see ownsAttendanceData() in firestore.rules) with no
-          // cross-document get() and no dependency on the fire-and-forget
-          // users/{uid} mapping. Self check-ins only: when HR/PM checks somebody
-          // else in, the field is left unset rather than falsely claiming them.
-          authUid: (user?.uid && (
+          // cross-document get() and no dependency on users/{uid} mapping.
+          authUid: isSelfCheckIn ? (user?.uid || null) : ((user?.uid && (
             emp.uid === user.uid || emp.id === user.uid || empUid === user.uid ||
             (emp.email && user.email && emp.email.toLowerCase() === user.email.toLowerCase())
-          )) ? user.uid : null,
+          )) ? user.uid : null),
+          email: emp.email || user?.email || '',
+          employeeEmail: emp.email || user?.email || '',
           employeeId: emp.id,
           employeeCode: emp.employeeId,
           employeeName: emp.fullName,
@@ -3985,9 +3990,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (finalTotalBreakMinutes > 0) {
           durationMins = Math.max(0, durationMins - finalTotalBreakMinutes);
         }
-        durationMins = Math.max(1, durationMins);
+        const isSelfCheckOut = !!emp && (
+          (!!activeEmployee && (
+            emp.id === activeEmployee.id ||
+            emp.employeeId === activeEmployee.employeeId ||
+            emp.uid === activeEmployee.uid ||
+            (!!emp.email && !!activeEmployee.email && emp.email.toLowerCase() === activeEmployee.email.toLowerCase())
+          )) ||
+          (!!user && (
+            emp.uid === user.uid ||
+            emp.id === user.uid ||
+            empUid === user.uid ||
+            (!!emp.email && !!user.email && emp.email.toLowerCase() === user.email.toLowerCase())
+          ))
+        );
 
-        const updates = {
+        const updates: Record<string, any> = {
           checkOutAt: serverTimestamp(),
           workingMinutes: durationMins,
           breaks: updatedBreaks,
@@ -4000,6 +4018,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           locationVerified: existingData.locationVerified !== undefined ? existingData.locationVerified : true,
           updatedAt: serverTimestamp()
         };
+        if (!existingData.authUid && isSelfCheckOut && user?.uid) {
+          updates.authUid = user.uid;
+        }
+        if (!existingData.email && (emp.email || user?.email)) {
+          updates.email = emp.email || user?.email || '';
+        }
+        if (!existingData.employeeEmail && (emp.email || user?.email)) {
+          updates.employeeEmail = emp.email || user?.email || '';
+        }
 
         transaction.update(docRef, cleanFirestorePayload(updates));
         return {

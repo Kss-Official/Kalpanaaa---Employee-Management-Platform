@@ -1364,10 +1364,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                            <button onClick={() => handleStartBreak('Tea Break')} className="px-2.5 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
                              🍵 Tea Break
                            </button>
-                           <button onClick={() =>                             <button onClick={() => handleStartBreak('Snack Break')} className="px-2.5 py-2 rounded-xl bg-orange-500/15 border border-orange-500/30 text-orange-300 hover:bg-orange-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
+                            <button onClick={() => handleStartBreak('Snack Break')} className="px-2.5 py-2 rounded-xl bg-orange-500/15 border border-orange-500/30 text-orange-300 hover:bg-orange-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
                               🍿 Snack Break
                             </button>
-                            handleStartBreak('Meal Break')} className="px-2.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
+                            <button onClick={() => handleStartBreak('Meal Break')} className="px-2.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
                              🍱 Meal Break
                            </button>
                            <button onClick={() => handleStartBreak('Team Huddle')} className="px-2.5 py-2 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-300 hover:bg-blue-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">

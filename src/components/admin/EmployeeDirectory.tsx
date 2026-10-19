@@ -161,8 +161,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       else if (designationText.includes('designer') || designationText.includes('ui') || designationText.includes('ux')) result.push('UI/UX Design');
       else if (designationText.includes('ai') || designationText.includes('machine learning')) result.push('Generative AI');
       else if (designationText.includes('hr') || (emp?.department || '').toLowerCase().includes('hr')) result.push('HR Operations');
-      else if (designationText.includes('coo') || designationText.includes('cto') || designationText.includes('architect')) result.push('Solution Architecture');
-      else if (designationText.includes('ceo') || designationText.includes('director')) result.push('Project Management');
+      else if (isExecutiveOrLeadership(emp) || designationText.includes('architect')) result.push('Solution Architecture');
+      else if (designationText.includes('director')) result.push('Project Management');
       else if (emp?.department === 'IT' || emp?.department === 'Engineering') result.push('Full Stack Development');
       else result.push('Full Stack Development');
     }

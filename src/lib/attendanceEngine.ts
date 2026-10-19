@@ -512,8 +512,7 @@ export function computeTotalLeaveBalances(
     earnLeave: finalEarnLeave,
     sickLeave: { credited: sl.credited, taken: sl.taken, balance: sl.balance },
     casualLeave: cl,
-    // Policy: max 2 EL + 1 SL = max 3 total credited. CL is always 0 per policy and must not inflate this total.
-    totalCredited: Math.min(finalEarnLeave.credited, 2) + sl.credited,
+    totalCredited: finalEarnLeave.credited + sl.credited + (cl.credited || 0),
     totalTaken: finalEarnLeave.taken + sl.taken + cl.taken,
     totalBalance: finalEarnLeave.balance + sl.balance + cl.balance,
   };
