@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { useHaptic } from '../../hooks/useHaptic';
@@ -1364,7 +1364,10 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                            <button onClick={() => handleStartBreak('Tea Break')} className="px-2.5 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
                              🍵 Tea Break
                            </button>
-                           <button onClick={() => handleStartBreak('Meal Break')} className="px-2.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
+                           <button onClick={() =>                             <button onClick={() => handleStartBreak('Snack Break')} className="px-2.5 py-2 rounded-xl bg-orange-500/15 border border-orange-500/30 text-orange-300 hover:bg-orange-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
+                              🍿 Snack Break
+                            </button>
+                            handleStartBreak('Meal Break')} className="px-2.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
                              🍱 Meal Break
                            </button>
                            <button onClick={() => handleStartBreak('Team Huddle')} className="px-2.5 py-2 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-300 hover:bg-blue-500/25 font-bold text-[11px] flex items-center justify-center gap-1 transition-colors">
@@ -1925,7 +1928,7 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
               </div>
 
               {!activeBreak && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 pt-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2.5 pt-2">
                   <button 
                     onClick={() => handleStartBreak('Tea Break')} 
                     disabled={isProcessingBreak}
@@ -1933,6 +1936,14 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({ activeTab, setAc
                   >
                     <span className="text-base">🍵</span>
                     <span>Tea Break</span>
+                  </button>
+                  <button 
+                    onClick={() => handleStartBreak('Snack Break')} 
+                    disabled={isProcessingBreak}
+                    className="px-3 py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/30 font-bold text-xs rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span className="text-base">🍿</span>
+                    <span>Snack Break</span>
                   </button>
                   <button 
                     onClick={() => handleStartBreak('Meal Break')} 
