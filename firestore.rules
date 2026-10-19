@@ -127,114 +127,34 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/employees/$(docId)).data;
     }
     function ownsAttendanceDocId(recordId) {
-      // Doc ID format: {uid}_{YYYY-MM-DD}
-      // NOTE: String.split() is NOT supported in Firestore Security Rules.
-      // We use recordId.matches() regex and direct uid-prefix checks instead.
+      // Doc ID format: {uid}_{YYYY-MM-DD} or {empId}_{YYYY-MM-DD} or emp-{empId}_{YYYY-MM-DD}
       let authUid = request.auth.uid;
-      let empId = getEmployeeId();
-      let empDocId = getEmployeeDocId();
-
-      // Primary check: doc ID starts with auth uid followed by underscore
-      // e.g. "BT19zoI3noTDcgeye4BWSVIWsEq1_2026-10-19" starts with uid + "_"
-      let uidMatch = recordId.matches(authUid + '_.*');
-
-      // Secondary: doc ID starts with empId or empDocId
-      let empIdMatch = empId != null && (
-        recordId.matches(empId + '_.*') ||
-        recordId.matches('emp-' + empId + '_.*')
-      );
-      let empDocIdMatch = empDocId != null && recordId.matches(empDocId + '_.*');
-
-      // Tertiary: look up the employee sub-doc for uid/email cross-check.
-      // We extract the employee portion by checking known-format prefixes.
-      // Since split() is unavailable, we check if the record starts with
-      // a known employee doc ID prefix and verify that employee owns this record.
-      let empUidOwns = (
-        empId != null &&
-        exists(/databases/$(database)/documents/employees/$(empId)) &&
-        (
-          employeeRecord(empId).get('uid', '~') == authUid ||
-          (hasEmail() && (
-            employeeRecord(empId).get('email', '~') == userEmail() ||
-            employeeRecord(empId).get('email', '~').lower() == userEmail().lower()
-          ))
-        ) &&
-        recordId.matches(empId + '_.*')
-      );
-
-      let empEmpDocOwns = (
-        empDocId != null &&
-        exists(/databases/$(database)/documents/employees/$(empDocId)) &&
-        (
-          employeeRecord(empDocId).get('uid', '~') == authUid ||
-          (hasEmail() && (
-            employeeRecord(empDocId).get('email', '~') == userEmail() ||
-            employeeRecord(empDocId).get('email', '~').lower() == userEmail().lower()
-          ))
-        ) &&
-        recordId.matches(empDocId + '_.*')
-      );
-
-      return uidMatch || empIdMatch || empDocIdMatch || empUidOwns || empEmpDocOwns;
+      return recordId.matches(authUid + '_.*') ||
+        (getEmployeeId() != null && (
+          recordId.matches(getEmployeeId() + '_.*') ||
+          recordId.matches('emp-' + getEmployeeId() + '_.*')
+        )) ||
+        (getEmployeeDocId() != null && recordId.matches(getEmployeeDocId() + '_.*'));
     }
     function ownsAttendanceData(d) {
       let authUid = request.auth.uid;
-      let email = userEmail().lower();
-      let empId = getEmployeeId();
-      let empDocId = getEmployeeDocId();
       return isRealUser() && (
         d.get('uid', '~') == authUid ||
         d.get('employeeUid', '~') == authUid ||
         d.get('authUid', '~') == authUid ||
         (hasEmail() && (
-          (d.get('email', '~') != '~' && (d.get('email', '~') == userEmail() || d.get('email', '~').lower() == email)) ||
-          (d.get('employeeEmail', '~') != '~' && (d.get('employeeEmail', '~') == userEmail() || d.get('employeeEmail', '~').lower() == email))
+          (d.get('email', '~') != '~' && (d.get('email', '~') == userEmail() || d.get('email', '~').lower() == userEmail().lower())) ||
+          (d.get('employeeEmail', '~') != '~' && (d.get('employeeEmail', '~') == userEmail() || d.get('employeeEmail', '~').lower() == userEmail().lower()))
         )) ||
-        (empId != null && (
-          d.get('employeeCode', '~') == empId ||
-          d.get('employeeId', '~') == empId ||
-          d.get('employeeId', '~') == ('emp-' + empId)
+        (getEmployeeId() != null && (
+          d.get('employeeCode', '~') == getEmployeeId() ||
+          d.get('employeeId', '~') == getEmployeeId() ||
+          d.get('employeeId', '~') == ('emp-' + getEmployeeId())
         )) ||
-        (empDocId != null && (
-          d.get('employeeId', '~') == empDocId ||
-          d.get('employeeDocId', '~') == empDocId
-        )) ||
-        (
-          d.get('employeeId', '') != '' &&
-          exists(/databases/$(database)/documents/employees/$(d.employeeId)) &&
-          (
-            employeeRecord(d.employeeId).get('uid', '~') == authUid ||
-            (hasEmail() && (
-              employeeRecord(d.employeeId).get('email', '~') == userEmail() ||
-              employeeRecord(d.employeeId).get('email', '~').lower() == email
-            )) ||
-            (empId != null && employeeRecord(d.employeeId).get('employeeId', '~') == empId)
-          )
-        ) ||
-        (
-          d.get('employeeCode', '') != '' &&
-          exists(/databases/$(database)/documents/employees/$(d.employeeCode)) &&
-          (
-            employeeRecord(d.employeeCode).get('uid', '~') == authUid ||
-            (hasEmail() && (
-              employeeRecord(d.employeeCode).get('email', '~') == userEmail() ||
-              employeeRecord(d.employeeCode).get('email', '~').lower() == email
-            )) ||
-            (empId != null && employeeRecord(d.employeeCode).get('employeeId', '~') == empId)
-          )
-        ) ||
-        (
-          d.get('employeeCode', '') != '' &&
-          exists(/databases/$(database)/documents/employees/$( 'emp-' + d.employeeCode )) &&
-          (
-            employeeRecord('emp-' + d.employeeCode).get('uid', '~') == authUid ||
-            (hasEmail() && (
-              employeeRecord('emp-' + d.employeeCode).get('email', '~') == userEmail() ||
-              employeeRecord('emp-' + d.employeeCode).get('email', '~').lower() == email
-            )) ||
-            (empId != null && employeeRecord('emp-' + d.employeeCode).get('employeeId', '~') == empId)
-          )
-        )
+        (getEmployeeDocId() != null && (
+          d.get('employeeId', '~') == getEmployeeDocId() ||
+          d.get('employeeDocId', '~') == getEmployeeDocId()
+        ))
       );
     }
     function ownsSalaryRecord(d) {
@@ -382,15 +302,23 @@ service cloud.firestore {
     match /attendance/{recordId} {
       allow read: if isRealUser();
       allow create: if isRealUser() && (
-        isHrAdmin() || isSuperAdmin() || isProjectManager() ||
-        ((ownsAttendanceDocId(recordId) || ownsAttendanceData(request.resource.data)) && validAttendanceShape())
-      ) && (request.resource.data.get('date', '') == '' || request.resource.data.get('date', '') >= '2026-07-27');
+        ownsAttendanceDocId(recordId) ||
+        ownsAttendanceData(request.resource.data) ||
+        isHrAdmin() || isSuperAdmin() || isProjectManager()
+      ) && validAttendanceShape() && (
+        request.resource.data.get('date', '') == '' ||
+        request.resource.data.get('date', '') >= '2026-07-27'
+      );
       allow update: if isRealUser() && (
-        isHrAdmin() || isSuperAdmin() || isProjectManager() ||
         ownsAttendanceDocId(recordId) ||
         ownsAttendanceData(resource.data) ||
-        ownsAttendanceData(request.resource.data)
-      ) && (request.resource.data.get('date', '') == '' || request.resource.data.get('date', '') >= '2026-07-27');
+        ownsAttendanceData(request.resource.data) ||
+        isHrAdmin() || isSuperAdmin() || isProjectManager()
+      ) && (
+        request.resource.data.get('date', '') == '' ||
+        request.resource.data.get('date', '') >= '2026-07-27' ||
+        (resource != null && resource.data.get('date', '') >= '2026-07-27')
+      );
       allow delete: if isConfigAdmin() || isSuperAdmin() || (resource != null && resource.data.get('date', '') < '2026-07-27');
     }
 
