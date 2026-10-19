@@ -17,20 +17,18 @@ export default defineConfig(({ command }) => {
         registerType: 'autoUpdate',
         injectRegister: false,
         devOptions: {
-          enabled: true,
-          type: 'module',
-          navigateFallback: 'index.html'
+          enabled: false
         },
         workbox: {
-          globPatterns: command === 'build' ? ['**/*.{js,css,html,ico,png,svg}'] : [],
-          // Keep the face-recognition bundle and massive media OUT of the precache.
-          // Precaching large media exhausts browser CacheStorage quotas causing
-          // "Failed to execute 'open' on 'CacheStorage'".
-          globIgnores: ['**/vendor-faceapi-*.js', '**/Final 1.jpg*', '**/*.jpeg', '**/*.jpg', '**/*.mp4'],
+          // Exclude html from globPatterns so index.html is NEVER precached by the SW.
+          // This guarantees browsers always fetch the latest bundle hashes from the server.
+          globPatterns: command === 'build' ? ['**/*.{js,css,ico,png,svg}'] : [],
+          globIgnores: ['**/index.html', '**/vendor-faceapi-*.js', '**/Final 1.jpg*', '**/*.jpeg', '**/*.jpg', '**/*.mp4'],
           maximumFileSizeToCacheInBytes: 3000000, // 3MB cap prevents CacheStorage quota errors
           skipWaiting: true,
           clientsClaim: true,
-          cleanupOutdatedCaches: true
+          cleanupOutdatedCaches: true,
+          navigateFallbackDenylist: [/^\/assets\//, /^\/models\//, /\.[a-z0-9]+$/i]
         },
         manifest: {
           name: 'Kalpanaaa Software Solutions',

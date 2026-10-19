@@ -61,21 +61,102 @@
   </div>
   <div id="root"></div>
   <script>
-    // Remove HTML splash once React has fully mounted and rendered
-    document.addEventListener('DOMContentLoaded', function() {
-      // React will call hideSplash() when it's ready
+    (function() {
+      // ── Self-healing auto-recovery for module script / MIME / chunk errors ──
+      var healingInProgress = false;
+      function triggerAutoHeal(reason) {
+        if (healingInProgress) return;
+        healingInProgress = true;
+        console.warn('[KSS Platform Recovery] Module/Chunk error detected:', reason);
+
+        var attempts = parseInt(sessionStorage.getItem('kss_auto_heal') || '0', 10);
+        if (attempts < 2) {
+          sessionStorage.setItem('kss_auto_heal', (attempts + 1).toString());
+          // 1. Unregister any stale service workers
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              regs.forEach(function(r) { r.unregister(); });
+            }).catch(function() {});
+          }
+          // 2. Clear CacheStorage
+          if ('caches' in window) {
+            caches.keys().then(function(keys) {
+              keys.forEach(function(k) { caches.delete(k); });
+            }).catch(function() {});
+          }
+          // 3. Force hard reload with timestamp query to bypass stale browser HTTP cache
+          setTimeout(function() {
+            var target = window.location.origin + window.location.pathname + '?_kss_v=' + Date.now();
+            window.location.replace(target);
+          }, 100);
+        } else {
+          // If already retried and still failing, display graceful recovery UI instead of blank screen
+          var splash = document.getElementById('splash-screen');
+          if (splash) {
+            splash.style.opacity = '1';
+            splash.style.display = 'flex';
+            splash.innerHTML = [
+              '<img src="/pwa-192x192.png" style="width:96px;height:96px;border-radius:22px;box-shadow:0 0 50px rgba(59,130,246,0.35);" alt="KSS">',
+              '<div style="text-align:center;color:#fff;font-family:system-ui,-apple-system,sans-serif;padding:0 24px;max-width:380px;">',
+              '  <h2 style="font-size:22px;font-weight:700;margin:0 0 10px 0;letter-spacing:-0.02em;">Platform Update Available</h2>',
+              '  <p style="font-size:14px;color:rgba(255,255,255,0.7);margin:0 0 24px 0;line-height:1.5;">A new version of Kalpanaaa HRMS has been released. Tap below to refresh and load the latest updates.</p>',
+              '  <button id="kss-heal-btn" style="background:#2563eb;color:#fff;border:none;padding:14px 32px;border-radius:12px;font-weight:600;font-size:15px;cursor:pointer;box-shadow:0 10px 25px -5px rgba(37,99,235,0.5);">Refresh &amp; Update Now</button>',
+              '</div>'
+            ].join('');
+            var btn = document.getElementById('kss-heal-btn');
+            if (btn) {
+              btn.onclick = function() {
+                sessionStorage.clear();
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    regs.forEach(function(r) { r.unregister(); });
+                  });
+                }
+                if ('caches' in window) {
+                  caches.keys().then(function(keys) {
+                    keys.forEach(function(k) { caches.delete(k); });
+                  });
+                }
+                window.location.replace(window.location.origin + window.location.pathname + '?_t=' + Date.now());
+              };
+            }
+          }
+        }
+      }
+
+      // Catch module / script / link load errors in capture phase
+      window.addEventListener('error', function(e) {
+        if (e && e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+          triggerAutoHeal('Asset load failure: ' + (e.target.src || e.target.href));
+        }
+      }, true);
+
+      // Catch Vite preload errors
+      window.addEventListener('vite:preloadError', function(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        triggerAutoHeal('Vite chunk preload error');
+      });
+
+      // Safety net: if React has not mounted into #root after 5s, check for stall
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        if (!root || !root.firstElementChild) {
+          triggerAutoHeal('Root mounting timeout');
+        }
+      }, 5000);
+
+      // Global splash hider invoked by React App on successful render
       window.__hideSplash = function() {
+        sessionStorage.removeItem('kss_auto_heal');
         var splash = document.getElementById('splash-screen');
         if (splash) {
           splash.style.opacity = '0';
           setTimeout(function() {
-            if (splash.parentNode) splash.parentNode.removeChild(splash);
+            if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
           }, 500);
         }
       };
-      // Fast safety net: remove splash after 150ms
-      setTimeout(window.__hideSplash, 150);
-    });
+    })();
   </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>

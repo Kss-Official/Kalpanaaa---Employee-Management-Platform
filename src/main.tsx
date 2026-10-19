@@ -20,6 +20,23 @@ if ('serviceWorker' in navigator) {
   }
 }
 
+// Vite dynamic chunk recovery
+window.addEventListener('vite:preloadError', (event) => {
+  if (event && event.preventDefault) event.preventDefault();
+  console.warn('[Vite] Preload chunk error detected, reloading cache...', event);
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      regs.forEach((r) => r.unregister());
+    }).catch(() => {});
+  }
+  if ('caches' in window) {
+    caches.keys().then((keys) => {
+      keys.forEach((k) => caches.delete(k));
+    }).catch(() => {});
+  }
+  window.location.reload();
+});
+
 // ── Global failure observability (Phase 22) ─────────────────────────────────
 // Captures uncaught errors and unhandled promise rejections so production
 // failures surface in the error_logs collection even when no UI path catches
