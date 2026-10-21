@@ -115,7 +115,10 @@ service cloud.firestore {
         request.auth.uid == employeeId ||
         (resource != null && (
           resource.data.get('uid', '~') == request.auth.uid ||
-          (hasEmail() && resource.data.get('email', '~') == userEmail())
+          (hasEmail() && (
+            resource.data.get('email', '~') == userEmail() ||
+            resource.data.get('email', '~').lower() == userEmail().lower()
+          ))
         )) ||
         (userDocExists() && (
           getUserDoc().get('employeeDocId', '~') == employeeId ||
@@ -256,13 +259,7 @@ service cloud.firestore {
             'permanentAddress', 'currentAddress', 'city', 'state', 'postalCode',
             'emergencyContact', 'emergencyRelationship', 'skills', 'specialization',
             'preferredShift', 'linkedinUrl', 'faceDescriptor', 'isFaceEnrolled',
-            'faceEnrolledAt', 'fullName', 'updatedAt'
-          ]) ||
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            'role', 'executiveRole', 'employeeId', 'email', 'salary', 'ctc',
-            'probationEndDate', 'bankAccountNumber', 'bankIfscCode', 'panNumber',
-            'approvedWfhDates', 'designation', 'department', 'status', 'shift',
-            'pmUid', 'reportingManagerUid', 'qrToken', 'accessLevel', 'permissions'
+            'faceEnrolledAt', 'fullName', 'updatedAt', 'hasResume', 'resumeUrl'
           ])
         )
       ) || isConfigAdmin() || isProjectManager() || isAuthorizedTechLead();
