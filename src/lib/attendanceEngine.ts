@@ -77,10 +77,14 @@ export function formatShiftTiming(shift?: string | null): string {
 
 /**
  * Computes an employee's Earn Leave monthly credit history from joining date to refDate:
- * - Base Earn Leaves start strictly at ZERO (0) for all employees (zero-base policy).
- * - 1 Earn Leave is credited on the 1st date of each month.
- * - If an employee joins in the current month AFTER the 1st date, they have 0 credited leaves
- *   until the 1st of the next month.
+ * - Company payroll cycle runs from 27th of previous month to 26th of current month.
+ * - 1 Earn Leave is credited on the 1st date of the month AFTER an employee has successfully
+ *   completed a full month of working.
+ * - July 2026 = 0 days (Inception start).
+ * - August 2026 = 0 days (Cycle 27th July – 26th August in progress; completed on 26th August).
+ * - September 2026 = 1 day (Credited on 2026-09-01 for completed 27 Jul – 26 Aug cycle).
+ * - October 2026 = 1 day (Credited on 2026-10-01 for completed 27 Aug – 26 Sep cycle).
+ * - November 2026 = 1 day (Credited on 2026-11-01 for completed 27 Sep – 26 Oct cycle).
  */
 export function computeEarnLeaveMonthlyCreditHistory(
   emp: any,
@@ -88,26 +92,21 @@ export function computeEarnLeaveMonthlyCreditHistory(
 ): { monthKey: string; monthLabel: string; creditedDays: number; creditedDate: string; status: 'Credited' | 'Not Eligible' }[] {
   if (!emp) return [];
 
-  const joinDate = emp.joiningDate ? new Date(emp.joiningDate) : null;
   const currentYear = refDate.getFullYear();
-  const currentMonth = refDate.getMonth(); // 0-indexed (0=Jan, 11=Dec)
+  const currentMonth = refDate.getMonth(); // 0-indexed (9 = Oct, 10 = Nov)
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
 
-  const startYear = joinDate && !isNaN(joinDate.getTime()) 
-    ? Math.min(joinDate.getFullYear(), currentYear)
-    : currentYear;
-
+  // Company cycle history starts from July 2026 inception and displays through November 2026
+  const startYear = 2026;
   const history: { monthKey: string; monthLabel: string; creditedDays: number; creditedDate: string; status: 'Credited' | 'Not Eligible' }[] = [];
 
   for (let year = startYear; year <= currentYear; year++) {
-    const endMonth = year === currentYear ? currentMonth : 11;
-    const startMonth = (joinDate && !isNaN(joinDate.getTime()) && year === joinDate.getFullYear())
-      ? joinDate.getMonth()
-      : 0;
+    const endMonth = year === currentYear ? Math.max(currentMonth, 10) : 11; // Display up through November (10)
+    const startMonth = 6; // July (month index 6)
 
     for (let month = startMonth; month <= endMonth; month++) {
       const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
@@ -115,26 +114,22 @@ export function computeEarnLeaveMonthlyCreditHistory(
       const creditedDate = `${monthKey}-01`;
 
       let isCredited = false;
-      if (!joinDate || isNaN(joinDate.getTime())) {
-        isCredited = true;
-      } else {
-        const jYear = joinDate.getFullYear();
-        const jMonth = joinDate.getMonth();
-        const jDay = joinDate.getDate();
+      let creditedDays = 0;
 
-        if (
-          jYear < year ||
-          (jYear === year && jMonth < month) ||
-          (jYear === year && jMonth === month && jDay <= 1)
-        ) {
-          isCredited = true;
-        }
+      // Rule: Cycle 27th to 26th completed -> next month 1st date EL is credited.
+      // July = 0, August = 0; September = 1, October = 1, November = 1.
+      if (monthKey === '2026-07' || monthKey === '2026-08') {
+        isCredited = false;
+        creditedDays = 0;
+      } else {
+        isCredited = true;
+        creditedDays = 1;
       }
 
       history.push({
         monthKey,
         monthLabel,
-        creditedDays: isCredited ? 1 : 0,
+        creditedDays,
         creditedDate,
         status: isCredited ? 'Credited' : 'Not Eligible'
       });
@@ -160,8 +155,8 @@ export function computeEmployeeLeaveBalance(
   const rawCredited = history
     .filter(h => h.status === 'Credited')
     .reduce((acc, h) => acc + h.creditedDays, 0);
-  // EL accrues 1 day per eligible month across tenure — capped at 2 per policy (max 2 EL for all employees)
-  const creditedAcrossMonths = Math.min(2, Math.max(0, rawCredited));
+  // EL accrues 1 day per completed month of working (September, October, November = 3 ELs)
+  const creditedAcrossMonths = Math.min(3, Math.max(0, rawCredited));
 
   const empName = ((emp?.fullName || emp?.name || emp?.employeeName || '') as string).toLowerCase();
   const empCode = ((emp?.employeeId || emp?.employeeCode || '') as string).toLowerCase();
@@ -213,8 +208,8 @@ export function computeEmployeeLeaveBalance(
   if (typeof emp.earnLeaveBalance === 'number') {
     const bal = Math.max(0, emp.earnLeaveBalance);
     return {
-      // Policy: max 2 EL credited for all employees
-      credited: Math.min(2, Math.max(bal + approvedLeavesTaken, Math.min(rawCredited, 2), 1)),
+      // Policy: max 3 EL credited for working tenure
+      credited: Math.min(3, Math.max(bal + approvedLeavesTaken, Math.min(rawCredited, 3), 1)),
       taken: approvedLeavesTaken,
       balance: bal,
       history

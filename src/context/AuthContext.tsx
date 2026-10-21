@@ -2463,14 +2463,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isSatya) {
-        // Satya Ranjan Das: EL=2, SL=1, WFH=0
-        const needsEl = typeof e.earnLeaveBalance !== 'number';
+        // Satya Ranjan Das: EL=3, SL=1, WFH=0 (Sep, Oct, Nov credited)
+        const needsEl = typeof e.earnLeaveBalance !== 'number' || e.earnLeaveBalance < 3;
         const needsSl = typeof e.sickLeaveBalance !== 'number';
         if (needsEl || needsSl) {
-          if (needsEl) e.earnLeaveBalance = 2;
+          e.earnLeaveBalance = 3;
           if (needsSl) e.sickLeaveBalance = 1;
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 3, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isRitish) {
         // Ritish: EL=1, SL=1, WFH=0
