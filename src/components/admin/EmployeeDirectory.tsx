@@ -20,7 +20,9 @@ import {
   Crown,
   Star,
   X,
-  Layers
+  Layers,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface EmployeeDirectoryProps {
@@ -45,6 +47,17 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
   const [showPrintAllBarcodes, setShowPrintAllBarcodes] = useState(false);
   const [attendanceModalEmp, setAttendanceModalEmp] = useState<Employee | null>(null);
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+
+  const copyToClipboard = (email: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!email) return;
+    navigator.clipboard.writeText(email);
+    setCopiedEmail(email);
+    setTimeout(() => {
+      setCopiedEmail(prev => prev === email ? null : prev);
+    }, 2000);
+  };
 
   const departments = useMemo(() => Array.from(new Set(employees.map(e => e.department).filter(Boolean))), [employees]);
 
@@ -189,6 +202,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
       if (!emp.fullName || emp.fullName.trim() === '') return false;
+      if (
+        emp.id === 'bf41B0ztyefb6OZzO9NykxA9MSz2' ||
+        emp.fullName.includes('GHOST') ||
+        emp.fullName.includes('[DELETED]') ||
+        emp.employeeId?.includes('GHOST')
+      ) {
+        return false;
+      }
       
       const matchesSearch = 
         (emp.fullName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
@@ -255,13 +276,34 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
       return 99;
     };
 
-    return employees
-      .filter(emp => isExecutiveLeadership(emp))
-      .sort((a, b) => {
-        const diff = getExecutiveRank(a) - getExecutiveRank(b);
-        if (diff !== 0) return diff;
-        return (a.fullName || '').localeCompare(b.fullName || '');
-      });
+    const rawExecs = employees.filter(emp => isExecutiveLeadership(emp));
+    const dedupedExecs: Employee[] = [];
+    const seenExecKeys = new Set<string>();
+
+    for (const exec of rawExecs) {
+      const nameLower = (exec.fullName || '').toLowerCase().trim();
+      const key = nameLower.includes('akshit')
+        ? 'exec-akshit-ceo'
+        : (exec.employeeId?.trim() || nameLower || exec.id);
+
+      if (seenExecKeys.has(key)) {
+        if (nameLower.includes('akshit')) {
+          const idx = dedupedExecs.findIndex(e => (e.fullName || '').toLowerCase().includes('akshit'));
+          if (idx !== -1 && (exec.id === 'emp-KSS2407002' || (exec.email || '').includes('akshit.ujjain'))) {
+            dedupedExecs[idx] = exec;
+          }
+        }
+        continue;
+      }
+      seenExecKeys.add(key);
+      dedupedExecs.push(exec);
+    }
+
+    return dedupedExecs.sort((a, b) => {
+      const diff = getExecutiveRank(a) - getExecutiveRank(b);
+      if (diff !== 0) return diff;
+      return (a.fullName || '').localeCompare(b.fullName || '');
+    });
   }, [employees]);
 
   const getStatusIndicator = (status?: string) => {
@@ -653,14 +695,39 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                     {exec.employeeId || 'KSS-EXEC'} • {exec.department || 'Executive Office'}
                   </p>
 
-                  <div className="space-y-1 text-xs text-slate-400 pt-1 font-medium">
-                    <div className="flex items-center gap-2 truncate">
-                      <Mail className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
-                      <span className="truncate">{exec.email}</span>
+                  <div className="space-y-1.5 text-xs text-slate-400 pt-1 font-medium">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 truncate">
+                        <Mail className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
+                        <a
+                          href={`mailto:${exec.email}`}
+                          className="truncate hover:text-amber-300 hover:underline transition-colors"
+                        >
+                          {exec.email}
+                        </a>
+                      </div>
+                      {exec.email && (
+                        <button
+                          onClick={(e) => copyToClipboard(exec.email!, e)}
+                          className="p-1 text-slate-500 hover:text-amber-300 rounded-md hover:bg-slate-800 transition-all cursor-pointer shrink-0"
+                          title="Copy Email"
+                        >
+                          {copiedEmail === exec.email ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 truncate">
                       <Phone className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
-                      <span>{exec.phone || '+91 98765 43210'}</span>
+                      <a
+                        href={`tel:${exec.phone || '+919876543210'}`}
+                        className="hover:text-amber-300 hover:underline transition-colors"
+                      >
+                        {exec.phone || '+91 98765 43210'}
+                      </a>
                     </div>
                   </div>
                 </div>

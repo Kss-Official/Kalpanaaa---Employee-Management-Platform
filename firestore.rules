@@ -310,6 +310,8 @@ service cloud.firestore {
         request.resource.data.get('date', '') >= '2026-07-27'
       );
       allow update: if isRealUser() && (
+        // FAST-PATH: explicit admin/PM UIDs bypass expensive getUserDoc() calls
+        request.auth.uid in ['vhKLIJCVZoTncqVtmh14paMbiXk2', '2d48Rm9eY4eBswXOZw2IBpWGkZK2'] ||
         ownsAttendanceDocId(recordId) ||
         ownsAttendanceData(resource.data) ||
         ownsAttendanceData(request.resource.data) ||

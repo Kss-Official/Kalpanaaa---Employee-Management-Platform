@@ -1271,6 +1271,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return;
               }
 
+              // PURGE DUPLICATE AKSHIT UJJAIN RECORD (emp-1785847273632 or old akshitujjain email)
+              if (
+                data.id === 'emp-1785847273632' ||
+                (data.id !== 'emp-KSS2407002' && data.employeeId === 'KSS2407002' && (data.email?.toLowerCase().includes('akshitujjain@') || data.email?.toLowerCase() === 'akshitujjain@kalpanaaasoftwaresolutions.in'))
+              ) {
+                if (canMigrate && !deletedEmployeeIds.has(data.id)) {
+                  deletedEmployeeIds.add(data.id);
+                  deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                }
+                return;
+              }
+
+              // PURGE GHOST DELETED USERS
+              if (
+                data.id === 'bf41B0ztyefb6OZzO9NykxA9MSz2' ||
+                data.employeeId?.includes('GHOST') ||
+                data.fullName?.includes('GHOST') ||
+                data.fullName?.includes('[DELETED]')
+              ) {
+                if (canMigrate && !deletedEmployeeIds.has(data.id)) {
+                  deletedEmployeeIds.add(data.id);
+                  deleteDoc(doc(db, 'employees', data.id)).catch(() => { });
+                }
+                return;
+              }
+
               // LIVE AUTOCORRECT CEO SPELLING AND EMAIL IN FIREBASE
               if (data.employeeId === 'CEO001') {
                 let needsUpdate = false;
@@ -1485,6 +1511,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // LIVE AUTOCORRECT PRATIKSHA HARODE (Employment Type: Intern)
+              const isPratikshaEmp =
+                data.id === 'NTirYBVT1pSuLj5thrdsjM54F303' ||
+                data.id === 'emp-1785863423639' ||
+                data.id === 'emp-KSS2407008' ||
+                data.employeeId === 'KSS2407008' ||
+                (data.fullName && data.fullName.toLowerCase().includes('pratiksha'));
+              if (isPratikshaEmp) {
+                if (data.employmentType !== 'Intern') {
+                  data.employmentType = 'Intern';
+                  if (canMigrate && !migratedEmployeeIds.has(`pratiksha-type-${data.id}`)) {
+                    migratedEmployeeIds.add(`pratiksha-type-${data.id}`);
+                    setDoc(doc(db, 'employees', data.id), { employmentType: 'Intern' }, { merge: true }).catch(() => { });
+                  }
+                }
+              }
+
               // LIVE AUTOCORRECT WORKFORCE REPORTING MANAGER TO D. KOUSHIK
               if (
                 !isExecutiveOrLeadership(data) &&
@@ -1533,6 +1576,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 continue;
               }
 
+              // Akshit Ujjain (CEO): ensure only ONE canonical record exists (emp-KSS2407002 / akshit.ujjain@...)
+              const isAkshit = (emp.fullName || '').toLowerCase().includes('akshit') || emp.employeeId === 'KSS2407002';
+              if (isAkshit) {
+                const existingIdx = deduplicated.findIndex(e => (e.fullName || '').toLowerCase().includes('akshit') || e.employeeId === 'KSS2407002');
+                if (existingIdx !== -1) {
+                  // Prefer canonical ID emp-KSS2407002 or canonical email with dot
+                  if (emp.id === 'emp-KSS2407002' || emailKey === 'akshit.ujjain@kalpanaaasoftwaresolutions.in') {
+                    deduplicated[existingIdx] = emp;
+                  }
+                  continue;
+                }
+              }
+
               // ID Collision Protection:
               // If an employeeId is already claimed, only skip if the email is absent or it's a true duplicate.
               // If distinct emails collide on an employeeId, protect canonical assignments:
@@ -1546,7 +1602,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     if (emailKey) seenEmails.add(emailKey);
                     continue;
                   }
-                } else if (!emailKey) {
+                } else {
+                  // If the employee ID is already claimed, skip duplicates
                   continue;
                 }
               }

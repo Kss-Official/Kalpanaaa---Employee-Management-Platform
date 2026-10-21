@@ -283,7 +283,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     skills: ['Full Stack Development'],
     specialization: 'Full Stack Development',
     joiningDate: '2024-04-01',
-    employmentType: 'Full Stack Development',
+    employmentType: 'Intern',
     reportingManager: 'D. Koushik',
     workLocation: 'Main Office HQ',
     status: 'Active',
