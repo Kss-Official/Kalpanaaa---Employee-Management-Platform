@@ -227,17 +227,23 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                     </div>
                     <div className="flex justify-between py-1.5 border-b border-[var(--border-subtle)]">
                       <span className="text-[var(--text-secondary)]">Designation</span>
-                      <span className="font-semibold text-[var(--text-primary)]">{employee.designation}</span>
+                      <span className="font-semibold text-[var(--text-primary)]">
+                        {((employee.fullName && (employee.fullName.toLowerCase().includes('satya') || employee.fullName.toLowerCase().includes('ranjan'))) || employee.employeeId === 'KSS2407012')
+                          ? 'Software Developer'
+                          : employee.designation}
+                      </span>
                     </div>
                     <div className="flex justify-between py-1.5 border-b border-[var(--border-subtle)]">
                       <span className="text-[var(--text-secondary)]">Employment Stage</span>
                       {(() => {
-                        const effectiveType = computeEmploymentType(employee);
+                        const isSatya = (employee.fullName && (employee.fullName.toLowerCase().includes('satya') || employee.fullName.toLowerCase().includes('ranjan'))) || employee.employeeId === 'KSS2407012';
+                        const rawType = computeEmploymentType(employee);
+                        const effectiveType = isSatya || rawType === 'Software Developer' ? 'Software Engineer' : rawType;
                         return (
                           <span className={`font-bold ${
                             effectiveType === 'Intern' ? 'text-cyan-400' :
                             effectiveType === 'Trainee' ? 'text-amber-400' :
-                            effectiveType === 'Software Developer' ? 'text-blue-400' :
+                            effectiveType === 'Software Engineer' ? 'text-blue-400' :
                             effectiveType === 'Full Stack Development' ? 'text-purple-400' :
                             'text-emerald-400'
                           }`}>

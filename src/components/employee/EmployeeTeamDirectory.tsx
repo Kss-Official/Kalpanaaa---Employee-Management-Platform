@@ -312,7 +312,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
       return { label: 'HR Lead', color: 'bg-purple-500/15 text-purple-300 border-purple-500/30 font-bold' };
     if (emp.role === 'PROJECT_MANAGER' || hasTitle(desig, 'project manager'))
       return { label: 'Project Manager', color: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 font-bold' };
-    if (isAuthorizedTechLead(emp) || (emp.role as string) === 'TECH_LEAD' || desig.includes('tech lead'))
+    if (isAuthorizedTechLead(emp) || (emp.role as string) === 'TECH_LEAD' || hasTitle(desig, 'tech lead', 'technical lead'))
       return { label: 'Tech Lead', color: 'bg-blue-500/15 text-blue-300 border-blue-500/30 font-bold' };
     return null;
   };
@@ -563,8 +563,11 @@ export const EmployeeTeamDirectory: React.FC = () => {
               const deptDisplay = (member.role === 'PROJECT_MANAGER' || (member.designation || '').toLowerCase().includes('project manager') || member.employeeId === 'KSS2407003' || (member.fullName || '').toLowerCase().includes('koushik'))
                 ? 'IT'
                 : (member.department || '—');
+              const isSatyaMember = member.employeeId === 'KSS2407012' || (member.fullName && (member.fullName.toLowerCase().includes('satya') || member.fullName.toLowerCase().includes('ranjan')));
               const desigDisplay = (member.fullName && (member.fullName.toLowerCase().includes('jigyansha') || member.fullName.toLowerCase().includes('jingyasha')))
                 ? 'AI/ML Developer'
+                : isSatyaMember
+                ? 'Software Developer'
                 : (member.designation || '—');
               const managerDisplay = member.reportingManager || 'D. Koushik';
 
@@ -708,8 +711,11 @@ export const EmployeeTeamDirectory: React.FC = () => {
                     const deptDisplay = (member.role === 'PROJECT_MANAGER' || (member.designation || '').toLowerCase().includes('project manager') || member.employeeId === 'KSS2407003' || (member.fullName || '').toLowerCase().includes('koushik'))
                       ? 'IT'
                       : (member.department || '—');
+                    const isSatyaMember = member.employeeId === 'KSS2407012' || (member.fullName && (member.fullName.toLowerCase().includes('satya') || member.fullName.toLowerCase().includes('ranjan')));
                     const desigDisplay = (member.fullName && (member.fullName.toLowerCase().includes('jigyansha') || member.fullName.toLowerCase().includes('jingyasha')))
                       ? 'AI/ML Developer'
+                      : isSatyaMember
+                      ? 'Software Developer'
                       : (member.designation || '—');
                     const managerDisplay = member.reportingManager || 'D. Koushik';
 
@@ -992,7 +998,9 @@ export const EmployeeTeamDirectory: React.FC = () => {
                       {selectedColleague.employeeId || 'KSS-EMP'}
                     </span>
                     <div className="text-[11px] text-slate-400 font-semibold">
-                      {selectedColleague.employmentType || 'Full-Time'}
+                      {(selectedColleague.employeeId === 'KSS2407012' || (selectedColleague.fullName && (selectedColleague.fullName.toLowerCase().includes('satya') || selectedColleague.fullName.toLowerCase().includes('ranjan'))))
+                        ? 'Software Engineer'
+                        : (selectedColleague.employmentType || 'Full-Time')}
                     </div>
                   </div>
                 </div>
@@ -1006,7 +1014,9 @@ export const EmployeeTeamDirectory: React.FC = () => {
                     )}
                   </h3>
                   <p className="text-sm font-semibold text-slate-300 mt-0.5">
-                    {selectedColleague.designation || 'Staff Member'}
+                    {(selectedColleague.employeeId === 'KSS2407012' || (selectedColleague.fullName && (selectedColleague.fullName.toLowerCase().includes('satya') || selectedColleague.fullName.toLowerCase().includes('ranjan'))))
+                      ? 'Software Developer'
+                      : (selectedColleague.designation || 'Staff Member')}
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {selectedColleague.department || 'Department'} • Reporting to{' '}

@@ -1442,6 +1442,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
+              // LIVE AUTOCORRECT SATYA RANJAN DAS (Software Developer designation & Software Engineer employmentType)
+              const isSatyaLiveRecord =
+                data.id === 'emp-KSS2407012' ||
+                data.id === 'emp-1785997525850' ||
+                data.employeeId === 'KSS2407012' ||
+                (data.fullName && (data.fullName.toLowerCase().includes('satya') || data.fullName.toLowerCase().includes('ranjan')));
+              if (isSatyaLiveRecord) {
+                let satyaChanged = false;
+                if (data.designation !== 'Software Developer') {
+                  data.designation = 'Software Developer';
+                  satyaChanged = true;
+                }
+                if (data.employmentType !== 'Software Engineer') {
+                  data.employmentType = 'Software Engineer';
+                  satyaChanged = true;
+                }
+                if (satyaChanged && canMigrate && !migratedEmployeeIds.has(`satya-live-${data.id}`)) {
+                  migratedEmployeeIds.add(`satya-live-${data.id}`);
+                  setDoc(doc(db, 'employees', data.id), {
+                    designation: 'Software Developer',
+                    employmentType: 'Software Engineer',
+                    updatedAt: serverTimestamp()
+                  }, { merge: true }).catch(() => { });
+                }
+              }
+
               // LIVE AUTOCORRECT PROJECT MANAGER D. KOUSHIK (IT Department, Project Management specialization, joiningDate: 2026-07-27)
               const isProjectManager =
                 data.role === 'PROJECT_MANAGER' ||
@@ -2463,14 +2489,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isSatya) {
-        // Satya Ranjan Das: EL=3, SL=1, WFH=0 (Sep, Oct, Nov credited)
+        // Satya Ranjan Das: EL=3, SL=1, WFH=0 (Sep, Oct, Nov credited), Software Developer & Software Engineer
         const needsEl = typeof e.earnLeaveBalance !== 'number' || e.earnLeaveBalance < 3;
         const needsSl = typeof e.sickLeaveBalance !== 'number';
-        if (needsEl || needsSl) {
+        const needsDesig = e.designation !== 'Software Developer';
+        const needsEmpType = e.employmentType !== 'Software Engineer';
+        if (needsEl || needsSl || needsDesig || needsEmpType) {
           e.earnLeaveBalance = 3;
           if (needsSl) e.sickLeaveBalance = 1;
+          e.designation = 'Software Developer';
+          e.employmentType = 'Software Engineer';
           changed = true;
-          setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: 3, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+          setDoc(doc(db, 'employees', e.id), { 
+            earnLeaveBalance: 3, 
+            sickLeaveBalance: e.sickLeaveBalance, 
+            designation: 'Software Developer',
+            employmentType: 'Software Engineer',
+            updatedAt: serverTimestamp() 
+          }, { merge: true }).catch(() => {});
         }
       } else if (isRitish) {
         // Ritish: EL=1, SL=1, WFH=0

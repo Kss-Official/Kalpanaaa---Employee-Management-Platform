@@ -62,7 +62,7 @@ const DESIGNATIONS = [
 ];
 
 const EMPLOYMENT_TYPES = [
-  'Intern', 'Trainee', 'Full-Time', 'Part-Time', 'Contract',
+  'Intern', 'Trainee', 'Software Engineer', 'Full-Time', 'Part-Time', 'Contract',
 ];
 
 // Specializations grouped for smart UX
@@ -765,9 +765,12 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
                   // Department normalized (IT for all technical staff & PM)
                   const deptDisplay = getAttendanceDepartment(emp);
-                  // Designation (AI/ML Developer for Jigyansha)
+                  // Designation (AI/ML Developer for Jigyansha, Software Developer for Satya)
+                  const isSatyaEmp = emp.employeeId === 'KSS2407012' || (emp.fullName && (emp.fullName.toLowerCase().includes('satya') || emp.fullName.toLowerCase().includes('ranjan')));
                   const desigDisplay = (emp.fullName && (emp.fullName.toLowerCase().includes('jigyansha') || emp.fullName.toLowerCase().includes('jingyasha')))
                     ? 'AI/ML Developer'
+                    : isSatyaEmp
+                    ? 'Software Developer'
                     : (emp.designation || '—');
 
                   return (
@@ -811,14 +814,16 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
                       {/* 5. Employment Type */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         {(() => {
-                          const effectiveEmpType = computeEmploymentType(emp);
+                          const isSatyaEmp = emp.employeeId === 'KSS2407012' || (emp.fullName && (emp.fullName.toLowerCase().includes('satya') || emp.fullName.toLowerCase().includes('ranjan')));
+                          const rawEmpType = computeEmploymentType(emp);
+                          const effectiveEmpType = isSatyaEmp || rawEmpType === 'Software Developer' ? 'Software Engineer' : rawEmpType;
                           return (
                             <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border whitespace-nowrap inline-block ${
                               effectiveEmpType === 'Intern'
                                 ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25'
                                 : effectiveEmpType === 'Trainee'
                                 ? 'bg-amber-500/10 text-amber-300 border-amber-500/25'
-                                : effectiveEmpType === 'Software Developer'
+                                : effectiveEmpType === 'Software Engineer'
                                 ? 'bg-blue-500/10 text-blue-300 border-blue-500/25'
                                 : effectiveEmpType === 'Full Stack Development'
                                 ? 'bg-purple-500/10 text-purple-300 border-purple-500/25'

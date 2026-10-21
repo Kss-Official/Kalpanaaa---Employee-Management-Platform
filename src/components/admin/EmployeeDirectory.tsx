@@ -475,8 +475,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                     ? 'IT'
                     : (emp.department || '—');
 
+                  const isSatyaEmp = emp.employeeId === 'KSS2407012' || (emp.fullName && (emp.fullName.toLowerCase().includes('satya') || emp.fullName.toLowerCase().includes('ranjan')));
                   const desigDisplay = (emp.fullName && (emp.fullName.toLowerCase().includes('jigyansha') || emp.fullName.toLowerCase().includes('jingyasha')))
                     ? 'AI/ML Developer'
+                    : isSatyaEmp
+                    ? 'Software Developer'
                     : (emp.designation || '—');
 
                   const reportingManagerDisplay = emp.reportingManager || 'D. Koushik';
@@ -532,14 +535,16 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                       {/* 6. Employment Type */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         {(() => {
-                          const effectiveType = computeEmploymentType(emp);
+                          const isSatyaEmp = emp.employeeId === 'KSS2407012' || (emp.fullName && (emp.fullName.toLowerCase().includes('satya') || emp.fullName.toLowerCase().includes('ranjan')));
+                          const rawType = computeEmploymentType(emp);
+                          const effectiveType = isSatyaEmp || rawType === 'Software Developer' ? 'Software Engineer' : rawType;
                           return (
                             <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border whitespace-nowrap inline-block ${
                               effectiveType === 'Intern'
                                 ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25'
                                 : effectiveType === 'Trainee'
                                 ? 'bg-amber-500/10 text-amber-300 border-amber-500/25'
-                                : effectiveType === 'Software Developer'
+                                : effectiveType === 'Software Engineer'
                                 ? 'bg-blue-500/10 text-blue-300 border-blue-500/25'
                                 : effectiveType === 'Full Stack Development'
                                 ? 'bg-purple-500/10 text-purple-300 border-purple-500/25'
