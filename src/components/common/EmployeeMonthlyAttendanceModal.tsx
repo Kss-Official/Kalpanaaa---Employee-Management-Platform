@@ -30,8 +30,13 @@ import {
   Info,
   CalendarDays,
   Layers,
-  RotateCcw
+  RotateCcw,
+  Plus,
+  Minus,
+  Loader2
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { adjustLeaveBalance } from '../../lib/leaveBalanceService';
 import { generateAttendanceReportPdf } from '../../lib/pdfGenerator';
 import { toISTTimeString, todayInIST } from '../../lib/absoluteTime';
 import { isNonWorkingDay, getHolidayInfo, isLateCheckIn, isWfhType, COMPANY_START_DATE, computeTotalLeaveBalances } from '../../lib/attendanceEngine';
@@ -48,9 +53,30 @@ const LeaveBalanceKpiBox: React.FC<{
 }> = ({ employee, leaveRequests, year, month, onOpen }) => {
   const [open, setOpen] = React.useState(false);
   const [tab, setTab] = React.useState<'All' | 'Earn Leave' | 'Sick Leave' | 'Casual Leave' | 'WFH'>('All');
+  const [isUpdatingLeave, setIsUpdatingLeave] = React.useState<string | null>(null);
+  const [editingField, setEditingField] = React.useState<'earnLeaveBalance' | 'sickLeaveBalance' | 'casualLeaveBalance' | null>(null);
+  const [editingValue, setEditingValue] = React.useState<string>('');
 
-  const { employees } = useAuth();
+  const { employees, activeEmployee, updateEmployee, role, user } = useAuth();
   const { triggerHaptic } = useHaptic();
+
+  // Strict check: Only the Project Manager is authorized to view and perform balance adjustments
+  const isPM = React.useMemo(() => {
+    const effectiveRole = activeEmployee?.role || role;
+    const desig = (activeEmployee?.designation || '').toLowerCase();
+    const empCode = (activeEmployee?.employeeId || '').toUpperCase();
+    const name = (activeEmployee?.fullName || (activeEmployee as any)?.name || '').toLowerCase();
+    const email = (user?.email || activeEmployee?.email || '').toLowerCase();
+
+    return (
+      effectiveRole === 'PROJECT_MANAGER' ||
+      role === 'PROJECT_MANAGER' ||
+      empCode === 'KSS2407003' ||
+      desig.includes('project manager') ||
+      name.includes('koushik') ||
+      email.includes('koushik')
+    );
+  }, [role, activeEmployee, user]);
 
   // Dynamically resolve freshest employee document from live context
   const liveEmp = React.useMemo(() => {
@@ -103,6 +129,141 @@ const LeaveBalanceKpiBox: React.FC<{
     });
   }, [leaveRequests, liveEmp]);
 
+  // Handler for PM: Update (+1) or Reduce (-1) leave counts
+  const handleAdjustLeave = async (
+    field: 'earnLeaveBalance' | 'sickLeaveBalance' | 'casualLeaveBalance',
+    delta: number
+  ) => {
+    if (!isPM) {
+      toast.error('Only the Project Manager is authorized to adjust leave balances.');
+      return;
+    }
+    triggerHaptic();
+
+    let currentBalance = 0;
+    let leaveLabel = 'Leave';
+    if (field === 'earnLeaveBalance') {
+      currentBalance = typeof liveEmp.earnLeaveBalance === 'number' ? liveEmp.earnLeaveBalance : overview.earnLeave.balance;
+      leaveLabel = 'Earn Leave';
+    } else if (field === 'sickLeaveBalance') {
+      currentBalance = typeof liveEmp.sickLeaveBalance === 'number' ? liveEmp.sickLeaveBalance : overview.sickLeave.balance;
+      leaveLabel = 'Sick Leave';
+    } else if (field === 'casualLeaveBalance') {
+      currentBalance = typeof liveEmp.casualLeaveBalance === 'number' ? liveEmp.casualLeaveBalance : overview.casualLeave.balance;
+      leaveLabel = 'Casual Leave';
+    }
+
+    const newBalance = Math.max(0, currentBalance + delta);
+    if (newBalance === currentBalance && delta < 0) {
+      toast.info(`${leaveLabel} balance is already 0.`);
+      return;
+    }
+
+    setIsUpdatingLeave(field);
+
+    try {
+      const targetId = liveEmp.id || liveEmp.employeeId || (liveEmp as any).uid;
+
+      // 1. Direct real-time Context & Firestore Cloud Database Update
+      await updateEmployee(targetId, { [field]: newBalance });
+      if (liveEmp.employeeId && liveEmp.employeeId !== targetId) {
+        await updateEmployee(liveEmp.employeeId, { [field]: newBalance }).catch(() => {});
+      }
+      if (liveEmp.id && liveEmp.id !== targetId) {
+        await updateEmployee(liveEmp.id, { [field]: newBalance }).catch(() => {});
+      }
+
+      // 2. Adjust leave balance & write audit log
+      await adjustLeaveBalance({
+        employeeId: targetId,
+        employeeCode: liveEmp.employeeId || '',
+        employeeName: liveEmp.fullName || '',
+        field,
+        previousValue: currentBalance,
+        newValue: newBalance,
+        adjustedBy: activeEmployee?.id || activeEmployee?.uid || 'manager',
+        adjustedByName: activeEmployee?.fullName || 'Project Manager',
+        adjustedAt: new Date().toISOString(),
+        reason: `Quick ${delta > 0 ? 'increment (+1)' : 'reduction (-1)'} via Leave Ledger modal`,
+      }).catch(err => console.warn('[LeaveLedger] Audit log error:', err));
+
+      toast.success(`${leaveLabel} balance updated: ${newBalance} ${newBalance === 1 ? 'Day' : 'Days'}`);
+    } catch (err: any) {
+      console.error('Failed to update leave balance:', err);
+      toast.error(err?.message || `Failed to update ${leaveLabel} balance`);
+    } finally {
+      setIsUpdatingLeave(null);
+    }
+  };
+
+  // Handler for PM: Direct number input update
+  const handleSaveDirect = async (
+    field: 'earnLeaveBalance' | 'sickLeaveBalance' | 'casualLeaveBalance'
+  ) => {
+    if (!isPM) {
+      toast.error('Only the Project Manager is authorized to adjust leave balances.');
+      return;
+    }
+    const val = parseFloat(editingValue);
+    if (isNaN(val) || val < 0) {
+      toast.error('Please enter a valid non-negative number.');
+      return;
+    }
+
+    triggerHaptic();
+
+    let currentBalance = 0;
+    let leaveLabel = 'Leave';
+    if (field === 'earnLeaveBalance') {
+      currentBalance = typeof liveEmp.earnLeaveBalance === 'number' ? liveEmp.earnLeaveBalance : overview.earnLeave.balance;
+      leaveLabel = 'Earn Leave';
+    } else if (field === 'sickLeaveBalance') {
+      currentBalance = typeof liveEmp.sickLeaveBalance === 'number' ? liveEmp.sickLeaveBalance : overview.sickLeave.balance;
+      leaveLabel = 'Sick Leave';
+    } else if (field === 'casualLeaveBalance') {
+      currentBalance = typeof liveEmp.casualLeaveBalance === 'number' ? liveEmp.casualLeaveBalance : overview.casualLeave.balance;
+      leaveLabel = 'Casual Leave';
+    }
+
+    const newBalance = Math.max(0, val);
+    setIsUpdatingLeave(field);
+    setEditingField(null);
+
+    try {
+      const targetId = liveEmp.id || liveEmp.employeeId || (liveEmp as any).uid;
+
+      // 1. Direct real-time Context & Firestore Cloud Database Update
+      await updateEmployee(targetId, { [field]: newBalance });
+      if (liveEmp.employeeId && liveEmp.employeeId !== targetId) {
+        await updateEmployee(liveEmp.employeeId, { [field]: newBalance }).catch(() => {});
+      }
+      if (liveEmp.id && liveEmp.id !== targetId) {
+        await updateEmployee(liveEmp.id, { [field]: newBalance }).catch(() => {});
+      }
+
+      // 2. Adjust leave balance & write audit log
+      await adjustLeaveBalance({
+        employeeId: targetId,
+        employeeCode: liveEmp.employeeId || '',
+        employeeName: liveEmp.fullName || '',
+        field,
+        previousValue: currentBalance,
+        newValue: newBalance,
+        adjustedBy: activeEmployee?.id || activeEmployee?.uid || 'manager',
+        adjustedByName: activeEmployee?.fullName || 'Project Manager',
+        adjustedAt: new Date().toISOString(),
+        reason: `Direct balance set to ${newBalance} via Leave Ledger modal`,
+      }).catch(err => console.warn('[LeaveLedger] Audit log error:', err));
+
+      toast.success(`${leaveLabel} balance set to ${newBalance} ${newBalance === 1 ? 'Day' : 'Days'}`);
+    } catch (err: any) {
+      console.error('Failed to update leave balance:', err);
+      toast.error(err?.message || `Failed to update ${leaveLabel} balance`);
+    } finally {
+      setIsUpdatingLeave(null);
+    }
+  };
+
 
 
   return (
@@ -152,6 +313,11 @@ const LeaveBalanceKpiBox: React.FC<{
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
                         {overview.totalBalance} Days Available
                       </span>
+                      {isPM && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" /> PM Balance Controls Active
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-slate-300">{liveEmp.fullName}</span>
@@ -214,11 +380,95 @@ const LeaveBalanceKpiBox: React.FC<{
                     </div>
 
                     <div className="text-center py-1.5 flex flex-col items-center">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Balance Available</span>
-                      <div className="flex items-center justify-center gap-1.5 bg-slate-900/90 px-4 py-2 rounded-2xl border border-purple-500/30 shadow-inner min-w-[120px]">
-                        <span className="text-2xl font-black text-purple-300 font-mono">{overview.earnLeave.balance}</span>
-                        <span className="text-xs font-semibold text-slate-400 font-sans">{overview.earnLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
+                        {isPM && (
+                          <span className="px-1.5 py-0.2 rounded text-[8px] font-black bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            PM Edit
+                          </span>
+                        )}
                       </div>
+                      {isPM ? (
+                        <div className="flex items-center justify-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-2xl border border-purple-500/40 shadow-inner">
+                          <button
+                            type="button"
+                            onClick={() => handleAdjustLeave('earnLeaveBalance', -1)}
+                            disabled={isUpdatingLeave === 'earnLeaveBalance' || overview.earnLeave.balance <= 0}
+                            className="w-7 h-7 rounded-xl bg-purple-500/20 hover:bg-purple-500/35 active:scale-90 border border-purple-500/40 text-purple-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                            title="Reduce count (-1 Day)"
+                            aria-label="Reduce Earn Leave count"
+                          >
+                            <Minus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                          </button>
+                          {editingField === 'earnLeaveBalance' ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                value={editingValue}
+                                onChange={(e) => setEditingValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveDirect('earnLeaveBalance');
+                                  if (e.key === 'Escape') setEditingField(null);
+                                }}
+                                className="w-14 px-1 py-0.5 bg-slate-800 border border-purple-400 rounded-lg text-center font-mono text-base font-black text-purple-200 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveDirect('earnLeaveBalance')}
+                                className="w-6 h-6 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 flex items-center justify-center cursor-pointer"
+                                title="Save count"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingField(null)}
+                                className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center justify-center cursor-pointer"
+                                title="Cancel"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => {
+                                setEditingField('earnLeaveBalance');
+                                setEditingValue(String(overview.earnLeave.balance));
+                              }}
+                              className="min-w-[70px] text-center flex items-center justify-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                              title="Click to type exact count"
+                            >
+                              {isUpdatingLeave === 'earnLeaveBalance' ? (
+                                <Loader2 className="w-5 h-5 text-purple-400 animate-spin my-0.5" />
+                              ) : (
+                                <>
+                                  <span className="text-2xl font-black text-purple-300 font-mono">{overview.earnLeave.balance}</span>
+                                  <span className="text-xs text-slate-400 font-sans">{overview.earnLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                                  <Edit3 className="w-2.5 h-2.5 text-purple-400/60 ml-0.5" />
+                                </>
+                              )}
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleAdjustLeave('earnLeaveBalance', 1)}
+                            disabled={isUpdatingLeave === 'earnLeaveBalance'}
+                            className="w-7 h-7 rounded-xl bg-purple-500/20 hover:bg-purple-500/35 active:scale-90 border border-purple-500/40 text-purple-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                            title="Update count (+1 Day)"
+                            aria-label="Update Earn Leave count"
+                          >
+                            <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-1.5 bg-slate-900/90 px-4 py-2 rounded-2xl border border-purple-500/30 shadow-inner min-w-[120px]">
+                          <span className="text-2xl font-black text-purple-300 font-mono">{overview.earnLeave.balance}</span>
+                          <span className="text-xs font-semibold text-slate-400 font-sans">{overview.earnLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
@@ -245,11 +495,95 @@ const LeaveBalanceKpiBox: React.FC<{
                     </div>
 
                     <div className="text-center py-1.5 flex flex-col items-center">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Balance Available</span>
-                      <div className="flex items-center justify-center gap-1.5 bg-slate-900/90 px-4 py-2 rounded-2xl border border-rose-500/30 shadow-inner min-w-[120px]">
-                        <span className="text-2xl font-black text-rose-300 font-mono">{overview.sickLeave.balance}</span>
-                        <span className="text-xs font-semibold text-slate-400 font-sans">{overview.sickLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
+                        {isPM && (
+                          <span className="px-1.5 py-0.2 rounded text-[8px] font-black bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            PM Edit
+                          </span>
+                        )}
                       </div>
+                      {isPM ? (
+                        <div className="flex items-center justify-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-2xl border border-rose-500/40 shadow-inner">
+                          <button
+                            type="button"
+                            onClick={() => handleAdjustLeave('sickLeaveBalance', -1)}
+                            disabled={isUpdatingLeave === 'sickLeaveBalance' || overview.sickLeave.balance <= 0}
+                            className="w-7 h-7 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 active:scale-90 border border-rose-500/40 text-rose-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                            title="Reduce count (-1 Day)"
+                            aria-label="Reduce Sick Leave count"
+                          >
+                            <Minus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                          </button>
+                          {editingField === 'sickLeaveBalance' ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                value={editingValue}
+                                onChange={(e) => setEditingValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveDirect('sickLeaveBalance');
+                                  if (e.key === 'Escape') setEditingField(null);
+                                }}
+                                className="w-14 px-1 py-0.5 bg-slate-800 border border-rose-400 rounded-lg text-center font-mono text-base font-black text-rose-200 focus:outline-none focus:ring-1 focus:ring-rose-400"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveDirect('sickLeaveBalance')}
+                                className="w-6 h-6 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 flex items-center justify-center cursor-pointer"
+                                title="Save count"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingField(null)}
+                                className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center justify-center cursor-pointer"
+                                title="Cancel"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => {
+                                setEditingField('sickLeaveBalance');
+                                setEditingValue(String(overview.sickLeave.balance));
+                              }}
+                              className="min-w-[70px] text-center flex items-center justify-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                              title="Click to type exact count"
+                            >
+                              {isUpdatingLeave === 'sickLeaveBalance' ? (
+                                <Loader2 className="w-5 h-5 text-rose-400 animate-spin my-0.5" />
+                              ) : (
+                                <>
+                                  <span className="text-2xl font-black text-rose-300 font-mono">{overview.sickLeave.balance}</span>
+                                  <span className="text-xs text-slate-400 font-sans">{overview.sickLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                                  <Edit3 className="w-2.5 h-2.5 text-rose-400/60 ml-0.5" />
+                                </>
+                              )}
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleAdjustLeave('sickLeaveBalance', 1)}
+                            disabled={isUpdatingLeave === 'sickLeaveBalance'}
+                            className="w-7 h-7 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 active:scale-90 border border-rose-500/40 text-rose-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                            title="Update count (+1 Day)"
+                            aria-label="Update Sick Leave count"
+                          >
+                            <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-1.5 bg-slate-900/90 px-4 py-2 rounded-2xl border border-rose-500/30 shadow-inner min-w-[120px]">
+                          <span className="text-2xl font-black text-rose-300 font-mono">{overview.sickLeave.balance}</span>
+                          <span className="text-xs font-semibold text-slate-400 font-sans">{overview.sickLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
@@ -276,11 +610,95 @@ const LeaveBalanceKpiBox: React.FC<{
                     </div>
 
                     <div className="text-center py-1.5 flex flex-col items-center">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Balance Available</span>
-                      <div className="flex items-center justify-center gap-1.5 bg-slate-900/90 px-4 py-2 rounded-2xl border border-cyan-500/30 shadow-inner min-w-[120px]">
-                        <span className="text-2xl font-black text-cyan-300 font-mono">{overview.casualLeave.balance}</span>
-                        <span className="text-xs font-semibold text-slate-400 font-sans">{overview.casualLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Balance Available</span>
+                        {isPM && (
+                          <span className="px-1.5 py-0.2 rounded text-[8px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                            PM Edit
+                          </span>
+                        )}
                       </div>
+                      {isPM ? (
+                        <div className="flex items-center justify-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-2xl border border-cyan-500/40 shadow-inner">
+                          <button
+                            type="button"
+                            onClick={() => handleAdjustLeave('casualLeaveBalance', -1)}
+                            disabled={isUpdatingLeave === 'casualLeaveBalance' || overview.casualLeave.balance <= 0}
+                            className="w-7 h-7 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/35 active:scale-90 border border-cyan-500/40 text-cyan-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                            title="Reduce count (-1 Day)"
+                            aria-label="Reduce Casual Leave count"
+                          >
+                            <Minus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                          </button>
+                          {editingField === 'casualLeaveBalance' ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                value={editingValue}
+                                onChange={(e) => setEditingValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveDirect('casualLeaveBalance');
+                                  if (e.key === 'Escape') setEditingField(null);
+                                }}
+                                className="w-14 px-1 py-0.5 bg-slate-800 border border-cyan-400 rounded-lg text-center font-mono text-base font-black text-cyan-200 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveDirect('casualLeaveBalance')}
+                                className="w-6 h-6 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 flex items-center justify-center cursor-pointer"
+                                title="Save count"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingField(null)}
+                                className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center justify-center cursor-pointer"
+                                title="Cancel"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => {
+                                setEditingField('casualLeaveBalance');
+                                setEditingValue(String(overview.casualLeave.balance));
+                              }}
+                              className="min-w-[70px] text-center flex items-center justify-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                              title="Click to type exact count"
+                            >
+                              {isUpdatingLeave === 'casualLeaveBalance' ? (
+                                <Loader2 className="w-5 h-5 text-cyan-400 animate-spin my-0.5" />
+                              ) : (
+                                <>
+                                  <span className="text-2xl font-black text-cyan-300 font-mono">{overview.casualLeave.balance}</span>
+                                  <span className="text-xs text-slate-400 font-sans">{overview.casualLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                                  <Edit3 className="w-2.5 h-2.5 text-cyan-400/60 ml-0.5" />
+                                </>
+                              )}
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleAdjustLeave('casualLeaveBalance', 1)}
+                            disabled={isUpdatingLeave === 'casualLeaveBalance'}
+                            className="w-7 h-7 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/35 active:scale-90 border border-cyan-500/40 text-cyan-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer shadow-sm group"
+                            title="Update count (+1 Day)"
+                            aria-label="Update Casual Leave count"
+                          >
+                            <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-1.5 bg-slate-900/90 px-4 py-2 rounded-2xl border border-cyan-500/30 shadow-inner min-w-[120px]">
+                          <span className="text-2xl font-black text-cyan-300 font-mono">{overview.casualLeave.balance}</span>
+                          <span className="text-xs font-semibold text-slate-400 font-sans">{overview.casualLeave.balance === 1 ? 'Day' : 'Days'}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5 text-xs bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">

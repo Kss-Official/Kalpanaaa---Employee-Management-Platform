@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { LeaveRequest } from '../../types';
 import { getWorkDate } from '../../lib/attendanceEngine';
+import { LeaveHistorySummarySection } from '../admin/LeaveHistorySummarySection';
 
 export const HRLeaveWfhApprovals: React.FC = () => {
   const { leaveRequests, updateLeaveRequestStage, updateLeaveRequestStatus, activeEmployee, settings, assignCompanyWideWfh, removeCompanyWideWfh } = useAuth();
@@ -216,6 +217,9 @@ export const HRLeaveWfhApprovals: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Admin Leave History & LOP Summary (Last 7d / 15d / 30d) */}
+      <LeaveHistorySummarySection />
 
       {/* Inbox Table & Cards View */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-3xl overflow-hidden shadow-xl backdrop-blur-md">

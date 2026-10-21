@@ -567,7 +567,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
               const desigDisplay = (member.fullName && (member.fullName.toLowerCase().includes('jigyansha') || member.fullName.toLowerCase().includes('jingyasha')))
                 ? 'AI/ML Developer'
                 : isSatyaMember
-                ? 'Software Developer'
+                ? 'Software Engineer'
                 : (member.designation || '—');
               const managerDisplay = member.reportingManager || 'D. Koushik';
 
@@ -715,7 +715,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
                     const desigDisplay = (member.fullName && (member.fullName.toLowerCase().includes('jigyansha') || member.fullName.toLowerCase().includes('jingyasha')))
                       ? 'AI/ML Developer'
                       : isSatyaMember
-                      ? 'Software Developer'
+                      ? 'Software Engineer'
                       : (member.designation || '—');
                     const managerDisplay = member.reportingManager || 'D. Koushik';
 
@@ -1015,7 +1015,7 @@ export const EmployeeTeamDirectory: React.FC = () => {
                   </h3>
                   <p className="text-sm font-semibold text-slate-300 mt-0.5">
                     {(selectedColleague.employeeId === 'KSS2407012' || (selectedColleague.fullName && (selectedColleague.fullName.toLowerCase().includes('satya') || selectedColleague.fullName.toLowerCase().includes('ranjan'))))
-                      ? 'Software Developer'
+                      ? 'Software Engineer'
                       : (selectedColleague.designation || 'Staff Member')}
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">

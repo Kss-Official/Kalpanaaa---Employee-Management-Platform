@@ -20,7 +20,7 @@ export const EmployeeLeaveTab: React.FC = () => {
   const { activeEmployee, leaveRequests, submitLeaveRequest, cancelLeaveRequest } = useAuth();
   const { triggerHaptic } = useHaptic();
   
-  const [type, setType] = useState<'Earn Leave' | 'Sick Leave' | 'WFH'>('Earn Leave');
+  const [type, setType] = useState<'Earn Leave' | 'Sick Leave' | 'WFH' | 'Loss of Pay'>('Earn Leave');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
@@ -36,7 +36,7 @@ export const EmployeeLeaveTab: React.FC = () => {
   const [ledgerEntries, setLedgerEntries] = useState<LeaveLedgerEntry[]>([]);
   const [historyViewTab, setHistoryViewTab] = useState<'requests' | 'ledger'>('requests');
 
-  const [filterType, setFilterType] = useState<'All' | 'Earn Leave' | 'Sick Leave' | 'WFH'>('All');
+  const [filterType, setFilterType] = useState<'All' | 'Earn Leave' | 'Sick Leave' | 'WFH' | 'Loss of Pay'>('All');
   const [timeFilter, setTimeFilter] = useState<'All' | 'Today' | 'Upcoming' | 'Previous' | 'Approved' | 'Rejected'>('All');
   const todayStr = todayInIST();
 
@@ -301,6 +301,7 @@ export const EmployeeLeaveTab: React.FC = () => {
               >
                 <option value="Earn Leave">Earn Leave (EL)</option>
                 <option value="Sick Leave">Sick Leave (SL)</option>
+                <option value="Loss of Pay">Loss of Pay (LOP)</option>
                 <option value="WFH">Work From Home (WFH)</option>
               </select>
             </div>
@@ -411,6 +412,8 @@ export const EmployeeLeaveTab: React.FC = () => {
               <option value="All">All Categories</option>
               <option value="Earn Leave">Earn Leave</option>
               <option value="Sick Leave">Sick Leave</option>
+              <option value="Loss of Pay">Loss of Pay (LOP)</option>
+              <option value="WFH">Work From Home</option>
             </select>
           </div>
           )}
@@ -654,7 +657,7 @@ export const EmployeeLeaveTab: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-base font-black text-white">Earn Leave Monthly Credit History</h3>
-                    <p className="text-xs text-slate-400">1 Earn Leave credited on the 1st date after completing cycle (27th – 26th). July &amp; August are 0; credited on Sept 1, Oct 1, Nov 1.</p>
+                    <p className="text-xs text-slate-400">1 Earn Leave credited on the 1st date after completing cycle (27th – 26th). July &amp; August are 0; credited on Sept 1 and Oct 1 for current completed cycles.</p>
                   </div>
                 </div>
                 <button
@@ -714,7 +717,7 @@ export const EmployeeLeaveTab: React.FC = () => {
                 <div className="p-3 bg-purple-500/5 rounded-xl border border-purple-500/20 text-[11px] text-purple-300 flex items-start gap-2">
                   <Info className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
                   <p>
-                    Per company payroll policy (27th to 26th cycle), 1 Earn Leave is credited on the 1st date of the next month for each successfully completed month of working. July and August credit 0 days; Earn Leave is credited on September 1st, October 1st, and November 1st onwards.
+                    Per company payroll policy (27th to 26th cycle), 1 Earn Leave is credited on the 1st date of the next month for each successfully completed month of working. July and August credit 0 days; Earn Leave is credited on September 1st and October 1st for current completed cycles.
                   </p>
                 </div>
               </div>

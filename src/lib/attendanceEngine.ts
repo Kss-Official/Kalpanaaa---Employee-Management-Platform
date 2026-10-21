@@ -84,7 +84,7 @@ export function formatShiftTiming(shift?: string | null): string {
  * - August 2026 = 0 days (Cycle 27th July – 26th August in progress; completed on 26th August).
  * - September 2026 = 1 day (Credited on 2026-09-01 for completed 27 Jul – 26 Aug cycle).
  * - October 2026 = 1 day (Credited on 2026-10-01 for completed 27 Aug – 26 Sep cycle).
- * - November 2026 = 1 day (Credited on 2026-11-01 for completed 27 Sep – 26 Oct cycle).
+ * - November 2026 = 0 days until 2026-11-01 (Credited on 2026-11-01 for completed 27 Sep – 26 Oct cycle once credit date arrives).
  */
 export function computeEarnLeaveMonthlyCreditHistory(
   emp: any,
@@ -103,6 +103,7 @@ export function computeEarnLeaveMonthlyCreditHistory(
   // Company cycle history starts from July 2026 inception and displays through November 2026
   const startYear = 2026;
   const history: { monthKey: string; monthLabel: string; creditedDays: number; creditedDate: string; status: 'Credited' | 'Not Eligible' }[] = [];
+  const refDateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(refDate.getDate()).padStart(2, '0')}`;
 
   for (let year = startYear; year <= currentYear; year++) {
     const endMonth = year === currentYear ? Math.max(currentMonth, 10) : 11; // Display up through November (10)
@@ -117,8 +118,9 @@ export function computeEarnLeaveMonthlyCreditHistory(
       let creditedDays = 0;
 
       // Rule: Cycle 27th to 26th completed -> next month 1st date EL is credited.
-      // July = 0, August = 0; September = 1, October = 1, November = 1.
-      if (monthKey === '2026-07' || monthKey === '2026-08') {
+      // July = 0, August = 0; September = 1, October = 1.
+      // Months whose credit date is in the future relative to refDate are not credited yet.
+      if (monthKey === '2026-07' || monthKey === '2026-08' || creditedDate > refDateStr) {
         isCredited = false;
         creditedDays = 0;
       } else {
@@ -155,8 +157,8 @@ export function computeEmployeeLeaveBalance(
   const rawCredited = history
     .filter(h => h.status === 'Credited')
     .reduce((acc, h) => acc + h.creditedDays, 0);
-  // EL accrues 1 day per completed month of working (September, October, November = 3 ELs)
-  const creditedAcrossMonths = Math.min(3, Math.max(0, rawCredited));
+  // EL accrues 1 day per completed month of working (September, October = 2 ELs for current cycle)
+  const creditedAcrossMonths = Math.min(2, Math.max(0, rawCredited));
 
   const empName = ((emp?.fullName || emp?.name || emp?.employeeName || '') as string).toLowerCase();
   const empCode = ((emp?.employeeId || emp?.employeeCode || '') as string).toLowerCase();
@@ -208,8 +210,8 @@ export function computeEmployeeLeaveBalance(
   if (typeof emp.earnLeaveBalance === 'number') {
     const bal = Math.max(0, emp.earnLeaveBalance);
     return {
-      // Policy: max 3 EL credited for working tenure
-      credited: Math.min(3, Math.max(bal + approvedLeavesTaken, Math.min(rawCredited, 3), 1)),
+      // Policy: max 2 EL credited for current cycle (Sept 1st & Oct 1st = 2 days)
+      credited: Math.min(2, Math.max(rawCredited, 1)),
       taken: approvedLeavesTaken,
       balance: bal,
       history
@@ -226,7 +228,7 @@ export function computeEmployeeLeaveBalance(
   if (hasTakenEarnLeave) {
     const taken = Math.min(1, Math.max(1, approvedLeavesTaken));
     return {
-      credited: 1,
+      credited: creditedAcrossMonths,
       taken: taken,
       balance: 0,
       history
@@ -235,7 +237,7 @@ export function computeEmployeeLeaveBalance(
 
   if (isExcludedFromEarnLeaveZero && approvedLeavesTaken === 0) {
     return {
-      credited: 1,
+      credited: creditedAcrossMonths,
       taken: 0,
       balance: 1,
       history

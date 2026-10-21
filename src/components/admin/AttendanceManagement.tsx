@@ -765,12 +765,12 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = () => {
 
                   // Department normalized (IT for all technical staff & PM)
                   const deptDisplay = getAttendanceDepartment(emp);
-                  // Designation (AI/ML Developer for Jigyansha, Software Developer for Satya)
+                  // Designation (AI/ML Developer for Jigyansha, Software Engineer for Satya)
                   const isSatyaEmp = emp.employeeId === 'KSS2407012' || (emp.fullName && (emp.fullName.toLowerCase().includes('satya') || emp.fullName.toLowerCase().includes('ranjan')));
                   const desigDisplay = (emp.fullName && (emp.fullName.toLowerCase().includes('jigyansha') || emp.fullName.toLowerCase().includes('jingyasha')))
                     ? 'AI/ML Developer'
                     : isSatyaEmp
-                    ? 'Software Developer'
+                    ? 'Software Engineer'
                     : (emp.designation || '—');
 
                   return (

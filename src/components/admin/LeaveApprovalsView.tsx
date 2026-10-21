@@ -7,6 +7,7 @@ import { LeaveRequest } from '../../types';
 import { todayInIST } from '../../lib/absoluteTime';
 import { isExecutiveOrLeadership, isWfhType } from '../../lib/attendanceEngine';
 import { toast } from 'sonner';
+import { LeaveHistorySummarySection } from './LeaveHistorySummarySection';
 
 /**
  * Whole-word title test against an UPPERCASED designation.
@@ -473,6 +474,9 @@ export const LeaveApprovalsView: React.FC = () => {
                 ))
               )}
             </div>
+
+      {/* Admin Leave History & LOP Summary (Last 7d / 15d / 30d) */}
+      <LeaveHistorySummarySection />
 
       <div className="space-y-4">
         <AnimatePresence mode="popLayout">

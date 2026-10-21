@@ -561,3 +561,167 @@ test('Leave: increment and decrement correctly adjusts and floors at 0', () => {
   assert.equal(bal, 0);
 });
 
+// ── Test 19: Standard Credit & Leave Used (Cases A & B) ─────────────────────
+test('Leave: standard credit cycle computes EL=2, SL=1, Total=3 and preserves leave usage', () => {
+  const refDate = new Date('2026-10-21');
+  const emp = {
+    id: 'emp-standard',
+    employeeId: 'KSS2407020',
+    fullName: 'Standard Employee',
+    joiningDate: '2026-07-27',
+    earnLeaveBalance: 2,
+    sickLeaveBalance: 1
+  };
+
+  // Case A: No leave used
+  const totalResA = engine.computeTotalLeaveBalances(emp, [], refDate);
+  assert.equal(totalResA.earnLeave.credited, 2, 'EL credited must be 2');
+  assert.equal(totalResA.sickLeave.credited, 1, 'SL credited must be 1');
+  assert.equal(totalResA.totalCredited, 3, 'Total credited must be 3 (EL 2 + SL 1)');
+  assert.equal(totalResA.totalTaken, 0, 'Total used must be 0');
+  assert.equal(totalResA.totalBalance, 3, 'Total balance must be 3');
+
+  // Case B: Leave used (1 EL taken, 1 SL taken)
+  const leaveRequests = [
+    {
+      id: 'req-1',
+      employeeId: 'KSS2407020',
+      type: 'Earn Leave',
+      startDate: '2026-09-15',
+      endDate: '2026-09-15',
+      status: 'Approved',
+      pmStatus: 'Approved',
+      hrStatus: 'Approved',
+      ceoStatus: 'Approved',
+      ctoStatus: 'Approved'
+    },
+    {
+      id: 'req-2',
+      employeeId: 'KSS2407020',
+      type: 'Sick Leave',
+      startDate: '2026-09-20',
+      endDate: '2026-09-20',
+      status: 'Approved',
+      pmStatus: 'Approved',
+      hrStatus: 'Approved',
+      ceoStatus: 'Approved',
+      ctoStatus: 'Approved'
+    }
+  ];
+
+  const empWithUsage = {
+    ...emp,
+    earnLeaveBalance: 1, // 2 credited - 1 used = 1
+    sickLeaveBalance: 0  // 1 credited - 1 used = 0
+  };
+
+  const totalResB = engine.computeTotalLeaveBalances(empWithUsage, leaveRequests, refDate);
+  assert.equal(totalResB.earnLeave.credited, 2, 'EL credited remains 2');
+  assert.equal(totalResB.sickLeave.credited, 1, 'SL credited remains 1');
+  assert.equal(totalResB.totalCredited, 3, 'Total credited remains 3 despite usage');
+  assert.equal(totalResB.earnLeave.taken, 1, 'EL taken must be 1');
+  assert.equal(totalResB.sickLeave.taken, 1, 'SL taken must be 1');
+  assert.equal(totalResB.totalTaken, 2, 'Total used reflects actual usage (2 days)');
+  assert.equal(totalResB.totalBalance, 1, 'Total balance reflects 1 day remaining');
+});
+
+// ── Test 20: No Duplicate Credits (Case C) ──────────────────────────────────
+test('Leave: no duplicate credits in monthly ledger history for completed cycles', () => {
+  const refDate = new Date('2026-10-21');
+  const emp = {
+    id: 'emp-asbin',
+    employeeId: 'KSS2407004',
+    fullName: 'Asbin T S',
+    joiningDate: '2026-07-27'
+  };
+
+  const history = engine.computeEarnLeaveMonthlyCreditHistory(emp, refDate);
+  const creditedMonths = history.filter(h => h.status === 'Credited');
+
+  // Should have exactly 2 credited months: 2026-09 and 2026-10
+  assert.equal(creditedMonths.length, 2, 'Exactly 2 months credited');
+  assert.equal(creditedMonths[0].monthKey, '2026-09');
+  assert.equal(creditedMonths[0].creditedDays, 1);
+  assert.equal(creditedMonths[1].monthKey, '2026-10');
+  assert.equal(creditedMonths[1].creditedDays, 1);
+
+  // November must NOT be credited on October 21
+  const novEntry = history.find(h => h.monthKey === '2026-11');
+  assert.ok(novEntry, 'November entry exists in ledger');
+  assert.equal(novEntry.creditedDays, 0, 'November creditedDays is 0');
+  assert.equal(novEntry.status, 'Not Eligible', 'November status is Not Eligible before Nov 1');
+
+  // Sum of EL credits is strictly 2
+  const totalElCredited = creditedMonths.reduce((acc, h) => acc + h.creditedDays, 0);
+  assert.equal(totalElCredited, 2, 'Sum of EL credits is strictly 2');
+});
+
+// ── Test 21: Asbin T S Real-world Balances Preserved (Cases D & E) ───────────
+test('Leave: preserves employee-specific balances and adjustments (Asbin T S 10 available, 3 credited, 3 used)', () => {
+  const refDate = new Date('2026-10-21');
+  // Asbin has stored EL balance 7 and SL balance 3 from historical / PM adjustments
+  const asbinDoc = {
+    id: 'emp-KSS2407004',
+    employeeId: 'KSS2407004',
+    fullName: 'Asbin T S',
+    joiningDate: '2026-07-27',
+    earnLeaveBalance: 7,
+    sickLeaveBalance: 3,
+    casualLeaveBalance: 0
+  };
+
+  const asbinLeaveRequests = [
+    {
+      id: 'req-el-1',
+      employeeId: 'KSS2407004',
+      type: 'Earn Leave',
+      startDate: '2026-08-10',
+      status: 'Approved',
+      pmStatus: 'Approved',
+      hrStatus: 'Approved',
+      ceoStatus: 'Approved',
+      ctoStatus: 'Approved'
+    },
+    {
+      id: 'req-el-2',
+      employeeId: 'KSS2407004',
+      type: 'Earn Leave',
+      startDate: '2026-09-05',
+      status: 'Approved',
+      pmStatus: 'Approved',
+      hrStatus: 'Approved',
+      ceoStatus: 'Approved',
+      ctoStatus: 'Approved'
+    },
+    {
+      id: 'req-sl-1',
+      employeeId: 'KSS2407004',
+      type: 'Sick Leave',
+      startDate: '2026-09-12',
+      status: 'Approved',
+      pmStatus: 'Approved',
+      hrStatus: 'Approved',
+      ceoStatus: 'Approved',
+      ctoStatus: 'Approved'
+    }
+  ];
+
+  const totalRes = engine.computeTotalLeaveBalances(asbinDoc, asbinLeaveRequests, refDate);
+
+  // 1. Total Credited must be 3 Days (EL 2 + SL 1 + CL 0)
+  assert.equal(totalRes.earnLeave.credited, 2, 'Asbin EL credited must be 2');
+  assert.equal(totalRes.sickLeave.credited, 1, 'Asbin SL credited must be 1');
+  assert.equal(totalRes.totalCredited, 3, 'Asbin Total Credited must be 3 Days');
+
+  // 2. Total Used must be 3 Days (EL 2 + SL 1 + CL 0)
+  assert.equal(totalRes.earnLeave.taken, 2, 'Asbin EL taken must be 2');
+  assert.equal(totalRes.sickLeave.taken, 1, 'Asbin SL taken must be 1');
+  assert.equal(totalRes.totalTaken, 3, 'Asbin Total Used must be 3 Days');
+
+  // 3. Stored Available Balance must be preserved (EL 7, SL 3 -> Total 10 Days Available)
+  assert.equal(totalRes.earnLeave.balance, 7, 'Asbin EL balance preserved at 7');
+  assert.equal(totalRes.sickLeave.balance, 3, 'Asbin SL balance preserved at 3');
+  assert.equal(totalRes.totalBalance, 10, 'Asbin Total Available Balance preserved at 10 Days');
+});
+
+

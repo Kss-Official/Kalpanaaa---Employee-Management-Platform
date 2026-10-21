@@ -16,7 +16,8 @@ import {
   X,
   Banknote,
   MessageSquare,
-  Sparkles
+  Sparkles,
+  BarChart3
 } from 'lucide-react';
 import { isAuthorizedTechLead } from '../../lib/hierarchy';
 
@@ -50,6 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'attendance',      label: 'Attendance Ledger',            icon: CalendarCheck2 },
     { id: 'reports',         label: 'Reports & Intelligence',       icon: FileSpreadsheet },
     { id: 'leave_approvals', label: 'Leave & WFH Sanctions',        icon: FileText },
+    { id: 'leave_analytics', label: 'Leave & LOP Analytics',        icon: BarChart3 },
     { id: 'hr_payroll',      label: 'Salary Disbursement',          icon: Banknote },
     { id: 'company_rules',   label: 'Company & Employee Rules',     icon: FileText },
     { id: 'notifications',   label: 'Notification History',         icon: ShieldCheck },
@@ -65,6 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'feedback_hub', label: 'Feedback & Reviews', icon: MessageSquare },
     { id: 'attendance', label: 'Attendance Ledger', icon: CalendarCheck2 },
     { id: 'leave_approvals', label: 'Leave & WFH Inbox', icon: FileText },
+    { id: 'leave_analytics', label: 'Leave & LOP Analytics', icon: BarChart3 },
     { id: 'hr_payroll', label: 'Salary Disbursement', icon: Banknote },
     { id: 'company_rules', label: 'Company & Employee Rules', icon: FileText },
     { id: 'notifications', label: 'Notification History', icon: ShieldCheck },

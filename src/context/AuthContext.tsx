@@ -1442,7 +1442,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
               }
 
-              // LIVE AUTOCORRECT SATYA RANJAN DAS (Software Developer designation & Software Engineer employmentType)
+              // LIVE AUTOCORRECT SATYA RANJAN DAS (Software Engineer designation & Software Engineer employmentType)
               const isSatyaLiveRecord =
                 data.id === 'emp-KSS2407012' ||
                 data.id === 'emp-1785997525850' ||
@@ -1450,8 +1450,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 (data.fullName && (data.fullName.toLowerCase().includes('satya') || data.fullName.toLowerCase().includes('ranjan')));
               if (isSatyaLiveRecord) {
                 let satyaChanged = false;
-                if (data.designation !== 'Software Developer') {
-                  data.designation = 'Software Developer';
+                if (data.designation !== 'Software Engineer') {
+                  data.designation = 'Software Engineer';
                   satyaChanged = true;
                 }
                 if (data.employmentType !== 'Software Engineer') {
@@ -1461,7 +1461,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (satyaChanged && canMigrate && !migratedEmployeeIds.has(`satya-live-${data.id}`)) {
                   migratedEmployeeIds.add(`satya-live-${data.id}`);
                   setDoc(doc(db, 'employees', data.id), {
-                    designation: 'Software Developer',
+                    designation: 'Software Engineer',
                     employmentType: 'Software Engineer',
                     updatedAt: serverTimestamp()
                   }, { merge: true }).catch(() => { });
@@ -2489,21 +2489,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDoc(doc(db, 'employees', e.id), { earnLeaveBalance: e.earnLeaveBalance, sickLeaveBalance: e.sickLeaveBalance, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
         }
       } else if (isSatya) {
-        // Satya Ranjan Das: EL=3, SL=1, WFH=0 (Sep, Oct, Nov credited), Software Developer & Software Engineer
+        // Satya Ranjan Das: EL=3, SL=1, WFH=0 (Sep, Oct, Nov credited), Software Engineer & Software Engineer
         const needsEl = typeof e.earnLeaveBalance !== 'number' || e.earnLeaveBalance < 3;
         const needsSl = typeof e.sickLeaveBalance !== 'number';
-        const needsDesig = e.designation !== 'Software Developer';
+        const needsDesig = e.designation !== 'Software Engineer';
         const needsEmpType = e.employmentType !== 'Software Engineer';
         if (needsEl || needsSl || needsDesig || needsEmpType) {
           e.earnLeaveBalance = 3;
           if (needsSl) e.sickLeaveBalance = 1;
-          e.designation = 'Software Developer';
+          e.designation = 'Software Engineer';
           e.employmentType = 'Software Engineer';
           changed = true;
           setDoc(doc(db, 'employees', e.id), { 
             earnLeaveBalance: 3, 
             sickLeaveBalance: e.sickLeaveBalance, 
-            designation: 'Software Developer',
+            designation: 'Software Engineer',
             employmentType: 'Software Engineer',
             updatedAt: serverTimestamp() 
           }, { merge: true }).catch(() => {});

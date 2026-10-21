@@ -471,7 +471,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           </p>
         </div>
 
-        <div className="relative z-10 grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full lg:w-auto shrink-0">
+        <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 w-full lg:w-auto shrink-0">
           <button
             onClick={() => {
               triggerHaptic();
@@ -481,6 +481,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, onO
           >
             <Plus className="w-4 h-4" strokeWidth={3} />
             <span>New Employee</span>
+          </button>
+
+          <button
+            onClick={() => {
+              triggerHaptic();
+              onNavigateTab('leave_analytics');
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-950/60 to-indigo-950/60 hover:from-purple-900/60 hover:to-indigo-900/60 border border-purple-500/30 text-purple-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md active:scale-95 w-full"
+          >
+            <Calendar className="w-4 h-4 text-purple-400" />
+            <span>Leave &amp; LOP Analytics</span>
           </button>
 
           <button

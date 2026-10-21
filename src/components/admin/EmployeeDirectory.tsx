@@ -479,7 +479,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                   const desigDisplay = (emp.fullName && (emp.fullName.toLowerCase().includes('jigyansha') || emp.fullName.toLowerCase().includes('jingyasha')))
                     ? 'AI/ML Developer'
                     : isSatyaEmp
-                    ? 'Software Developer'
+                    ? 'Software Engineer'
                     : (emp.designation || '—');
 
                   const reportingManagerDisplay = emp.reportingManager || 'D. Koushik';

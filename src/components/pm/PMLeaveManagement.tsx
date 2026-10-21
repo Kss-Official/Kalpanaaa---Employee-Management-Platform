@@ -28,7 +28,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 
 interface EditingLeave {
   empId: string;
-  field: 'earnLeaveBalance' | 'sickLeaveBalance';
+  field: 'earnLeaveBalance' | 'sickLeaveBalance' | 'casualLeaveBalance';
   value: string;
   reason: string;
 }
@@ -177,7 +177,9 @@ export const PMLeaveManagement: React.FC = () => {
     const prev =
       editingLeave.field === 'earnLeaveBalance'
         ? emp.earnLeaveBalance ?? 0
-        : emp.sickLeaveBalance ?? 0;
+        : editingLeave.field === 'sickLeaveBalance'
+        ? emp.sickLeaveBalance ?? 0
+        : emp.casualLeaveBalance ?? 0;
 
     if (newVal === prev) {
       setEditingLeave(null);
@@ -314,10 +316,11 @@ export const PMLeaveManagement: React.FC = () => {
       {/* Employee Table */}
       <div className="bg-slate-900/60 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
         {/* Table Header */}
-        <div className="hidden lg:grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3 bg-slate-800/50 border-b border-slate-700/50 text-[10px] font-black uppercase tracking-widest text-slate-500">
+        <div className="hidden lg:grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3 bg-slate-800/50 border-b border-slate-700/50 text-[10px] font-black uppercase tracking-widest text-slate-500">
           <span>Employee</span>
           <span>Earned Leave</span>
           <span>Sick Leave</span>
+          <span>Casual Leave</span>
           <span>WFH ({monthLabel(selectedMonth)})</span>
           <span>Actions</span>
         </div>
@@ -331,6 +334,7 @@ export const PMLeaveManagement: React.FC = () => {
           filteredEmployees.map((emp) => {
             const el = typeof emp.earnLeaveBalance === 'number' ? emp.earnLeaveBalance : 0;
             const sl = typeof emp.sickLeaveBalance === 'number' ? emp.sickLeaveBalance : 0;
+            const cl = typeof emp.casualLeaveBalance === 'number' ? emp.casualLeaveBalance : 0;
             const wfhAllowance = getWfhAllowance(emp, selectedMonth);
             const wfhUsed = getWfhUsed(emp, selectedMonth);
             const wfhRemaining = Math.max(0, wfhAllowance - wfhUsed);
@@ -343,6 +347,9 @@ export const PMLeaveManagement: React.FC = () => {
             const isEditingSL =
               editingLeave?.empId === emp.id &&
               editingLeave?.field === 'sickLeaveBalance';
+            const isEditingCL =
+              editingLeave?.empId === emp.id &&
+              editingLeave?.field === 'casualLeaveBalance';
             const isEditingWfhRow =
               editingWfh?.empId === emp.id &&
               editingWfh?.monthKey === selectedMonth;
@@ -350,7 +357,7 @@ export const PMLeaveManagement: React.FC = () => {
             return (
               <div key={emp.id} className="border-b border-slate-800/60 last:border-0">
                 {/* Main Row */}
-                <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-4 hover:bg-slate-800/30 transition-colors">
+                <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-4 hover:bg-slate-800/30 transition-colors">
                   
                   {/* Employee Info */}
                   <div className="flex items-center gap-3">
@@ -491,6 +498,62 @@ export const PMLeaveManagement: React.FC = () => {
                     )}
                   </div>
 
+                  {/* Casual Leave */}
+                  <div className="flex items-center lg:block">
+                    <span className="lg:hidden text-xs text-slate-500 w-28 flex-shrink-0">Casual Leave:</span>
+                    {isEditingCL ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          value={editingLeave.value}
+                          onChange={(e) =>
+                            setEditingLeave((prev) =>
+                              prev ? { ...prev, value: e.target.value } : null
+                            )
+                          }
+                          className="w-16 px-2 py-1 bg-slate-800 border border-cyan-500/50 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                          autoFocus
+                        />
+                        <button
+                          onClick={handleSaveLeave}
+                          disabled={saving}
+                          className="p-1 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+                        >
+                          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          onClick={() => setEditingLeave(null)}
+                          className="p-1 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className={`text-lg font-black ${cl > 0 ? 'text-cyan-400' : 'text-slate-400'}`}>
+                          {cl}
+                        </span>
+                        <button
+                          onClick={() =>
+                            setEditingLeave({
+                              empId: emp.id,
+                              field: 'casualLeaveBalance',
+                              value: String(cl),
+                              reason: '',
+                            })
+                          }
+                          className="p-1 rounded-lg bg-slate-700/60 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+                          style={{ opacity: 1 }}
+                          title="Edit CL"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   {/* WFH (Monthly) */}
                   <div className="flex items-center lg:block">
                     <span className="lg:hidden text-xs text-slate-500 w-28 flex-shrink-0">WFH Allowance:</span>
@@ -590,8 +653,8 @@ export const PMLeaveManagement: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Reason input for leave edit (appears below when editing EL/SL) */}
-                {(isEditingEL || isEditingSL) && editingLeave && (
+                {/* Reason input for leave edit (appears below when editing EL/SL/CL) */}
+                {(isEditingEL || isEditingSL || isEditingCL) && editingLeave && (
                   <div className="px-5 pb-3">
                     <input
                       type="text"

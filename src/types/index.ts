@@ -37,7 +37,7 @@ export interface BreakEntry {
   durationMinutes: number;
 }
 
-export type LeaveCategory = 'Earn Leave' | 'Sick Leave' | 'WFH';
+export type LeaveCategory = 'Earn Leave' | 'Sick Leave' | 'WFH' | 'Loss of Pay' | 'Casual Leave';
 
 export interface LeaveRequest {
   id: string;
@@ -47,7 +47,7 @@ export interface LeaveRequest {
   department?: string;
   employeeRole?: UserRole | string;
   pmUid?: string;       // Assigned Project Manager Auth UID for scoped routing
-  type: 'Leave' | 'WFH' | 'Earn Leave' | 'Sick Leave';
+  type: 'Leave' | 'WFH' | 'Earn Leave' | 'Sick Leave' | 'Loss of Pay' | 'Casual Leave';
   leaveCategory?: LeaveCategory;
   startDate: string;    // YYYY-MM-DD
   endDate: string;      // YYYY-MM-DD
@@ -132,7 +132,7 @@ export interface LeaveLockEntry {
   requestId: string;
   employeeUid: string;
   employeeId: string;
-  type: 'Leave' | 'WFH' | 'Earn Leave' | 'Sick Leave';
+  type: 'Leave' | 'WFH' | 'Earn Leave' | 'Sick Leave' | 'Loss of Pay' | 'Casual Leave';
   active: boolean;
   reservedAt: string;
 }

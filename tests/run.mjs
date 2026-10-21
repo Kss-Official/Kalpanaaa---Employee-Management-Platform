@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const OUT = mkdtempSync(join(tmpdir(), 'kss-regression-'));
-const entries = ['errors', 'safeStorage', 'attendanceEngine', 'hierarchy'];
+const entries = ['errors', 'safeStorage', 'attendanceEngine', 'hierarchy', 'leaveAnalyticsService', 'leaveHistorySummaryService'];
 
 for (const name of entries) {
   esbuild.buildSync({
@@ -26,7 +26,9 @@ const testFiles = [
   join('tests', 'fcm.test.mjs'),
   join('tests', 'rtdb.test.mjs'),
   join('tests', 'hierarchy.test.mjs'),
-  join('tests', 'leave.test.mjs')
+  join('tests', 'leave.test.mjs'),
+  join('tests', 'leaveAnalytics.test.mjs'),
+  join('tests', 'leaveHistorySummary.test.mjs')
 ];
 
 const testRes = spawnSync(

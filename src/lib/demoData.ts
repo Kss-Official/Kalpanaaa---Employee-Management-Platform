@@ -405,7 +405,7 @@ export const INITIAL_EMPLOYEES: Employee[] = [
     gender: 'Male',
     dateOfBirth: '1999-10-15',
     department: 'Engineering',
-    designation: 'Software Developer',
+    designation: 'Software Engineer',
     skills: ['Technical Leadership'],
     specialization: 'Technical Leadership',
     joiningDate: '2024-05-01',

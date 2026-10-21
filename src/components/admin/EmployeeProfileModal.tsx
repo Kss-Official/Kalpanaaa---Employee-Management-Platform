@@ -229,7 +229,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                       <span className="text-[var(--text-secondary)]">Designation</span>
                       <span className="font-semibold text-[var(--text-primary)]">
                         {((employee.fullName && (employee.fullName.toLowerCase().includes('satya') || employee.fullName.toLowerCase().includes('ranjan'))) || employee.employeeId === 'KSS2407012')
-                          ? 'Software Developer'
+                          ? 'Software Engineer'
                           : employee.designation}
                       </span>
                     </div>
